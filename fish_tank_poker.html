@@ -2520,6 +2520,29 @@ function formatBetSuggestion(label,plan,d){
   return label+'ポットの'+plan.pct+'% ('+plan.amt+'T)';
 }
 
+function postflopQuickBetOptions(pot,minBet,totalStack){
+  // [Codex fix 2026-05-30] 小ポットでは33/50/75%が全部min betに丸まるため、重複削除後も実用サイズを残す。
+  const cap=Math.max(0,Math.round(totalStack||0));
+  const min=Math.max(1,Math.round(minBet||1));
+  const basePot=Math.max(1,Math.round(pot||1));
+  const seen=new Set();
+  const out=[];
+  function add(label,amt,title){
+    const a=Math.round(Math.min(Math.max(amt,min),cap));
+    if(a<=0||seen.has(a))return;
+    seen.add(a);
+    out.push({label:label,amt:a,title:title||''});
+  }
+  add('Min',min,'最小ベット');
+  [33,50,75,100,125,150,200,300].forEach(function(pct){
+    const raw=Math.round(basePot*pct/100);
+    if(raw<min)return;
+    add(pct+'%',raw);
+  });
+  if(cap>0&&!seen.has(cap)&&cap<=basePot*5)add('All-in',cap,'オールイン');
+  return out;
+}
+
 // ===== ポストフロップ評価 (EV損失ベース) =====
 
 function evalCheck(d,hr,human,nOpponents){
@@ -4214,6 +4237,12 @@ function runFishTankRegressionTests(){
     return !!(ev&&!/明確なコール/.test(ev.comment||'')&&(ev.quality==='ok'||ev.isMix||/若干|ボーダー/.test(ev.comment||'')));
   });
 
+  add('小ポットでもポストフロップのクイックベット選択肢を十分に出す',function(){
+    const opts=postflopQuickBetOptions(7,5,285);
+    const labels=opts.map(function(o){return o.label;});
+    return opts.length>=5&&labels.includes('Min')&&labels.includes('100%')&&labels.includes('200%');
+  });
+
   const results=tests.map(function(t){
     try{return{name:t.name,pass:!!t.fn()};}
     catch(e){return{name:t.name,pass:false,error:e&&e.message?e.message:String(e)};}
@@ -4385,23 +4414,15 @@ function renderActions(){
         }
       });
     } else {
-      // ポストフロップ自分からベット → 33%/50%/75%/100%/125%（常に5択表示）
-      // [Claude fix 2026-05-23] minR未満のボタンも常に表示しclamping。ポット小/ミニレイズ後に3択になるのを防ぐ
       const pot=game.pot;
       const minR=game.currentBet+game.minRaise;
-      const seen=new Set(); // 同額重複を防ぐ
-      [[33,'33%'],[50,'50%'],[75,'75%'],[100,'100%'],[125,'125%']].forEach(function(arr){
-        const pct=arr[0],label=arr[1];
-        const rawAmt=Math.round(pot*pct/100);
-        const clampedAmt=Math.max(rawAmt,Math.max(1,minR)); // minR未満はminRにclamp
-        const amt=Math.round(Math.min(clampedAmt,h.chips+h.currentBet));
-        if(amt<=h.currentBet||seen.has(amt))return; // ベット増加なし or 重複スキップ
-        seen.add(amt);
+      const total=h.chips+h.currentBet;
+      postflopQuickBetOptions(pot,Math.max(1,minR),total).forEach(function(opt){
         const b=document.createElement('button');b.className='qbtn';
-        const isAllin=amt>=h.chips+h.currentBet;
-        b.textContent=isAllin?label+' All-in':label;
-        if(isAllin)b.title='スタック不足のためオールインになります';
-        b.addEventListener('click',function(){qbtnAct(amt);});qb.appendChild(b);
+        const isAllin=opt.amt>=total;
+        b.textContent=isAllin&&opt.label!=='All-in'?opt.label+' All-in':opt.label;
+        if(opt.title||isAllin)b.title=opt.title||(isAllin?'スタック不足のためオールインになります':'');
+        b.addEventListener('click',function(){qbtnAct(opt.amt);});qb.appendChild(b);
       });
     }
     if(tc===0){
