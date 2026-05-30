@@ -2292,6 +2292,46 @@ function riverMadeHandRisk(holeCards,comm,evalResult,role){
   return{factor:Math.max(0.25,Math.min(1,factor)),note,fourFlushNoFlush,vulnerableValue};
 }
 
+function streetBettingPressure(hr,d,role,betToPotRatio,comm){
+  if(!['flop','turn'].includes(d.street))return{factor:1,note:'',tags:[]};
+  let factor=1;
+  const tags=[];
+  const idx=streetDecisionIndex(hr,d);
+  const before=idx>=0?hr.decisions.slice(0,idx):hr.decisions;
+  const pfRaises=hr.decisions.filter(function(x){return x.street==='preflop'&&(x.action==='raise'||x.action==='allin');});
+  const lastPfr=pfRaises[pfRaises.length-1]||null;
+  const humanWasLastPfr=!!(lastPfr&&lastPfr.isHuman);
+  const posState=postflopPositionState(hr,d);
+  const villainBetFlop=before.some(function(x){return !x.isHuman&&x.street==='flop'&&(x.action==='raise'||x.action==='allin');});
+  const is3BetPot=pfRaises.length>=2;
+  const weakPair=['under_pair','bottom_pair','low_pair','second_pair','board_pair'].includes(role.pairTier);
+  const onePair=!!role.pairTier&&role.role==='medium';
+  const topBoardRank=comm&&comm.length?Math.max.apply(null,comm.map(function(c){return RANK_VAL[c.rank]||0;})):0;
+  const broadwayHigh=topBoardRank>=12;
+
+  if(is3BetPot&&posState.isOOP&&!humanWasLastPfr&&weakPair){
+    factor*=d.street==='flop'?0.45:0.32;
+    tags.push('3BETポットでOOPの受け側。アンダーペア/弱いワンペアはレンジ実現率を大きく割引');
+  }else if(is3BetPot&&posState.isOOP&&!humanWasLastPfr&&onePair){
+    factor*=d.street==='flop'?0.68:0.55;
+    tags.push('3BETポットでOOPの受け側。ワンペアは相手の強レンジに対して慎重に評価');
+  }
+  if(d.street==='turn'&&villainBetFlop&&d.toCall>0){
+    factor*=weakPair?0.62:0.78;
+    tags.push('フロップCB後のターン継続ベットで相手レンジが強化');
+  }
+  if(d.street==='turn'&&weakPair&&broadwayHigh){
+    factor*=0.78;
+    tags.push('K/Q/A高ボードの下ペアは改善が乏しく、ショーダウン到達率が低い');
+  }
+  if(betToPotRatio>=0.60&&weakPair){
+    factor*=0.82;
+    tags.push('中サイズ以上のベットに対して弱いワンペアの継続頻度を下げる');
+  }
+  const note=tags.length?' 【3BET/OOP実現率補正】'+tags.join('。')+'。生EQではなく相手レンジに対する実効EQで評価します。':'';
+  return{factor:Math.max(0.16,Math.min(1,factor)),note,tags};
+}
+
 function calcSPR(humanChips,pot){return pot>0?Math.round(humanChips/pot*10)/10:99;}
 
 function postflopPositionState(hr,d){
@@ -2663,10 +2703,11 @@ function evalCall(d,hr,human,nOpponents){
   const betBasePot=d.toCall>0?Math.max(1,(d.pot||0)-d.toCall):(d.pot||0);
   const betToPotRatio=betBasePot>0?d.toCall/betBasePot:0.5;
   const pressure=riverShowdownPressure(hr,d,role,nOpponents,betToPotRatio);
+  const streetPressure=streetBettingPressure(hr,d,role,betToPotRatio,comm);
   const madeRisk=riverMadeHandRisk(hc,comm,evalRes,role);
-  const effEq=eq*pressure.factor*madeRisk.factor;
+  const effEq=eq*pressure.factor*streetPressure.factor*madeRisk.factor;
   const effEqPct=Math.round(effEq*100);
-  const effNote=(pressure.factor<0.98||madeRisk.factor<0.98)?' 実効EQ約'+effEqPct+'%（生EQ '+eqPct+'%）として評価。':'';
+  const effNote=(pressure.factor<0.98||streetPressure.factor<0.98||madeRisk.factor<0.98)?' 実効EQ約'+effEqPct+'%（生EQ '+eqPct+'%）として評価。':'';
   const evDiff=effEq-po; // EV差: プラスならコール正解
   const evDiffAbs=Math.abs(evDiff);
 
@@ -2685,21 +2726,21 @@ function evalCall(d,hr,human,nOpponents){
     }
   }
   if(evDiff>=0.15){
-    return{quality:'good',deduction:0,rawEqPct:eqPct,effectiveEqPct:effEqPct,comment:'正解。コール（EQ約'+eqPct+'%、必要'+poPct+'%）'+adjNote+pressure.note+madeRisk.note+effNote+fourFlushCallNote+'。'+role.note+' EV優位（+'+Math.round(evDiff*100)+'%）で明確なコールです。'};
+    return{quality:'good',deduction:0,rawEqPct:eqPct,effectiveEqPct:effEqPct,comment:'正解。コール（EQ約'+eqPct+'%、必要'+poPct+'%）'+adjNote+pressure.note+streetPressure.note+madeRisk.note+effNote+fourFlushCallNote+'。'+role.note+' EV優位（+'+Math.round(evDiff*100)+'%）で明確なコールです。'};
   }
   if(evDiff>=0.05){
-    return{quality:'good',deduction:Math.round(2*sw),rawEqPct:eqPct,effectiveEqPct:effEqPct,comment:'正解。コール（EQ約'+eqPct+'%、必要'+poPct+'%）'+adjNote+pressure.note+madeRisk.note+effNote+fourFlushCallNote+'。'+role.note+' 若干のEV優位。'};
+    return{quality:'good',deduction:Math.round(2*sw),rawEqPct:eqPct,effectiveEqPct:effEqPct,comment:'正解。コール（EQ約'+eqPct+'%、必要'+poPct+'%）'+adjNote+pressure.note+streetPressure.note+madeRisk.note+effNote+fourFlushCallNote+'。'+role.note+' 若干のEV優位。'};
   }
   if(evDiff>=-0.05){
-    return{quality:'ok',deduction:0,rawEqPct:eqPct,effectiveEqPct:effEqPct,comment:'コール（EQ約'+eqPct+'%、必要'+poPct+'%）'+adjNote+pressure.note+madeRisk.note+effNote+fourFlushCallNote+'。'+role.note+' ボーダーラインのコール。EV差が小さく（'+Math.round(evDiff*100)+'%）、コール/フォールドどちらも許容内です。',isMix:true};
+    return{quality:'ok',deduction:0,rawEqPct:eqPct,effectiveEqPct:effEqPct,comment:'コール（EQ約'+eqPct+'%、必要'+poPct+'%）'+adjNote+pressure.note+streetPressure.note+madeRisk.note+effNote+fourFlushCallNote+'。'+role.note+' ボーダーラインのコール。EV差が小さく（'+Math.round(evDiff*100)+'%）、コール/フォールドどちらも許容内です。',isMix:true};
   }
   if(evDiff>=-0.12){
-    return{quality:'ok',deduction:Math.round(8*sw),rawEqPct:eqPct,effectiveEqPct:effEqPct,comment:'やや損なコール（EQ約'+eqPct+'%、必要'+poPct+'%）'+adjNote+pressure.note+madeRisk.note+effNote+fourFlushCallNote+'。'+role.note+' EV微損（'+Math.round(evDiff*100)+'%）。',suggest:'推奨: フォールドが若干有利'};
+    return{quality:'ok',deduction:Math.round(8*sw),rawEqPct:eqPct,effectiveEqPct:effEqPct,comment:'やや損なコール（EQ約'+eqPct+'%、必要'+poPct+'%）'+adjNote+pressure.note+streetPressure.note+madeRisk.note+effNote+fourFlushCallNote+'。'+role.note+' EV微損（'+Math.round(evDiff*100)+'%）。',suggest:'推奨: フォールドが若干有利'};
   }
   if(evDiff>=-0.22){
-    return{quality:'bad',deduction:Math.round(18*sw),rawEqPct:eqPct,effectiveEqPct:effEqPct,comment:'【EV損失】コール（EQ約'+eqPct+'%、必要'+poPct+'%）'+adjNote+pressure.note+madeRisk.note+effNote+fourFlushCallNote+'。'+role.note+' EV損失（'+Math.round(evDiff*100)+'%）で基本的にはフォールドすべき局面。',suggest:'推奨: フォールド'};
+    return{quality:'bad',deduction:Math.round(18*sw),rawEqPct:eqPct,effectiveEqPct:effEqPct,comment:'【EV損失】コール（EQ約'+eqPct+'%、必要'+poPct+'%）'+adjNote+pressure.note+streetPressure.note+madeRisk.note+effNote+fourFlushCallNote+'。'+role.note+' EV損失（'+Math.round(evDiff*100)+'%）で基本的にはフォールドすべき局面。',suggest:'推奨: フォールド'};
   }
-  return{quality:'bad',deduction:Math.round(28*sw),rawEqPct:eqPct,effectiveEqPct:effEqPct,comment:'【大きなEV損失】コール（EQ約'+eqPct+'%、必要'+poPct+'%）'+adjNote+pressure.note+madeRisk.note+effNote+fourFlushCallNote+'。EV損失'+Math.round(evDiff*100)+'%。明確なフォールドスポット。',suggest:'推奨: フォールド'};
+  return{quality:'bad',deduction:Math.round(28*sw),rawEqPct:eqPct,effectiveEqPct:effEqPct,comment:'【大きなEV損失】コール（EQ約'+eqPct+'%、必要'+poPct+'%）'+adjNote+pressure.note+streetPressure.note+madeRisk.note+effNote+fourFlushCallNote+'。EV損失'+Math.round(evDiff*100)+'%。明確なフォールドスポット。',suggest:'推奨: フォールド'};
 }
 
 function evalFold(d,hr,human,nOpponents){
@@ -2726,6 +2767,7 @@ function evalFold(d,hr,human,nOpponents){
   else if(isWeakHandFold&&betToPotRatio>0.55) foldRealizeAdj=0.91;
   if(nOpponents>=2) foldRealizeAdj*=0.93;
   const pressure=riverShowdownPressure(hr,d,role,nOpponents,betToPotRatio);
+  const streetPressure=streetBettingPressure(hr,d,role,betToPotRatio,comm);
   // ---- マルチウェイリバー bet+コール構造: 実効EQ大幅補正 ----
   // bet+callが入ると: ベッターはバリュー寄り、オーバーコーラーは超強レンジのみ残る
   // 両方に勝つ必要があるため実効EQは生EQの40〜50%程度まで下落
@@ -2773,24 +2815,24 @@ function evalFold(d,hr,human,nOpponents){
     }
   }
   const madeRiskFold=riverMadeHandRisk(hc,comm,evalResFd,roleFd);
-  const adjEqFold=eq*foldRealizeAdj*pressure.factor*madeRiskFold.factor;
+  const adjEqFold=eq*foldRealizeAdj*pressure.factor*streetPressure.factor*madeRiskFold.factor;
   const effEqPct=Math.round(adjEqFold*100);
-  const effNote=(pressure.factor<0.98||madeRiskFold.factor<0.98)?' 実効EQ約'+effEqPct+'%（生EQ '+eqPct+'%）として評価。':'';
+  const effNote=(pressure.factor<0.98||streetPressure.factor<0.98||madeRiskFold.factor<0.98)?' 実効EQ約'+effEqPct+'%（生EQ '+eqPct+'%）として評価。':'';
   const evDiff=adjEqFold-po;
 
   if(evDiff<=-0.10){
-    return{quality:'good',deduction:0,rawEqPct:eqPct,effectiveEqPct:effEqPct,comment:'正解。フォールド（EQ約'+eqPct+'%、必要'+poPct+'%）'+adjNote+pressure.note+madeRiskFold.note+effNote+mwRiverOvercallNote+strongDrawFoldNote+'。'+role.note+' EV的に明確なフォールドです。'};
+    return{quality:'good',deduction:0,rawEqPct:eqPct,effectiveEqPct:effEqPct,comment:'正解。フォールド（EQ約'+eqPct+'%、必要'+poPct+'%）'+adjNote+pressure.note+streetPressure.note+madeRiskFold.note+effNote+mwRiverOvercallNote+strongDrawFoldNote+'。'+role.note+' EV的に明確なフォールドです。'};
   }
   if(evDiff<0.05){
-    return{quality:'good',deduction:Math.round(2*sw),rawEqPct:eqPct,effectiveEqPct:effEqPct,comment:'正解。フォールド（EQ約'+eqPct+'%、必要'+poPct+'%）'+adjNote+pressure.note+madeRiskFold.note+effNote+mwRiverOvercallNote+strongDrawFoldNote+'。'+role.note+' ボーダーラインですがフォールドが有力。'};
+    return{quality:'good',deduction:Math.round(2*sw),rawEqPct:eqPct,effectiveEqPct:effEqPct,comment:'正解。フォールド（EQ約'+eqPct+'%、必要'+poPct+'%）'+adjNote+pressure.note+streetPressure.note+madeRiskFold.note+effNote+mwRiverOvercallNote+strongDrawFoldNote+'。'+role.note+' ボーダーラインですがフォールドが有力。'};
   }
   if(evDiff<0.12){
-    return{quality:'ok',deduction:0,isMix:true,rawEqPct:eqPct,effectiveEqPct:effEqPct,comment:'フォールド（EQ約'+eqPct+'%、必要'+poPct+'%）'+adjNote+pressure.note+madeRiskFold.note+effNote+mwRiverOvercallNote+strongDrawFoldNote+strongHandFoldNote+'。'+role.note+' コールとフォールドの混合戦略。EV差小（'+Math.round(evDiff*100)+'%）でフォールドも許容内。',suggest:'コールも検討: EQ差 +'+Math.round(evDiff*100)+'%'};
+    return{quality:'ok',deduction:0,isMix:true,rawEqPct:eqPct,effectiveEqPct:effEqPct,comment:'フォールド（EQ約'+eqPct+'%、必要'+poPct+'%）'+adjNote+pressure.note+streetPressure.note+madeRiskFold.note+effNote+mwRiverOvercallNote+strongDrawFoldNote+strongHandFoldNote+'。'+role.note+' コールとフォールドの混合戦略。EV差小（'+Math.round(evDiff*100)+'%）でフォールドも許容内。',suggest:'コールも検討: EQ差 +'+Math.round(evDiff*100)+'%'};
   }
   if(evDiff<0.22){
-    return{quality:'bad',deduction:Math.round(18*sw),rawEqPct:eqPct,effectiveEqPct:effEqPct,comment:'【EV損失】フォールド（EQ約'+eqPct+'%、必要'+poPct+'%）'+adjNote+pressure.note+madeRiskFold.note+effNote+strongDrawFoldNote+strongHandFoldNote+'。'+role.note+' EV損失あり（+'+Math.round(evDiff*100)+'%の優位をフォールド）。',suggest:'推奨: コール（必要EQ '+poPct+'% に対し実効EQ'+effEqPct+'%）'};
+    return{quality:'bad',deduction:Math.round(18*sw),rawEqPct:eqPct,effectiveEqPct:effEqPct,comment:'【EV損失】フォールド（EQ約'+eqPct+'%、必要'+poPct+'%）'+adjNote+pressure.note+streetPressure.note+madeRiskFold.note+effNote+strongDrawFoldNote+strongHandFoldNote+'。'+role.note+' EV損失あり（+'+Math.round(evDiff*100)+'%の優位をフォールド）。',suggest:'推奨: コール（必要EQ '+poPct+'% に対し実効EQ'+effEqPct+'%）'};
   }
-  return{quality:'bad',deduction:Math.round(Math.max(28,evDiff>0.35?35:28)*sw),rawEqPct:eqPct,effectiveEqPct:effEqPct,comment:'【大きなEV損失】フォールド（EQ約'+eqPct+'%、必要'+poPct+'%）'+adjNote+pressure.note+madeRiskFold.note+effNote+strongDrawFoldNote+strongHandFoldNote+'。EV損失'+Math.round(evDiff*100)+'%。明確なコールスポット。',suggest:'推奨: コール'};
+  return{quality:'bad',deduction:Math.round(Math.max(28,evDiff>0.35?35:28)*sw),rawEqPct:eqPct,effectiveEqPct:effEqPct,comment:'【大きなEV損失】フォールド（EQ約'+eqPct+'%、必要'+poPct+'%）'+adjNote+pressure.note+streetPressure.note+madeRiskFold.note+effNote+strongDrawFoldNote+strongHandFoldNote+'。EV損失'+Math.round(evDiff*100)+'%。明確なコールスポット。',suggest:'推奨: コール'};
 }
 
 function evalBet(d,hr,human,nOpponents){
@@ -4135,6 +4177,41 @@ function runFishTankRegressionTests(){
   add('完成ボードのリバートップペアコールを明確コールと言い切らない',function(){
     const ev=humanEval(analyzeHand(limpIsoTopPairHand()),function(e){return e.street==='river'&&e.action==='call';});
     return !!(ev&&!/明確なコール/.test(ev.comment||'')&&(ev.isMix||/ボーダー|若干|相手依存|ブラフキャッチ/.test(ev.comment||'')));
+  });
+
+  function threeBetUnderpairHand(){
+    const players=[
+      regressionPlayer('あなた',true,['7h','7d'],{chips:500}),
+      regressionPlayer('dai',false,['Ah','Ac'],{chips:500})
+    ];
+    return regressionHand({
+      players:players,
+      board:['Kh','4h','8d','Qc'],
+      bigBlind:5,
+      pot:193,
+      pfStory:{narrative:'UTG open -> MP 3BET -> UTG call'},
+      decisions:[
+        regressionDecision({street:'preflop',action:'raise',amount:16,pot:7,toCall:5,facingRaise:false,position:'UTG',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:500,pfRaiseCountBefore:0,pfFacingBetLevel:0,pfActionBetLevel:2}),
+        regressionDecision({street:'preflop',action:'raise',amount:48,pot:23,toCall:16,facingRaise:true,position:'MP',playerName:'dai',isHuman:false,playerIdx:1,playerChipsBefore:500,pfRaiseCountBefore:1,pfFacingBetLevel:2,pfActionBetLevel:3}),
+        regressionDecision({street:'preflop',action:'call',amount:32,pot:55,toCall:32,potOdds:32/87,facingRaise:true,position:'UTG',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:484,playerBetBefore:16,pfRaiseCountBefore:2,pfFacingBetLevel:3,pfActionBetLevel:3}),
+        regressionDecision({street:'flop',action:'check',amount:0,pot:87,toCall:0,facingRaise:false,position:'UTG',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:452}),
+        regressionDecision({street:'flop',action:'raise',amount:29,pot:87,toCall:0,facingRaise:false,position:'MP',playerName:'dai',isHuman:false,playerIdx:1,playerChipsBefore:452}),
+        regressionDecision({street:'flop',action:'call',amount:29,pot:116,toCall:29,potOdds:29/145,facingRaise:true,position:'UTG',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:452}),
+        regressionDecision({street:'turn',action:'check',amount:0,pot:145,toCall:0,facingRaise:false,position:'UTG',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:423}),
+        regressionDecision({street:'turn',action:'raise',amount:48,pot:145,toCall:0,facingRaise:false,position:'MP',playerName:'dai',isHuman:false,playerIdx:1,playerChipsBefore:423}),
+        regressionDecision({street:'turn',action:'fold',amount:0,pot:193,toCall:48,potOdds:48/241,facingRaise:true,position:'UTG',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:423})
+      ]
+    });
+  }
+
+  add('3BETポットOOPの77ターン下ペアフォールドを明確ミス扱いしない',function(){
+    const ev=humanEval(analyzeHand(threeBetUnderpairHand()),function(e){return e.street==='turn'&&e.action==='fold';});
+    return !!(ev&&ev.quality!=='bad'&&(ev.deduction||0)<=2&&/3BET\/OOP|フォールドが有力|明確なフォールド/.test(ev.comment||''));
+  });
+
+  add('3BETポットOOPの77フロップ小CBコールを明確コールと言い切らない',function(){
+    const ev=humanEval(analyzeHand(threeBetUnderpairHand()),function(e){return e.street==='flop'&&e.action==='call';});
+    return !!(ev&&!/明確なコール/.test(ev.comment||'')&&(ev.quality==='ok'||ev.isMix||/若干|ボーダー/.test(ev.comment||'')));
   });
 
   const results=tests.map(function(t){
