@@ -4562,6 +4562,8 @@ function showAnalysis(hr,fromHistory){
     const stOrder=['preflop','flop','turn','river'];
     const stEvMap={};
     for(const ev of an.evals){if(!stEvMap[ev.street])stEvMap[ev.street]=[];stEvMap[ev.street].push(ev);}
+    // [Codex fix 2026-05-30] 同じTモード学習ポイントが各ストリートに重なると読みにくいため、リザルト内では一度だけ表示する。
+    const shownTournamentLessons=new Set();
     const stLbl={preflop:'PREFLOP',flop:'FLOP',turn:'TURN',river:'RIVER'};
     const gradeCol={'S':'#d4a820','A':'#22a46c','B':'#3d6cf0','C':'#d87020','D':'#e04848','F':'#9333ea'};
     function metaChip(label,value,color){
@@ -4619,7 +4621,11 @@ function showAnalysis(hr,fromHistory){
         const actLabel=actionText(ev);
         const poStr=ev.potOdds>0?' <span style="color:var(--dim)">(PO '+Math.round(ev.potOdds*100)+'%)</span>':'';
         const suggestHTML=ev.suggest?'<div style="margin-top:4px;color:var(--gold);font-size:10px;font-weight:600">▶ '+ev.suggest+'</div>':'';
-        const tLessonHTML=ev.tournamentLesson?'<div style="margin-top:6px;padding:6px 8px;border-left:3px solid var(--gold);background:rgba(212,168,32,.08);border-radius:6px;color:var(--text);font-size:10px;line-height:1.55"><strong style="color:var(--gold)">Tモード学習ポイント:</strong> '+ev.tournamentLesson+'</div>':'';
+        let tLessonHTML='';
+        if(ev.tournamentLesson&&!shownTournamentLessons.has(ev.tournamentLesson)){
+          shownTournamentLessons.add(ev.tournamentLesson);
+          tLessonHTML='<div style="margin-top:6px;padding:6px 8px;border-left:3px solid var(--gold);background:rgba(212,168,32,.08);border-radius:6px;color:var(--text);font-size:10px;line-height:1.55"><strong style="color:var(--gold)">Tモード学習ポイント:</strong> '+ev.tournamentLesson+'</div>';
+        }
         const tRangeHTML=ev.tournamentRangeHint?'<div style="margin-top:5px;padding:5px 8px;border:1px dashed var(--border);background:var(--panel);border-radius:6px;color:var(--dim);font-size:10px;line-height:1.5"><strong style="color:var(--text)">Tレンジ目安:</strong> '+ev.tournamentRangeHint+'</div>':'';
         const tProfileHTML=ev.tournamentRangeProfile?'<div style="margin-top:5px;padding:5px 8px;border:1px solid rgba(61,108,240,.18);background:rgba(61,108,240,.06);border-radius:6px;color:var(--text);font-size:10px;line-height:1.5"><strong style="color:var(--accent)">Tレンジ判定:</strong> '+tournamentRangeProfileText(ev.tournamentRangeProfile)+'</div>':'';
         html+='<div class="decision-row '+ev.quality+'"><div class="dr-action '+ev.quality+'">'+actLabel+'</div><div>'+decisionMeta(ev)+ev.comment+poStr+tLessonHTML+tRangeHTML+tProfileHTML+suggestHTML+'</div></div>';
