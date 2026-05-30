@@ -1610,7 +1610,7 @@ class GameEngine{
     this.street='preflop';this.deck=new Deck();this.minRaise=cfg.bb;
     this.actorsRemaining=[];this.currentHandDecisions=[];
     this.waitingForHuman=false;this.gameOver=false;
-    this.sbIdx=0;this.bbIdx=1;this._lastWinners=[];
+    this.sbIdx=0;this.bbIdx=1;this._lastWinners=[];this._lastActions={};
   }
   get smallBlind(){return this.sb;}
   get bigBlind(){return this.bb;}
@@ -1677,6 +1677,8 @@ class GameEngine{
     this.handNum++;this.deck.reset();this.community=[];
     this.pot=0;this.currentBet=0;this.street='preflop';this.minRaise=this.bb;
     this.actorsRemaining=[];this.currentHandDecisions=[];
+    // [Codex fix 2026-05-30] 新ハンド開始時に前ハンドのアクション表示を残さない。未来のアクションが見えるように見えるため。
+    this._lastActions={};
     this.players.forEach(p=>p.reset());
     do{this.dealerIndex=(this.dealerIndex+1)%this.players.length;}
     while(!this.players[this.dealerIndex].active);
@@ -1771,7 +1773,7 @@ class GameEngine{
     this.currentHandDecisions.push(dec);
     // アクション吹き出し用タイムスタンプ
     if(!this._lastActions)this._lastActions={};
-    this._lastActions[pi]={action:dec.action,amount:dec.amount,ts:Date.now(),playerName:p.isHuman?'あなた':p.name,position:dec.position};
+    this._lastActions[pi]={action:dec.action,amount:dec.amount,ts:Date.now(),handNum:this.handNum,playerName:p.isHuman?'あなた':p.name,position:dec.position};
     this.actorsRemaining=this.actorsRemaining.filter(i=>i!==pi);
     // フルレイズのみアクション再開放。パーシャルオールインは再開放しない
     if((action==='raise'||action==='allin')&&this.currentBet>prevBet){
@@ -4243,6 +4245,14 @@ function runFishTankRegressionTests(){
     return opts.length>=5&&labels.includes('Min')&&labels.includes('100%')&&labels.includes('200%');
   });
 
+  add('新ハンド開始時に前ハンドのアクション表示を消す',function(){
+    const g=new GameEngine({sb:2,bb:5,aiLevel:'medium',startingChips:500,numPlayers:6});
+    g.handNum=9;
+    g._lastActions={0:{action:'fold',amount:0,ts:Date.now(),handNum:8},1:{action:'fold',amount:0,ts:Date.now(),handNum:8}};
+    g.startHand();
+    return !!(g.handNum===10&&g._lastActions&&Object.keys(g._lastActions).length===0);
+  });
+
   const results=tests.map(function(t){
     try{return{name:t.name,pass:!!t.fn()};}
     catch(e){return{name:t.name,pass:false,error:e&&e.message?e.message:String(e)};}
@@ -4321,7 +4331,7 @@ function renderTable(){
     // [Codex fix 2026-05-29] 浮遊吹き出しは9人卓で席同士が衝突するため、直近アクションは席パネル内に収める。
     const la=game._lastActions&&game._lastActions[pi];
     let seatActionHTML='';
-    if(la&&Date.now()-la.ts<2400){
+    if(la&&la.handNum===game.handNum&&Date.now()-la.ts<2400){
       const abCls={fold:'ab-fold',check:'ab-check',call:'ab-call',raise:'ab-raise',allin:'ab-allin'}[la.action]||'ab-call';
       const isBetA=la.action==='raise'&&la.amount>0;
       const actionLabel={
