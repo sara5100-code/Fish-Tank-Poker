@@ -1049,7 +1049,7 @@ function simpleHandShape(c1,c2){
   };
 }
 // [Codex fix 2026-06-04] 序盤は「深いから何でも参加」ではなく、ドミネートリスクと実現率で参加レンジを健全化する。
-function tournamentEarlyProfile(ctx,d,holeCards,stackBB,pos,totalPlayers){
+function tournamentEarlyProfile(ctx,d,holeCards,stackBB,pos,totalPlayers,preCtx){
   if(!ctx||!ctx.enabled||ctx.phase!=='序盤'||!d||d.street!=='preflop'||!holeCards||holeCards.length<2)return null;
   const ht=handType(holeCards[0],holeCards[1]);
   const handFrac=HAND_COMBO_FRAC[ht]||0.99;
@@ -1063,6 +1063,13 @@ function tournamentEarlyProfile(ctx,d,holeCards,stackBB,pos,totalPlayers){
   const mp=['MP','LJ','HJ'].includes(pos);
   const late=['CO','BTN'].includes(pos);
   const oop=['SB','BB','UTG','UTG+1'].includes(pos);
+  preCtx=preCtx||{};
+  const openerPos=preCtx.openerPos||'';
+  const limpers=preCtx.limpers||0;
+  const behind=preCtx.playersBehind==null?null:preCtx.playersBehind;
+  const toCall=d.toCall||d.amount||0;
+  const stackChips=d.playerChipsBefore||((ctx.bb||1)*bb);
+  const callStackPct=stackChips?Math.round(toCall/Math.max(1,stackChips)*100):0;
   let lane='open',cap=live25OpenPct(pos,activePlayers),actionLabel='Open',baseline='序盤オープンレンジ';
   if(!facing&&d.action==='call'){
     lane='limp';cap=0.05;actionLabel='Open limp';baseline='序盤でも基本はraise/fold';
@@ -1074,6 +1081,7 @@ function tournamentEarlyProfile(ctx,d,holeCards,stackBB,pos,totalPlayers){
     lane='threeBet';cap=0.075+(shape.suitedBroadway?0.025:0)+(shape.wheelAxs?0.030:0)+(shape.pair&&shape.lo>=8?0.035:0);actionLabel='3BET';baseline='序盤の3BETはバリュー寄り';
   }else if(facing){
     lane='flat';cap=late?0.24:mp?0.17:0.12;actionLabel='Flat';baseline='序盤のコールドコール';
+    if(['UTG','UTG+1'].includes(openerPos))cap-=shape.dominatedOffsuit?0.07:0.03;
     if(shape.pair)cap+=0.08;
     if(shape.suitedConnector)cap+=0.05;
     if(shape.suitedBroadway)cap+=0.04;
@@ -1097,15 +1105,35 @@ function tournamentEarlyProfile(ctx,d,holeCards,stackBB,pos,totalPlayers){
   if(oop&&lane!=='bbDefend')risks.push('OOPで実現率低下');
   if(lane==='limp')risks.push('リンプ癖');
   if(lane==='flat'&&!shape.pair&&!shape.suited&&!shape.suitedBroadway)risks.push('インプライド不足');
+  if(lane==='flat'&&behind!=null&&behind>=3)risks.push('後続スクイーズリスク');
+  let exceptionReason='';
+  if(lane==='flat'&&shape.pair&&callStackPct<=8&&bb>=35)exceptionReason='小〜中ポケットはセットマイン例外。必要額がスタックの約'+callStackPct+'%なら、相手スタックが深い時だけ継続候補';
+  else if(lane==='flat'&&shape.suitedConnector&&late&&callStackPct<=7)exceptionReason='後ろ位置のスーテッド連結は実現率とインプライドがあり、低頻度flat例外';
+  else if(lane==='flat'&&shape.suitedBroadway&&!oop)exceptionReason='スーテッドブロードウェイはドミネート耐性とプレイアビリティがあり継続候補';
+  let participationLeak='';
+  let recommendedRoute='';
+  if(lane==='limp'){
+    participationLeak=handFrac<=cap+0.20?'レイズすべき手をリンプしている可能性':'弱い手を安く見に行くリンプ癖';
+    recommendedRoute=handFrac<=live25OpenPct(pos,activePlayers)+0.03?'raise優先':'fold優先';
+  }else if(lane==='flat'){
+    participationLeak=exceptionReason?'条件付きflat例外':'安いからコールになりやすいコールドコール';
+    recommendedRoute=exceptionReason?'call可。ただしポジションと相手スタック依存':(shape.dominatedOffsuit||oop?'fold/3betに整理':'相手傾向でcallまたは3bet');
+  }else{
+    recommendedRoute=severity==='bad'?'位置を締める':'レンジ内なら標準サイズで参加';
+  }
+  if(exceptionReason&&severity==='bad'&&handFrac<=cap+0.08){verdict='境界';severity='border';}
   const plan=severity==='bad'
     ?(lane==='flat'||lane==='limp'?'fold/raiseに整理':'位置を締める')
     :severity==='border'?'相手傾向と後続人数で調整':'自然な参加候補';
-  return{handType:ht,handPercent:pct(handFrac),stackBB:bb,position:pos,lane,actionLabel,baseline,capPercent:pct(cap),marginPercent:Math.round(margin*100),verdict,severity,risks,plan};
+  return{handType:ht,handPercent:pct(handFrac),stackBB:bb,position:pos,lane,actionLabel,baseline,capPercent:pct(cap),marginPercent:Math.round(margin*100),verdict,severity,risks,plan,participationLeak,recommendedRoute,exceptionReason,callStackPct,limpers,openerPos,playersBehind:behind};
 }
 function tournamentEarlyProfileText(profile){
   if(!profile)return'';
   const risk=profile.risks&&profile.risks.length?' / 注意: '+profile.risks.join('・'):'';
-  return profile.handType+' 上位'+profile.handPercent+'%: '+profile.actionLabel+'目安 上位'+profile.capPercent+'% -> '+profile.verdict+'（'+profile.baseline+'） / 方針: '+profile.plan+risk;
+  const route=profile.recommendedRoute?' / 推奨経路: '+profile.recommendedRoute:'';
+  const ex=profile.exceptionReason?' / 例外: '+profile.exceptionReason:'';
+  const leak=profile.participationLeak?' / リーク: '+profile.participationLeak:'';
+  return profile.handType+' 上位'+profile.handPercent+'%: '+profile.actionLabel+'目安 上位'+profile.capPercent+'% -> '+profile.verdict+'（'+profile.baseline+'） / 方針: '+profile.plan+route+leak+ex+risk;
 }
 function liveCashRangeProfile(hr,d,holeCards,pos){
   if(!d||d.street!=='preflop'||!holeCards||holeCards.length<2)return null;
@@ -3895,11 +3923,14 @@ function analyzeHand(hr){
     const callOff=facing&&ev.action==='call'&&(callCommitRatio>=0.55||((ev.toCall||0)>=Math.max(1,(ev.playerChipsBefore||0)*0.55)));
     const nonBBFlat=ev.street==='preflop'&&facing&&ev.action==='call'&&ev.position!=='BB'&&!callOff;
     if(phase==='序盤'){
-      if(ev.street==='preflop'&&ev.action==='call'&&facing&&ev.position!=='BB'){
+      if(ev.street==='preflop'&&ev.earlyProfile&&ev.earlyProfile.lane==='limp'){
+        next=Math.max(ev.earlyProfile.severity==='bad'?10:6,Math.round(next*1.12));
+        notes.push('序盤のオープンリンプは、'+(ev.earlyProfile.participationLeak||'レイズ/フォールドを曖昧にする参加')+'として重めに採点。推奨経路は'+ev.earlyProfile.recommendedRoute);
+      }else if(ev.street==='preflop'&&ev.action==='call'&&facing&&ev.position!=='BB'){
         const ep=ev.earlyProfile||null;
         const mult=ep&&ep.severity==='bad'?1.20:ep&&ep.severity==='border'?1.08:1.10;
         next=Math.round(next*mult);
-        notes.push(ep?'序盤参加レンジ「'+ep.verdict+'」。'+ep.plan+'。'+(ep.risks&&ep.risks.length?ep.risks.join('・')+'を重視':'悪い参加レンジを早めに削ることを重視'):'序盤は飛び回避より、悪い参加レンジを早めに削ることを重視');
+        notes.push(ep?'序盤コールドコール「'+ep.verdict+'」。'+ep.plan+'。'+(ep.exceptionReason?ep.exceptionReason:(ep.risks&&ep.risks.length?ep.risks.join('・')+'を重視':'悪い参加レンジを早めに削ることを重視')):'序盤は飛び回避より、悪い参加レンジを早めに削ることを重視');
       }else if(ev.street==='preflop'&&ev.earlyProfile&&ev.earlyProfile.severity==='bad'&&(ev.action==='raise'||ev.action==='allin'||ev.action==='call')){
         next=Math.max(8,Math.round(next*1.12));
         notes.push('序盤参加レンジ外の参加は、中盤前に難しいSPRを作るため重めに採点');
@@ -4441,6 +4472,14 @@ function analyzeHand(hr){
       const thFrac=HAND_COMBO_FRAC[tht]||0.99;
       const tpos=d.position||'MP';
       const tn=tournamentPreflopNote(hr.tournamentContext,d,tpos,thRank,thFrac);
+      const preCtxEarly=(function(){
+        const before=prefBefore(d);
+        const firstAgg=before.find(function(x){return x.street==='preflop'&&(x.action==='raise'||x.action==='allin');});
+        const order=['UTG','UTG+1','MP','LJ','HJ','CO','BTN','SB','BB'];
+        const oi=order.indexOf(tpos);
+        const playersBehind=oi>=0?Math.max(0,order.length-oi-1):null;
+        return{openerPos:firstAgg?firstAgg.position:'',limpers:limpCount,playersBehind};
+      })();
       ev.comment=(ev.comment||'')+tn.note;
       ev.stackBB=tn.stackBB;
       ev.bbAnte=hr.tournamentContext.bbAnte;
@@ -4467,7 +4506,7 @@ function analyzeHand(hr){
       ev.tournamentRangeProfile=tournamentRangeProfile(hr.tournamentContext,d,human.holeCards,tn.stackBB,tpos);
       ev.bubbleProfile=tournamentBubbleProfile(hr.tournamentContext,d,tn.stackBB,tpos);
       ev.bubbleIcmRange=tournamentBubbleIcmRangeProfile(hr.tournamentContext,d,human.holeCards,tn.stackBB,tpos,ev.bubbleProfile);
-      ev.earlyProfile=tournamentEarlyProfile(hr.tournamentContext,d,human.holeCards,tn.stackBB,tpos,(hr.tournamentContext&&hr.tournamentContext.players)||hr.players.length||6);
+      ev.earlyProfile=tournamentEarlyProfile(hr.tournamentContext,d,human.holeCards,tn.stackBB,tpos,(hr.tournamentContext&&hr.tournamentContext.players)||hr.players.length||6,preCtxEarly);
       ev.middleProfile=tournamentMiddleProfile(hr.tournamentContext,d,tn.stackBB,tpos,human.holeCards);
       const tsAdj=tournamentShortStackPreflopAdjust(hr.tournamentContext,d,tpos,thRank,thFrac,handCat(tc1,tc2),tc1.suit===tc2.suit,tc1.rank===tc2.rank);
       if(tsAdj&&!facingFourBetCtx(d)){
@@ -4525,7 +4564,7 @@ function analyzeHand(hr){
       ev.tournamentLesson=tournamentResultLesson(hr.tournamentContext,d,tStackBB,d.position||'MP');
       ev.tournamentRangeProfile=tournamentRangeProfile(hr.tournamentContext,d,human.holeCards,tStackBB,d.position||'MP');
       ev.bubbleProfile=tournamentBubbleProfile(hr.tournamentContext,d,tStackBB,d.position||'MP');
-      ev.earlyProfile=tournamentEarlyProfile(hr.tournamentContext,d,human.holeCards,tStackBB,d.position||'MP',(hr.tournamentContext&&hr.tournamentContext.players)||hr.players.length||6);
+      ev.earlyProfile=tournamentEarlyProfile(hr.tournamentContext,d,human.holeCards,tStackBB,d.position||'MP',(hr.tournamentContext&&hr.tournamentContext.players)||hr.players.length||6,{limpers:limpCount});
       ev.middleProfile=tournamentMiddleProfile(hr.tournamentContext,d,tStackBB,d.position||'MP',human.holeCards);
     }
     const scoredBefore=scoredDeduction(ev);
@@ -4780,6 +4819,35 @@ function runFishTankRegressionTests(){
     });
     const ev=humanEval(analyzeHand(hr),e=>e.action==='raise');
     return !!(ev&&ev.earlyProfile&&ev.earlyProfile.severity!=='bad'&&ev.earlyProfile.lane==='open');
+  });
+
+  add('序盤のオープンリンプをリンプ癖として重く見る',function(){
+    const ctx={enabled:true,phase:'序盤',stackBB:40,players:8,playersLeft:32,seatsPaid:6,sb:100,bb:200,bbAnte:200,bbAnteBB:1,focusId:'bbante_basic',focusLabel:'BBアンティ基礎'};
+    const hr=regressionHand({
+      heroHole:['Ks','Qs'],
+      bigBlind:200,
+      tournamentContext:ctx,
+      decisions:[
+        regressionDecision({street:'preflop',action:'call',amount:200,pot:500,toCall:200,facingRaise:false,position:'HJ',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:8000,pfRaiseCountBefore:0,pfFacingBetLevel:0,pfActionBetLevel:0})
+      ]
+    });
+    const ev=humanEval(analyzeHand(hr),e=>e.action==='call');
+    return !!(ev&&ev.earlyProfile&&ev.earlyProfile.lane==='limp'&&/リンプ/.test(ev.earlyProfile.participationLeak||'')&&/オープンリンプ/.test(ev.phaseWeightNote||'')&&(ev.deduction||0)>=10);
+  });
+
+  add('序盤の小ポケットコールドコールはセットマイン例外を保持する',function(){
+    const ctx={enabled:true,phase:'序盤',stackBB:40,players:8,playersLeft:32,seatsPaid:6,sb:100,bb:200,bbAnte:200,bbAnteBB:1,focusId:'bbante_basic',focusLabel:'BBアンティ基礎'};
+    const hr=regressionHand({
+      heroHole:['5s','5d'],
+      bigBlind:200,
+      tournamentContext:ctx,
+      decisions:[
+        regressionDecision({street:'preflop',action:'raise',amount:500,pot:500,toCall:200,facingRaise:false,position:'HJ',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:9000,pfRaiseCountBefore:0,pfFacingBetLevel:0,pfActionBetLevel:2}),
+        regressionDecision({street:'preflop',action:'call',amount:500,pot:1000,toCall:500,potOdds:500/1500,facingRaise:true,position:'BTN',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:8000,pfRaiseCountBefore:1,pfFacingBetLevel:2,pfActionBetLevel:2})
+      ]
+    });
+    const ev=humanEval(analyzeHand(hr),e=>e.action==='call');
+    return !!(ev&&ev.earlyProfile&&ev.earlyProfile.lane==='flat'&&ev.earlyProfile.exceptionReason&&/セットマイン/.test(ev.earlyProfile.exceptionReason)&&ev.earlyProfile.severity!=='bad');
   });
 
   add('中盤18〜25BBの非BBフラットを専用プロファイルで重く見る',function(){
@@ -5595,6 +5663,8 @@ function showAnalysis(hr,fromHistory){
       if(ev.bubbleIcmRange)m+=metaChip('バブルICM表',ev.bubbleIcmRange.verdict+' / '+ev.bubbleIcmRange.laneLabel,ev.bubbleIcmRange.severity==='bad'?'var(--red)':ev.bubbleIcmRange.severity==='border'?'var(--gold)':'var(--green)');
       if(ev.earlyProfile)m+=metaChip('序盤参加',ev.earlyProfile.verdict+' / '+ev.earlyProfile.actionLabel,ev.earlyProfile.severity==='bad'?'var(--red)':ev.earlyProfile.severity==='border'?'var(--gold)':'var(--green)');
       if(ev.earlyProfile)m+=metaChip('序盤方針',ev.earlyProfile.plan,'var(--gold)');
+      if(ev.earlyProfile&&ev.earlyProfile.participationLeak)m+=metaChip('リンプ/CC',ev.earlyProfile.participationLeak,'var(--gold)');
+      if(ev.earlyProfile&&ev.earlyProfile.exceptionReason)m+=metaChip('参加例外',ev.earlyProfile.exceptionReason,'var(--green)');
       if(ev.middleProfile)m+=metaChip('中盤帯',ev.middleProfile.band,'var(--accent)');
       if(ev.middleProfile)m+=metaChip('中盤方針',ev.middleProfile.policy,'var(--gold)');
       if(ev.middleProfile&&ev.middleProfile.deepAxes)m+=metaChip('中盤5軸',ev.middleProfile.deepAxes.join(' / '),'var(--gold)');
