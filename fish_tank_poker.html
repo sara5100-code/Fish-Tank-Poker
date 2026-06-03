@@ -1166,6 +1166,45 @@ function tournamentEarlyProfileText(profile){
   const leak=profile.participationLeak?' / リーク: '+profile.participationLeak:'';
   return profile.handType+' 上位'+profile.handPercent+'%: '+profile.actionLabel+'目安 上位'+profile.capPercent+'% -> '+profile.verdict+'（'+profile.baseline+'） / 方針: '+profile.plan+route+leak+ex+spec+risk;
 }
+// [Codex fix 2026-06-04] 序盤トーナメントのマルチウェイは、人数・位置・手役の脆さで別軸評価する。
+function tournamentEarlyMultiwayProfile(ctx,d,role,nOpponents,pos){
+  if(!ctx||!ctx.enabled||ctx.phase!=='序盤'||!d||d.street==='preflop')return null;
+  const players=(nOpponents||1)+1;
+  if(players<3)return null;
+  const note=(role&&role.note)||'';
+  const pairTier=role&&role.pairTier;
+  const isOOP=['SB','BB','UTG','UTG+1'].includes(pos||d.position||'');
+  const lane=d.action==='check'?'check':d.action==='call'?'call':(d.action==='raise'||d.action==='bet'||d.action==='allin')?'bet':d.action;
+  const betPct=d.pot?Math.round(((d.amount||0)/Math.max(1,d.pot))*100):0;
+  const onePair=!!pairTier||/ワンペア|トップペア|中・低ペア|ミドルペア|オーバーペア/.test(note);
+  const weakPair=['board_pair','under_pair','bottom_pair','low_pair','second_pair'].includes(pairTier);
+  const strong=!!(role&&(role.isNut||role.role==='nutted'||role.role==='strong'||role.role==='monster'));
+  const draw=!!(role&&role.draw&&(role.draw.flush||role.draw.oesd||role.draw.gutshot||role.draw.straight));
+  const comboDraw=!!(role&&role.draw&&role.draw.flush&&(role.draw.oesd||role.draw.gutshot||role.draw.straight));
+  let severity=players>=4?'high':'normal';
+  let policy='序盤マルチウェイではブラフ頻度を下げ、バリューと強いドロー中心にします。';
+  let risk=players>=4?'4way以上で誰かが強いレンジを持ちやすい':'3wayでブラフ成功率とエクイティ実現率が下がる';
+  if(isOOP)risk+=' / OOPで実現率が下がる';
+  if(onePair&&!strong)policy='ワンペアは強く見すぎず、チェックまたは小さめでポット管理します。';
+  if(draw&&!comboDraw&&!strong)policy='ナッツ級やコンボドロー以外のセミブラフ頻度を落とします。';
+  if(lane==='bet'&&!strong&&(betPct>=50||weakPair||(!comboDraw&&draw))){
+    severity='bad';
+    risk+=' / 複数人に大きく打つほど強いレンジだけが残りやすい';
+  }else if(lane==='call'&&onePair&&!strong){
+    severity=players>=4||weakPair?'bad':'border';
+    risk+=' / ワンペアで受けるほど後続ストリートが難しい';
+  }else if(lane==='check'&&!strong&&(onePair||weakPair||draw)){
+    severity='good';
+    policy='この場面ではチェックでポット管理し、相手の強いアクションに備える判断を自然に扱います。';
+  }
+  return{players,lane,position:pos||d.position||'',isOOP,betPct,onePair,weakPair,strong,draw,comboDraw,severity,risk,policy};
+}
+function tournamentEarlyMultiwayProfileText(profile){
+  if(!profile)return'';
+  const p=profile.players+'way';
+  const lane={check:'チェック',call:'コール',bet:'ベット/レイズ'}[profile.lane]||profile.lane;
+  return p+' / '+lane+' / '+(profile.isOOP?'OOP':'IP')+' / '+profile.severity+'：'+profile.policy+' 注意: '+profile.risk;
+}
 function liveCashRangeProfile(hr,d,holeCards,pos){
   if(!d||d.street!=='preflop'||!holeCards||holeCards.length<2)return null;
   const ht=handType(holeCards[0],holeCards[1]);
@@ -3968,6 +4007,18 @@ function analyzeHand(hr){
       }else if(ev.street==='preflop'&&ev.action==='fold'&&!facing&&ev.earlyProfile&&ev.earlyProfile.severity==='good'&&ev.earlyProfile.marginPercent>=8){
         next=Math.round(next*1.08);
         notes.push('序盤でもコア参加レンジを降りすぎると、チップを増やす機会を失いやすい');
+      }else if(ev.street!=='preflop'&&ev.earlyMultiwayProfile){
+        const mw=ev.earlyMultiwayProfile;
+        if(mw.lane==='bet'&&mw.severity==='bad'){
+          next=Math.max(8,Math.round(next*1.18));
+          notes.push('序盤マルチウェイでは、'+mw.policy+' '+mw.risk);
+        }else if(mw.lane==='call'&&mw.onePair&&!mw.strong){
+          next=Math.round(next*(mw.severity==='bad'?1.16:1.08));
+          notes.push('序盤マルチウェイのワンペア受けは、後続ストリートの難しさを重めに見る');
+        }else if(mw.lane==='check'&&mw.severity==='good'){
+          next=Math.round(next*0.90);
+          notes.push('序盤マルチウェイでは自然なポット管理チェックとして軽めに見る');
+        }
       }else if(ev.street==='river'&&facing&&ev.action==='call'){
         next=Math.round(next*1.05);
         notes.push('序盤でもワンペア系の払いすぎは長期リークとして少し重めに採点');
@@ -4464,6 +4515,7 @@ function analyzeHand(hr){
       // ポストフロップ - 新レンジベース評価
       const hasOdds=d.potOdds>0;
       const streetOpps=oppsAtStreet(d.street); // ストリート別相手数
+      ev.streetOpps=streetOpps;
       let result=null;
       if(d.action==='check'){
         result=evalCheck(d,hr,human,streetOpps);
@@ -4598,6 +4650,11 @@ function analyzeHand(hr){
       ev.bubbleProfile=tournamentBubbleProfile(hr.tournamentContext,d,tStackBB,d.position||'MP');
       ev.earlyProfile=tournamentEarlyProfile(hr.tournamentContext,d,human.holeCards,tStackBB,d.position||'MP',(hr.tournamentContext&&hr.tournamentContext.players)||hr.players.length||6,{limpers:limpCount});
       ev.middleProfile=tournamentMiddleProfile(hr.tournamentContext,d,tStackBB,d.position||'MP',human.holeCards);
+      const mwCommLen={flop:3,turn:4,river:5}[d.street]||0;
+      const mwComm=hr.community.slice(0,mwCommLen);
+      const mwEval=human.holeCards&&human.holeCards.length>=2&&mwComm.length>=3?HandEval.evaluate([...human.holeCards,...mwComm]):null;
+      const mwRole=mwEval?handRole(human.holeCards,mwComm,mwEval):null;
+      ev.earlyMultiwayProfile=tournamentEarlyMultiwayProfile(hr.tournamentContext,d,mwRole,ev.streetOpps||oppsAtStreet(d.street),d.position||'MP');
     }
     const scoredBefore=scoredDeduction(ev);
     assignDecisionAxis(ev);
@@ -4925,6 +4982,70 @@ function runFishTankRegressionTests(){
     });
     const ev=humanEval(analyzeHand(hr),e=>e.action==='call');
     return !!(ev&&ev.earlyProfile&&ev.earlyProfile.speculative&&ev.earlyProfile.speculative.type==='suitedConnector'&&ev.earlyProfile.speculative.status==='bad'&&!ev.earlyProfile.exceptionReason);
+  });
+
+  add('序盤マルチウェイの弱ワンペア大きめベットを重く見る',function(){
+    const ctx={enabled:true,phase:'序盤',stackBB:40,players:8,playersLeft:32,seatsPaid:6,sb:100,bb:200,bbAnte:200,bbAnteBB:1,focusId:'bbante_basic',focusLabel:'BBアンティ基礎'};
+    const players=[
+      regressionPlayer('あなた',true,['8s','7s'],{chips:8000}),
+      regressionPlayer('a',false,['Ah','Kd'],{chips:8000}),
+      regressionPlayer('b',false,['Qs','Qd'],{chips:8000}),
+      regressionPlayer('c',false,['Jc','Jh'],{chips:8000})
+    ];
+    const hr=regressionHand({
+      players,
+      board:['Ts','7c','4d'],
+      bigBlind:200,
+      tournamentContext:ctx,
+      decisions:[
+        regressionDecision({street:'flop',action:'raise',amount:700,pot:1000,toCall:0,facingRaise:false,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:8000})
+      ]
+    });
+    const ev=humanEval(analyzeHand(hr),e=>e.street==='flop'&&e.action==='raise');
+    return !!(ev&&ev.earlyMultiwayProfile&&ev.earlyMultiwayProfile.players>=4&&ev.earlyMultiwayProfile.severity==='bad'&&/序盤マルチウェイ/.test(ev.phaseWeightNote||''));
+  });
+
+  add('序盤マルチウェイの弱ワンペアチェックを自然なポット管理として扱う',function(){
+    const ctx={enabled:true,phase:'序盤',stackBB:40,players:8,playersLeft:32,seatsPaid:6,sb:100,bb:200,bbAnte:200,bbAnteBB:1,focusId:'bbante_basic',focusLabel:'BBアンティ基礎'};
+    const players=[
+      regressionPlayer('あなた',true,['8s','7s'],{chips:8000}),
+      regressionPlayer('a',false,['Ah','Kd'],{chips:8000}),
+      regressionPlayer('b',false,['Qs','Qd'],{chips:8000}),
+      regressionPlayer('c',false,['Jc','Jh'],{chips:8000})
+    ];
+    const hr=regressionHand({
+      players,
+      board:['Ts','7c','4d'],
+      bigBlind:200,
+      tournamentContext:ctx,
+      decisions:[
+        regressionDecision({street:'flop',action:'check',amount:0,pot:1000,toCall:0,facingRaise:false,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:8000})
+      ]
+    });
+    const ev=humanEval(analyzeHand(hr),e=>e.street==='flop'&&e.action==='check');
+    return !!(ev&&ev.earlyMultiwayProfile&&ev.earlyMultiwayProfile.lane==='check'&&ev.earlyMultiwayProfile.severity==='good'&&ev.quality!=='bad');
+  });
+
+  add('序盤マルチウェイのワンペアコールを受けすぎ候補として分類する',function(){
+    const ctx={enabled:true,phase:'序盤',stackBB:40,players:8,playersLeft:32,seatsPaid:6,sb:100,bb:200,bbAnte:200,bbAnteBB:1,focusId:'bbante_basic',focusLabel:'BBアンティ基礎'};
+    const players=[
+      regressionPlayer('あなた',true,['8s','7s'],{chips:8000}),
+      regressionPlayer('a',false,['Ah','Kd'],{chips:8000}),
+      regressionPlayer('b',false,['Qs','Qd'],{chips:8000}),
+      regressionPlayer('c',false,['Jc','Jh'],{chips:8000})
+    ];
+    const hr=regressionHand({
+      players,
+      board:['Ts','7c','4d'],
+      bigBlind:200,
+      tournamentContext:ctx,
+      decisions:[
+        regressionDecision({street:'flop',action:'raise',amount:700,pot:1000,toCall:0,facingRaise:false,position:'BTN',playerName:'a',isHuman:false,playerIdx:1,playerChipsBefore:8000}),
+        regressionDecision({street:'flop',action:'call',amount:700,pot:1700,toCall:700,potOdds:700/2400,facingRaise:true,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:8000})
+      ]
+    });
+    const ev=humanEval(analyzeHand(hr),e=>e.street==='flop'&&e.action==='call');
+    return !!(ev&&ev.earlyMultiwayProfile&&ev.earlyMultiwayProfile.lane==='call'&&ev.earlyMultiwayProfile.onePair&&ev.earlyMultiwayProfile.severity==='bad');
   });
 
   add('中盤18〜25BBの非BBフラットを専用プロファイルで重く見る',function(){
@@ -5743,6 +5864,7 @@ function showAnalysis(hr,fromHistory){
       if(ev.earlyProfile&&ev.earlyProfile.participationLeak)m+=metaChip('リンプ/CC',ev.earlyProfile.participationLeak,'var(--gold)');
       if(ev.earlyProfile&&ev.earlyProfile.exceptionReason)m+=metaChip('参加例外',ev.earlyProfile.exceptionReason,'var(--green)');
       if(ev.earlyProfile&&ev.earlyProfile.speculative&&ev.earlyProfile.speculative.type)m+=metaChip('投機評価',ev.earlyProfile.speculative.status+' / '+ev.earlyProfile.speculative.reason,ev.earlyProfile.speculative.status==='bad'?'var(--red)':ev.earlyProfile.speculative.status==='border'?'var(--gold)':'var(--green)');
+      if(ev.earlyMultiwayProfile)m+=metaChip('序盤MW',tournamentEarlyMultiwayProfileText(ev.earlyMultiwayProfile),ev.earlyMultiwayProfile.severity==='bad'?'var(--red)':ev.earlyMultiwayProfile.severity==='good'?'var(--green)':'var(--gold)');
       if(ev.middleProfile)m+=metaChip('中盤帯',ev.middleProfile.band,'var(--accent)');
       if(ev.middleProfile)m+=metaChip('中盤方針',ev.middleProfile.policy,'var(--gold)');
       if(ev.middleProfile&&ev.middleProfile.deepAxes)m+=metaChip('中盤5軸',ev.middleProfile.deepAxes.join(' / '),'var(--gold)');
@@ -5901,6 +6023,7 @@ function buildHandHistoryText(includeContext){
       if(ev.nextBBPressure)meta.push('BB接近='+ev.nextBBPressure);
       if(ev.bubbleIcmRange)meta.push('バブルICM表='+tournamentBubbleIcmRangeText(ev.bubbleIcmRange));
       if(ev.earlyProfile)meta.push('序盤参加='+tournamentEarlyProfileText(ev.earlyProfile));
+      if(ev.earlyMultiwayProfile)meta.push('序盤MW='+tournamentEarlyMultiwayProfileText(ev.earlyMultiwayProfile));
       if(ev.middleProfile)meta.push('中盤帯='+tournamentMiddleProfileText(ev.middleProfile));
       if(ev.toCall>0)meta.push('必要コール='+ev.toCall);
       if(ev.potOdds>0)meta.push('必要EQ='+Math.round(ev.potOdds*100)+'%');
@@ -6075,6 +6198,7 @@ function evaluationSnapshot(hr,an){
         bubbleProfile:e.bubbleProfile||null,
         bubbleIcmRange:e.bubbleIcmRange||null,
         earlyProfile:e.earlyProfile||null,
+        earlyMultiwayProfile:e.earlyMultiwayProfile||null,
         middleProfile:e.middleProfile||null,
         stackRank:e.stackRank||null,
         shortestOppStackBB:e.shortestOppStackBB,
