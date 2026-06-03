@@ -3468,6 +3468,41 @@ function analyzeHand(hr){
     ev.evalAxis=primary;
     ev.axisTags=tags.slice(0,6);
   }
+  function scoredDeduction(ev){
+    return (ev.quality==='bad'||(ev.quality==='ok'&&(ev.deduction||0)>0))?(ev.deduction||0):0;
+  }
+  // [Codex fix 2026-06-03] 判断軸ごとに減点の重みを変え、リバー判断とOOPチェックの教育効果を分ける。
+  function applyDecisionAxisWeight(ev){
+    const before=ev.deduction||0;
+    if(!before)return 0;
+    let next=before;
+    const notes=[];
+    if(ev.evalAxis==='リバーのコール/フォールド'){
+      const weakOnePair=/ワンペア|トップペア|中・低ペア|ミドルペア|ボード.*ペア|下位ペア/.test(ev.comment||'');
+      if(ev.quality==='bad')next=Math.round(next*(ev.action==='call'&&weakOnePair?1.30:1.15));
+      else if(ev.quality==='ok')next=Math.round(next*(ev.action==='call'&&weakOnePair?1.18:1.10));
+      notes.push('リバー判断は初心者リークに直結するため重めに採点');
+    }else if(ev.evalAxis==='チェック頻度と主導権'){
+      const rangeLow=ev.rangeAdv==='低'||ev.nutAdv==='低'||/OOP/.test(ev.comment||'');
+      const rangeHigh=ev.rangeAdv==='高'||ev.nutAdv==='高';
+      if(rangeLow){
+        next=Math.round(next*0.70);
+        notes.push('OOP/レンジ不利の自然なチェックは減点を軽く補正');
+      }else if(rangeHigh&&ev.quality==='bad'){
+        next=Math.round(next*1.15);
+        notes.push('レンジ/ナッツ優位での取り逃しはやや重く採点');
+      }
+    }
+    next=Math.max(0,Math.min(45,next));
+    if(next!==before){
+      ev.deduction=next;
+      ev.axisWeightNote=notes.join('。');
+      if(ev.axisWeightNote){
+        ev.comment=(ev.comment||'')+' 【判断軸補正】'+ev.axisWeightNote+'。';
+      }
+    }
+    return next-before;
+  }
 
   for(const d of hr.decisions.filter(d=>d.isHuman)){
     const ev={...d,quality:'ok',comment:'',suggest:'',deduction:0};
@@ -3975,7 +4010,11 @@ function analyzeHand(hr){
       ev.tournamentLesson=tournamentResultLesson(hr.tournamentContext,d,tStackBB,d.position||'MP');
       ev.tournamentRangeProfile=tournamentRangeProfile(hr.tournamentContext,d,human.holeCards,tStackBB,d.position||'MP');
     }
+    const scoredBefore=scoredDeduction(ev);
     assignDecisionAxis(ev);
+    applyDecisionAxisWeight(ev);
+    const scoredAfter=scoredDeduction(ev);
+    if(scoredAfter!==scoredBefore)score-=(scoredAfter-scoredBefore);
     evals.push(ev);
   }
   score=Math.max(0,Math.min(100,score));
@@ -4347,6 +4386,30 @@ function runFishTankRegressionTests(){
   add('完成ボードのリバートップペアコールを明確コールと言い切らない',function(){
     const ev=humanEval(analyzeHand(limpIsoTopPairHand()),function(e){return e.street==='river'&&e.action==='call';});
     return !!(ev&&ev.evalAxis==='リバーのコール/フォールド'&&ev.axisTags&&ev.axisTags.includes('リバー圧力')&&!/明確なコール/.test(ev.comment||'')&&(ev.isMix||/ボーダー|若干|相手依存|ブラフキャッチ/.test(ev.comment||'')));
+  });
+
+  add('リバーワンペアの悪いコールは判断軸で重く補正する',function(){
+    const hr=regressionHand({
+      heroHole:['Ts','Qd'],
+      villainHole:['Ah','Kh'],
+      board:['Tc','9c','8c','5c','2h'],
+      decisions:[
+        regressionDecision({street:'preflop',action:'raise',amount:15,pot:7,toCall:5,facingRaise:false,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:500,pfRaiseCountBefore:0,pfFacingBetLevel:0,pfActionBetLevel:2}),
+        regressionDecision({street:'preflop',action:'call',amount:15,pot:22,toCall:15,potOdds:15/37,facingRaise:true,position:'BTN',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:500,pfRaiseCountBefore:1,pfFacingBetLevel:2,pfActionBetLevel:2}),
+        regressionDecision({street:'flop',action:'check',amount:0,pot:37,toCall:0,facingRaise:false,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:485}),
+        regressionDecision({street:'flop',action:'raise',amount:25,pot:37,toCall:0,facingRaise:false,position:'BTN',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:485}),
+        regressionDecision({street:'flop',action:'call',amount:25,pot:62,toCall:25,potOdds:25/87,facingRaise:true,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:485}),
+        regressionDecision({street:'turn',action:'check',amount:0,pot:87,toCall:0,facingRaise:false,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:460}),
+        regressionDecision({street:'turn',action:'raise',amount:75,pot:87,toCall:0,facingRaise:false,position:'BTN',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:460}),
+        regressionDecision({street:'turn',action:'call',amount:75,pot:162,toCall:75,potOdds:75/237,facingRaise:true,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:460}),
+        regressionDecision({street:'river',action:'check',amount:0,pot:237,toCall:0,facingRaise:false,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:385}),
+        regressionDecision({street:'river',action:'raise',amount:190,pot:237,toCall:0,facingRaise:false,position:'BTN',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:385}),
+        regressionDecision({street:'river',action:'call',amount:190,pot:427,toCall:190,potOdds:190/617,facingRaise:true,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:385})
+      ],
+      pot:617
+    });
+    const ev=humanEval(analyzeHand(hr),function(e){return e.street==='river'&&e.action==='call';});
+    return !!(ev&&ev.evalAxis==='リバーのコール/フォールド'&&ev.deduction>=20&&/リバー判断/.test(ev.axisWeightNote||''));
   });
 
   function threeBetUnderpairHand(){
@@ -4730,6 +4793,7 @@ function showAnalysis(hr,fromHistory){
       if(ev.lineContext)m+=metaChip('文脈',ev.lineContext,'var(--accent)');
       if(ev.evalAxis)m+=metaChip('判断軸',ev.evalAxis,'var(--gold)');
       if(ev.axisTags&&ev.axisTags.length)m+=metaChip('副軸',ev.axisTags.join(' / '));
+      if(ev.axisWeightNote)m+=metaChip('軸補正',ev.axisWeightNote,'var(--gold)');
       if(ev.toCall>0)m+=metaChip('必要コール',ev.toCall+'T');
       if(ev.potOdds>0)m+=metaChip('必要EQ',Math.round(ev.potOdds*100)+'%');
       if(ev.rawEqPct!=null)m+=metaChip('Raw EQ',ev.rawEqPct+'%');
@@ -4877,6 +4941,7 @@ function buildHandHistoryText(includeContext){
       if(ev.lineContext)meta.push('文脈='+ev.lineContext);
       if(ev.evalAxis)meta.push('判断軸='+ev.evalAxis);
       if(ev.axisTags&&ev.axisTags.length)meta.push('副軸='+ev.axisTags.join(','));
+      if(ev.axisWeightNote)meta.push('軸補正='+ev.axisWeightNote);
       if(ev.toCall>0)meta.push('必要コール='+ev.toCall);
       if(ev.potOdds>0)meta.push('必要EQ='+Math.round(ev.potOdds*100)+'%');
       if(ev.strategyMix)meta.push('推奨頻度='+ev.strategyMix);
@@ -5044,6 +5109,7 @@ function evaluationSnapshot(hr,an){
         lineContext:e.lineContext||'',
         evalAxis:e.evalAxis||'',
         axisTags:e.axisTags||[],
+        axisWeightNote:e.axisWeightNote||'',
         quality:e.quality,
         deduction:e.deduction||0,
         suggest:e.suggest||'',
