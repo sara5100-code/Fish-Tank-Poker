@@ -538,20 +538,28 @@ function tournamentEvalAxes(ctx,stackBB){
 
   const left=ctx.playersLeft||0,paid=ctx.seatsPaid||0;
   let icmPressure='低';
-  if(ctx.phase==='バブル'||(left&&paid&&left<=paid*2.2))icmPressure='高';
+  if(ctx.phase==='HU')icmPressure='低';
+  else if(ctx.phase==='バブル'||(left&&paid&&left<=paid*2.2))icmPressure='高';
   else if(left&&paid&&left<=paid*4)icmPressure='中';
 
   let primary='BBアンティのスチール価値';
-  if(icmPressure==='高')primary='ICM/チケット圧とカバー関係';
+  let phaseAxis='序盤のレンジ健全性';
+  if(ctx.phase==='HU')primary='HUの広いレンジと主導権';
+  else if(icmPressure==='高')primary='ICM/チケット圧とカバー関係';
   else if(bb<=17)primary='push/foldとopen jam';
   else if(bb<=25)primary='小さめオープン・非BBフラット削減・reshove';
   else if(ctx.phase==='序盤')primary='広すぎるコール抑制とポストフロップ実現率';
-  return{stackBand,icmPressure,primary};
+  if(ctx.phase==='中盤')phaseAxis='中盤の有効BB/reshove';
+  else if(ctx.phase==='HU')phaseAxis='HUの広いレンジ/降りすぎ抑制';
+  else if(ctx.phase==='FT')phaseAxis='FTのペイジャンプ/スタック順位';
+  else if(ctx.phase==='バブル'||icmPressure==='高')phaseAxis='バブルのICM/カバー関係';
+  else if(bb<=17)phaseAxis='ショート帯のpush/fold';
+  return{stackBand,icmPressure,primary,phaseAxis};
 }
 function tournamentAxisSummary(ctx,stackBB){
   const a=tournamentEvalAxes(ctx,stackBB);
   if(!a.primary)return'';
-  return 'スタック帯: '+a.stackBand+' / ICM圧: '+a.icmPressure+' / 主軸: '+a.primary;
+  return 'スタック帯: '+a.stackBand+' / ICM圧: '+a.icmPressure+' / 主軸: '+a.primary+' / フェーズ軸: '+a.phaseAxis;
 }
 // [Codex fix 2026-05-27] Tモードのリザルトで「なぜその軸で見るのか」を初心者向けに説明する。
 function tournamentResultLesson(ctx,d,stackBB,pos){
@@ -3269,7 +3277,7 @@ function analyzeHand(hr){
       note+=' 有効'+stackBB+'BB。BBアンティで自然にショート化が早く、リングよりポジションと先手の価値が上がります。';
     }
     if(tctx.phase==='バブル')note+=' バブル/チケット目前ではICM圧があり、ミドルスタック同士の薄い衝突は避けます。';
-    return{note,stackBB,stackBand:axes.stackBand,icmPressure:axes.icmPressure,tournamentAxis:axes.primary};
+    return{note,stackBB,stackBand:axes.stackBand,icmPressure:axes.icmPressure,tournamentAxis:axes.primary,tournamentPhaseAxis:axes.phaseAxis};
   }
 
   // [Codex fix 2026-05-26] トーナメントの20BB前後は、リングのコール/3BET評価ではなくpush/fold寄りに補正する。
@@ -3499,6 +3507,88 @@ function analyzeHand(hr){
       ev.axisWeightNote=notes.join('。');
       if(ev.axisWeightNote){
         ev.comment=(ev.comment||'')+' 【判断軸補正】'+ev.axisWeightNote+'。';
+      }
+    }
+    return next-before;
+  }
+  // [Codex fix 2026-06-03] Tモードでは同じ判断軸でも序盤/中盤/バブル/FT/HUで減点の教育重みを変える。
+  function applyTournamentPhaseWeight(ev){
+    const before=ev.deduction||0;
+    if(!before||!ev.tournamentPhase)return 0;
+    let next=before;
+    const notes=[];
+    const phase=ev.tournamentPhase;
+    const stackBB=ev.stackBB||99;
+    const facing=(ev.toCall||0)>0&&(ev.street!=='preflop'||ev.facingRaise);
+    const covered=ev.coverState==='covered'||ev.coverState==='mixed_covered';
+    const covering=ev.coverState==='covering'||ev.coverState==='mixed_covering';
+    const late=['CO','BTN','SB'].includes(ev.position);
+    const raiseLike=ev.action==='raise'||ev.action==='allin';
+    if(phase==='序盤'){
+      if(ev.street==='preflop'&&ev.action==='call'&&facing&&ev.position!=='BB'){
+        next=Math.round(next*1.10);
+        notes.push('序盤は飛び回避より、悪い参加レンジを早めに削ることを重視');
+      }else if(ev.street==='river'&&facing&&ev.action==='call'){
+        next=Math.round(next*1.05);
+        notes.push('序盤でもワンペア系の払いすぎは長期リークとして少し重めに採点');
+      }
+    }else if(phase==='中盤'){
+      if(stackBB<=25&&ev.street==='preflop'&&ev.action==='call'&&facing&&ev.position!=='BB'){
+        next=Math.round(next*1.18);
+        notes.push('中盤の浅い非BBコールは、3bet jam/foldに整理する価値が高いため重めに採点');
+      }else if(stackBB<=25&&ev.street==='preflop'&&raiseLike){
+        next=Math.round(next*1.08);
+        notes.push('中盤は有効BBに対するサイズ/フォールドエクイティのミスをやや重く採点');
+      }else if(stackBB<=25&&ev.street!=='preflop'&&ev.evalAxis==='リバーのコール/フォールド'){
+        next=Math.round(next*1.10);
+        notes.push('中盤の低SPRではリバーの薄い受けが脱落リスクに直結しやすい');
+      }
+    }else if(phase==='バブル'){
+      if(facing&&ev.action==='call'){
+        next=Math.round(next*(covered?1.38:1.25));
+        notes.push(covered?'バブルでカバーされている薄いコールは通過率を大きく落とすため重く採点':'バブルはコール側が特にタイトになるため、薄い受けを重く採点');
+      }else if(facing&&ev.action==='fold'){
+        next=Math.round(next*(covered?0.70:0.82));
+        notes.push('バブルでは薄いフォールドの価値が上がるため、コール推奨側の減点を軽く補正');
+      }else if(raiseLike&&!facing&&covered){
+        next=Math.round(next*1.15);
+        notes.push('バブルでカバーされている側の下限オープン/jamは失敗時の痛みを重く見る');
+      }else if(raiseLike&&!facing&&covering){
+        next=Math.round(next*0.92);
+        notes.push('バブルでカバーしている側は圧をかける価値が高く、攻撃ミスの減点を少し軽く見る');
+      }
+    }else if(phase==='FT'){
+      if(facing&&ev.action==='call'){
+        next=Math.round(next*(covered?1.28:1.16));
+        notes.push('FTはペイジャンプが大きく、カバーされるコールの失敗を重めに採点');
+      }else if(facing&&ev.action==='fold'){
+        next=Math.round(next*0.82);
+        notes.push('FTではペイジャンプを守るフォールドの価値を加味し、減点を軽く補正');
+      }else if(late&&ev.street==='preflop'&&ev.action==='fold'&&!facing){
+        next=Math.round(next*1.10);
+        notes.push('FTでも後ろ寄りのアンティ回収機会を逃しすぎるとチップ不足になりやすい');
+      }
+    }else if(phase==='HU'){
+      if(ev.action==='fold'){
+        next=Math.round(next*1.28);
+        notes.push('HUはレンジが大きく広がるため、降りすぎを重く採点');
+      }else if(ev.action==='check'&&ev.quality==='bad'){
+        next=Math.round(next*1.15);
+        notes.push('HUでは主導権と小ベット頻度が高く、受け身すぎるチェックをやや重く採点');
+      }else if(facing&&ev.action==='call'){
+        next=Math.round(next*0.92);
+        notes.push('HUではブラフ頻度と薄いバリューが増えるため、受けのミスを少し軽く見る');
+      }
+    }else if(stackBB<=17&&ev.street==='preflop'&&ev.action==='call'&&facing&&ev.position!=='BB'){
+      next=Math.round(next*1.15);
+      notes.push('ショート帯は非BBフラットよりpush/fold整理を重視');
+    }
+    next=Math.max(0,Math.min(45,next));
+    if(next!==before){
+      ev.deduction=next;
+      ev.phaseWeightNote=notes.join('。');
+      if(ev.phaseWeightNote){
+        ev.comment=(ev.comment||'')+' 【フェーズ補正】'+ev.phaseWeightNote+'。';
       }
     }
     return next-before;
@@ -3955,6 +4045,7 @@ function analyzeHand(hr){
       ev.stackBand=tn.stackBand;
       ev.icmPressure=tn.icmPressure;
       ev.tournamentAxis=tn.tournamentAxis;
+      ev.tournamentPhaseAxis=tn.tournamentPhaseAxis;
       ev.tournamentFocus=hr.tournamentContext.focusLabel;
       ev.coverState=d.coverState;
       ev.coverLabel=d.coverLabel;
@@ -4002,6 +4093,7 @@ function analyzeHand(hr){
       ev.stackBand=axes.stackBand;
       ev.icmPressure=axes.icmPressure;
       ev.tournamentAxis=axes.primary;
+      ev.tournamentPhaseAxis=axes.phaseAxis;
       ev.tournamentFocus=hr.tournamentContext.focusLabel;
       ev.coverState=d.coverState;
       ev.coverLabel=d.coverLabel;
@@ -4013,6 +4105,7 @@ function analyzeHand(hr){
     const scoredBefore=scoredDeduction(ev);
     assignDecisionAxis(ev);
     applyDecisionAxisWeight(ev);
+    applyTournamentPhaseWeight(ev);
     const scoredAfter=scoredDeduction(ev);
     if(scoredAfter!==scoredBefore)score-=(scoredAfter-scoredBefore);
     evals.push(ev);
@@ -4233,6 +4326,50 @@ function runFishTankRegressionTests(){
     });
     const ev=humanEval(analyzeHand(hr),e=>e.action==='raise');
     return !!(ev&&ev.tournamentRangeProfile&&ev.tournamentRangeProfile.lane==='open'&&ev.tournamentRangeProfile.severity==='good');
+  });
+
+  add('バブルでカバーされる薄い非BBコールはフェーズ補正で重く見る',function(){
+    const ctx={enabled:true,phase:'バブル',stackBB:14,players:9,playersLeft:9,seatsPaid:6,sb:500,bb:1000,bbAnte:1000,bbAnteBB:1,focusId:'bubble_call',focusLabel:'バブル薄コール回避'};
+    const hr=regressionHand({
+      heroHole:['Qs','To'],
+      bigBlind:1000,
+      tournamentContext:ctx,
+      decisions:[
+        regressionDecision({street:'preflop',action:'raise',amount:2000,pot:2500,toCall:1000,facingRaise:false,position:'HJ',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:26000,pfRaiseCountBefore:0,pfFacingBetLevel:0,pfActionBetLevel:2}),
+        regressionDecision({street:'preflop',action:'call',amount:2000,pot:4500,toCall:2000,potOdds:2000/6500,facingRaise:true,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:14000,pfRaiseCountBefore:1,pfFacingBetLevel:2,pfActionBetLevel:2,coverState:'covered',coverLabel:'カバーされている',coverPressure:'高'})
+      ]
+    });
+    const ev=humanEval(analyzeHand(hr),e=>e.action==='call');
+    return !!(ev&&ev.tournamentPhaseAxis==='バブルのICM/カバー関係'&&/バブル/.test(ev.phaseWeightNote||'')&&(ev.deduction||0)>=14);
+  });
+
+  add('バブルの強ハンドフォールド減点はICMで軽くなる',function(){
+    const ctx={enabled:true,phase:'バブル',stackBB:14,players:9,playersLeft:9,seatsPaid:6,sb:500,bb:1000,bbAnte:1000,bbAnteBB:1,focusId:'bubble_call',focusLabel:'バブル薄コール回避'};
+    const hr=regressionHand({
+      heroHole:['Ah','Kd'],
+      bigBlind:1000,
+      tournamentContext:ctx,
+      decisions:[
+        regressionDecision({street:'preflop',action:'allin',amount:14000,pot:2500,toCall:1000,facingRaise:false,position:'BTN',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:26000,pfRaiseCountBefore:0,pfFacingBetLevel:0,pfActionBetLevel:2}),
+        regressionDecision({street:'preflop',action:'fold',amount:0,pot:16500,toCall:14000,potOdds:14000/30500,facingRaise:true,position:'SB',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:14000,pfRaiseCountBefore:1,pfFacingBetLevel:2,pfActionBetLevel:2,coverState:'covered',coverLabel:'カバーされている',coverPressure:'高'})
+      ]
+    });
+    const ev=humanEval(analyzeHand(hr),e=>e.action==='fold');
+    return !!(ev&&ev.tournamentPhaseAxis==='バブルのICM/カバー関係'&&/フォールド/.test(ev.phaseWeightNote||'')&&(ev.deduction||0)>0&&(ev.deduction||0)<20);
+  });
+
+  add('HUでは降りすぎをフェーズ補正で重く見る',function(){
+    const ctx={enabled:true,phase:'HU',stackBB:20,players:2,playersLeft:2,seatsPaid:1,sb:500,bb:1000,bbAnte:0,bbAnteBB:0,focusId:'general',focusLabel:'総合練習'};
+    const hr=regressionHand({
+      heroHole:['Ks','To'],
+      bigBlind:1000,
+      tournamentContext:ctx,
+      decisions:[
+        regressionDecision({street:'preflop',action:'fold',amount:0,pot:1500,toCall:500,facingRaise:false,position:'BTN',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:20000,pfRaiseCountBefore:0,pfFacingBetLevel:0,pfActionBetLevel:0})
+      ]
+    });
+    const ev=humanEval(analyzeHand(hr),e=>e.action==='fold');
+    return !!(ev&&ev.tournamentPhaseAxis==='HUの広いレンジ/降りすぎ抑制'&&/HU/.test(ev.phaseWeightNote||'')&&(ev.deduction||0)>=18);
   });
 
   add('相手の実ハンドを変えても評価が変わらない',function(){
@@ -4794,6 +4931,8 @@ function showAnalysis(hr,fromHistory){
       if(ev.evalAxis)m+=metaChip('判断軸',ev.evalAxis,'var(--gold)');
       if(ev.axisTags&&ev.axisTags.length)m+=metaChip('副軸',ev.axisTags.join(' / '));
       if(ev.axisWeightNote)m+=metaChip('軸補正',ev.axisWeightNote,'var(--gold)');
+      if(ev.tournamentPhaseAxis)m+=metaChip('フェーズ軸',ev.tournamentPhaseAxis,'var(--accent)');
+      if(ev.phaseWeightNote)m+=metaChip('フェーズ補正',ev.phaseWeightNote,'var(--gold)');
       if(ev.toCall>0)m+=metaChip('必要コール',ev.toCall+'T');
       if(ev.potOdds>0)m+=metaChip('必要EQ',Math.round(ev.potOdds*100)+'%');
       if(ev.rawEqPct!=null)m+=metaChip('Raw EQ',ev.rawEqPct+'%');
@@ -4942,6 +5081,8 @@ function buildHandHistoryText(includeContext){
       if(ev.evalAxis)meta.push('判断軸='+ev.evalAxis);
       if(ev.axisTags&&ev.axisTags.length)meta.push('副軸='+ev.axisTags.join(','));
       if(ev.axisWeightNote)meta.push('軸補正='+ev.axisWeightNote);
+      if(ev.tournamentPhaseAxis)meta.push('フェーズ軸='+ev.tournamentPhaseAxis);
+      if(ev.phaseWeightNote)meta.push('フェーズ補正='+ev.phaseWeightNote);
       if(ev.toCall>0)meta.push('必要コール='+ev.toCall);
       if(ev.potOdds>0)meta.push('必要EQ='+Math.round(ev.potOdds*100)+'%');
       if(ev.strategyMix)meta.push('推奨頻度='+ev.strategyMix);
@@ -5110,6 +5251,8 @@ function evaluationSnapshot(hr,an){
         evalAxis:e.evalAxis||'',
         axisTags:e.axisTags||[],
         axisWeightNote:e.axisWeightNote||'',
+        tournamentPhaseAxis:e.tournamentPhaseAxis||'',
+        phaseWeightNote:e.phaseWeightNote||'',
         quality:e.quality,
         deduction:e.deduction||0,
         suggest:e.suggest||'',
