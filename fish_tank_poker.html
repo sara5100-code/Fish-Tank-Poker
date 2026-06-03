@@ -573,6 +573,10 @@ function tournamentBubbleProfile(ctx,d,stackBB,pos){
   const coverState=d.coverState||'neutral';
   const covered=coverState==='covered'||coverState==='mixed_covered';
   const covering=coverState==='covering'||coverState==='mixed_covering';
+  const coverCount=d.coverCount||0;
+  const coveredByCount=d.coveredByCount||0;
+  const bubbleDistance=left&&paid?Math.max(0,left-paid):null;
+  const shorterExists=coverCount>0;
   let stage='バブル付近';
   if(left&&paid){
     if(left<=paid+1)stage='直接バブル';
@@ -627,15 +631,28 @@ function tournamentBubbleProfile(ctx,d,stackBB,pos){
     policy='Callで見るよりpush/fold。降りすぎも残りBBと相談';
     callMultiplier=1.18;foldMultiplier=0.88;attackMultiplier=0.96;
   }
+  if(shorterExists&&(stackRole==='ミドル'||stackRole==='上位ミドル')&&!covering){
+    risk='自分より短いスタックがいる中でのミドル衝突';
+    policy+='。下位スタックがいる間は、受けるオールインと非BBフラットをさらに締める';
+    callMultiplier+=0.18;
+    foldMultiplier=Math.max(0.52,foldMultiplier-0.08);
+  }
+  if(stage==='直接バブル'){
+    callMultiplier+=0.08;
+    foldMultiplier=Math.max(0.50,foldMultiplier-0.04);
+  }
   return{
     stage,stackRole,leverage,archetype,risk,policy,
     callMultiplier,foldMultiplier,attackMultiplier,
-    left,paid,avgStackBB:avg,stackBB:bb,position:pos||d.position||''
+    left,paid,bubbleDistance,avgStackBB:avg,stackBB:bb,position:pos||d.position||'',
+    coverCount,coveredByCount,shorterExists
   };
 }
 function tournamentBubbleProfileText(profile){
   if(!profile)return'';
-  return profile.stage+' / '+profile.archetype+' / 危険: '+profile.risk+' / 方針: '+profile.policy;
+  const dist=profile.bubbleDistance!=null?' / 通過まで'+profile.bubbleDistance+'人':'';
+  const shorter=profile.coverCount?' / 下位スタック'+profile.coverCount+'人':'';
+  return profile.stage+dist+shorter+' / '+profile.archetype+' / 危険: '+profile.risk+' / 方針: '+profile.policy;
 }
 // [Codex fix 2026-05-27] Tモードのリザルトで「なぜその軸で見るのか」を初心者向けに説明する。
 function tournamentResultLesson(ctx,d,stackBB,pos){
@@ -3603,6 +3620,9 @@ function analyzeHand(hr){
     const bp=ev.bubbleProfile||null;
     const late=['CO','BTN','SB'].includes(ev.position);
     const raiseLike=ev.action==='raise'||ev.action==='allin';
+    const callCommitRatio=ev.playerChipsBefore?((ev.amount||ev.toCall||0)/Math.max(1,ev.playerChipsBefore)):0;
+    const callOff=facing&&ev.action==='call'&&(callCommitRatio>=0.55||((ev.toCall||0)>=Math.max(1,(ev.playerChipsBefore||0)*0.55)));
+    const nonBBFlat=ev.street==='preflop'&&facing&&ev.action==='call'&&ev.position!=='BB'&&!callOff;
     if(phase==='序盤'){
       if(ev.street==='preflop'&&ev.action==='call'&&facing&&ev.position!=='BB'){
         next=Math.round(next*1.10);
@@ -3624,17 +3644,22 @@ function analyzeHand(hr){
       }
     }else if(phase==='バブル'){
       if(facing&&ev.action==='call'){
-        next=Math.round(next*(bp?bp.callMultiplier:(covered?1.38:1.25)));
-        notes.push(bp?'バブル立場「'+bp.archetype+'」では、'+bp.risk+'を避けるため薄いコールを重く採点':covered?'バブルでカバーされている薄いコールは通過率を大きく落とすため重く採点':'バブルはコール側が特にタイトになるため、薄い受けを重く採点');
+        let mult=bp?bp.callMultiplier:(covered?1.38:1.25);
+        if(callOff)mult+=0.18;
+        if(nonBBFlat)mult+=0.10;
+        if(bp&&bp.shorterExists&&!covering)mult+=0.10;
+        next=Math.round(next*mult);
+        const callType=callOff?'オールイン受け':nonBBFlat?'非BBフラット':'コール';
+        notes.push(bp?'バブル立場「'+bp.archetype+'」の'+callType+'は、'+bp.risk+'を避けるため重く採点':covered?'バブルでカバーされている薄いコールは通過率を大きく落とすため重く採点':'バブルはコール側が特にタイトになるため、薄い受けを重く採点');
       }else if(facing&&ev.action==='fold'){
         next=Math.round(next*(bp?bp.foldMultiplier:(covered?0.70:0.82)));
-        notes.push(bp?'バブル立場「'+bp.archetype+'」では、'+bp.policy+'ためフォールド減点を調整':'バブルでは薄いフォールドの価値が上がるため、コール推奨側の減点を軽く補正');
+        notes.push(bp?'バブル立場「'+bp.archetype+'」では、'+bp.policy+'ため、フォールド減点を調整':'バブルでは薄いフォールドの価値が上がるため、コール推奨側の減点を軽く補正');
       }else if(raiseLike&&!facing&&covered){
         next=Math.round(next*(bp?bp.attackMultiplier:1.15));
         notes.push(bp?'バブル立場「'+bp.archetype+'」の攻撃下限を、'+bp.policy+'方針で補正':'バブルでカバーされている側の下限オープン/jamは失敗時の痛みを重く見る');
       }else if(raiseLike&&!facing&&covering){
         next=Math.round(next*(bp?bp.attackMultiplier:0.92));
-        notes.push(bp?'バブル立場「'+bp.archetype+'」では、'+bp.policy+'ため攻撃系の減点を調整':'バブルでカバーしている側は圧をかける価値が高く、攻撃ミスの減点を少し軽く見る');
+        notes.push(bp?'バブル立場「'+bp.archetype+'」では、'+bp.policy+'ため、攻撃系の減点を調整':'バブルでカバーしている側は圧をかける価値が高く、攻撃ミスの減点を少し軽く見る');
       }
     }else if(phase==='FT'){
       if(facing&&ev.action==='call'){
@@ -4130,6 +4155,8 @@ function analyzeHand(hr){
       ev.coverLabel=d.coverLabel;
       ev.coverPressure=d.coverPressure;
       ev.coverDeltaBB=d.coverDeltaBB;
+      ev.coverCount=d.coverCount;
+      ev.coveredByCount=d.coveredByCount;
       ev.tournamentLesson=tournamentResultLesson(hr.tournamentContext,d,tn.stackBB,tpos);
       ev.tournamentRangeHint=tournamentRangeHint(hr.tournamentContext,d,human.holeCards,tn.stackBB,tpos);
       ev.tournamentRangeProfile=tournamentRangeProfile(hr.tournamentContext,d,human.holeCards,tn.stackBB,tpos);
@@ -4179,6 +4206,8 @@ function analyzeHand(hr){
       ev.coverLabel=d.coverLabel;
       ev.coverPressure=d.coverPressure;
       ev.coverDeltaBB=d.coverDeltaBB;
+      ev.coverCount=d.coverCount;
+      ev.coveredByCount=d.coveredByCount;
       ev.tournamentLesson=tournamentResultLesson(hr.tournamentContext,d,tStackBB,d.position||'MP');
       ev.tournamentRangeProfile=tournamentRangeProfile(hr.tournamentContext,d,human.holeCards,tStackBB,d.position||'MP');
       ev.bubbleProfile=tournamentBubbleProfile(hr.tournamentContext,d,tStackBB,d.position||'MP');
@@ -4437,6 +4466,21 @@ function runFishTankRegressionTests(){
     });
     const ev=humanEval(analyzeHand(hr),e=>e.action==='call');
     return !!(ev&&ev.bubbleProfile&&ev.bubbleProfile.archetype==='カバーされているミドル'&&/ミドル同士|即終了/.test((ev.phaseWeightNote||'')+' '+(ev.bubbleProfile.risk||'')));
+  });
+
+  add('バブルで下位スタックがいるミドルのオールイン受けをさらに重く見る',function(){
+    const ctx={enabled:true,phase:'バブル',stackBB:18,players:9,playersLeft:4,seatsPaid:3,avgStackBB:17,sb:500,bb:1000,bbAnte:1000,bbAnteBB:1,focusId:'bubble_call',focusLabel:'バブル薄コール回避'};
+    const hr=regressionHand({
+      heroHole:['Qs','To'],
+      bigBlind:1000,
+      tournamentContext:ctx,
+      decisions:[
+        regressionDecision({street:'preflop',action:'allin',amount:22000,pot:2500,toCall:1000,facingRaise:false,position:'BTN',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:42000,pfRaiseCountBefore:0,pfFacingBetLevel:0,pfActionBetLevel:2}),
+        regressionDecision({street:'preflop',action:'call',amount:18000,pot:24500,toCall:18000,potOdds:18000/42500,facingRaise:true,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:18000,pfRaiseCountBefore:1,pfFacingBetLevel:2,pfActionBetLevel:2,coverState:'mixed_covered',coverLabel:'上位スタックあり',coverPressure:'高',coverCount:1,coveredByCount:1})
+      ]
+    });
+    const ev=humanEval(analyzeHand(hr),e=>e.action==='call');
+    return !!(ev&&ev.bubbleProfile&&ev.bubbleProfile.shorterExists&&ev.bubbleProfile.stage==='直接バブル'&&/オールイン受け/.test(ev.phaseWeightNote||'')&&(ev.deduction||0)>=35);
   });
 
   add('バブルの強ハンドフォールド減点はICMで軽くなる',function(){
@@ -5045,6 +5089,8 @@ function showAnalysis(hr,fromHistory){
       if(ev.phaseWeightNote)m+=metaChip('フェーズ補正',ev.phaseWeightNote,'var(--gold)');
       if(ev.bubbleProfile)m+=metaChip('バブル立場',ev.bubbleProfile.archetype,'var(--red)');
       if(ev.bubbleProfile)m+=metaChip('危険タイプ',ev.bubbleProfile.risk,'var(--gold)');
+      if(ev.bubbleProfile&&ev.bubbleProfile.bubbleDistance!=null)m+=metaChip('通過まで',ev.bubbleProfile.bubbleDistance+'人');
+      if(ev.bubbleProfile&&ev.bubbleProfile.coverCount)m+=metaChip('下位スタック',ev.bubbleProfile.coverCount+'人','var(--gold)');
       if(ev.toCall>0)m+=metaChip('必要コール',ev.toCall+'T');
       if(ev.potOdds>0)m+=metaChip('必要EQ',Math.round(ev.potOdds*100)+'%');
       if(ev.rawEqPct!=null)m+=metaChip('Raw EQ',ev.rawEqPct+'%');
