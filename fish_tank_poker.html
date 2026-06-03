@@ -3434,6 +3434,41 @@ function analyzeHand(hr){
     return null;
   }
 
+  function assignDecisionAxis(ev){
+    const tags=[];
+    function addTag(t){if(t&&!tags.includes(t))tags.push(t);}
+    let primary='';
+    if(ev.street==='preflop'){
+      primary=ev.tournamentAxis||ev.lineContext||'プリフロップ参加レンジ';
+      addTag('レンジ');
+      if(ev.lineContext)addTag(ev.lineContext);
+      if(ev.action==='raise'||ev.action==='allin')addTag('サイズ/フォールドエクイティ');
+      if(ev.toCall>0)addTag('ポットオッズ');
+      if(ev.strategyMix)addTag('ミックス頻度');
+      if(ev.stackBB!=null)addTag('有効BB');
+      if(ev.icmPressure&&ev.icmPressure!=='低')addTag('ICM');
+    }else{
+      const facing=ev.toCall>0;
+      const betting=ev.action==='raise'||ev.action==='bet'||ev.action==='allin';
+      if(ev.street==='river'&&facing)primary='リバーのコール/フォールド';
+      else if(facing)primary='ポットオッズと実効EQ';
+      else if(betting)primary=ev.street==='river'?'リバーのバリュー/ブラフサイズ':'ベット頻度とサイズ';
+      else if(ev.action==='check')primary='チェック頻度と主導権';
+      else primary='ポストフロップ判断';
+      if(ev.effectiveEqPct!=null)addTag('実効EQ');
+      if(ev.realizationPct!=null)addTag('実現率');
+      if(ev.rangeAdv)addTag('レンジ優位');
+      if(ev.nutAdv)addTag('ナッツ優位');
+      if(betting)addTag('サイズ');
+      if(ev.street==='river')addTag('リバー圧力');
+      if(ev.tournamentAxis)addTag(ev.tournamentAxis);
+      if(ev.icmPressure&&ev.icmPressure!=='低')addTag('ICM');
+    }
+    if(ev.deduction>0)addTag('EV損失');
+    ev.evalAxis=primary;
+    ev.axisTags=tags.slice(0,6);
+  }
+
   for(const d of hr.decisions.filter(d=>d.isHuman)){
     const ev={...d,quality:'ok',comment:'',suggest:'',deduction:0};
     if(d.street==='preflop'){
@@ -3940,6 +3975,7 @@ function analyzeHand(hr){
       ev.tournamentLesson=tournamentResultLesson(hr.tournamentContext,d,tStackBB,d.position||'MP');
       ev.tournamentRangeProfile=tournamentRangeProfile(hr.tournamentContext,d,human.holeCards,tStackBB,d.position||'MP');
     }
+    assignDecisionAxis(ev);
     evals.push(ev);
   }
   score=Math.max(0,Math.min(100,score));
@@ -4211,7 +4247,7 @@ function runFishTankRegressionTests(){
       ]
     });
     const ev=humanEval(analyzeHand(hr),function(e){return e.street==='preflop'&&e.action==='call';});
-    return !!(ev&&ev.lineContext==='BBディフェンス'&&!/コールドコール/.test(ev.lineContext));
+    return !!(ev&&ev.lineContext==='BBディフェンス'&&ev.evalAxis==='BBディフェンス'&&ev.axisTags&&ev.axisTags.includes('レンジ')&&!/コールドコール/.test(ev.lineContext));
   });
 
   add('トーナメント極小スタック開始を補正する',function(){
@@ -4310,7 +4346,7 @@ function runFishTankRegressionTests(){
 
   add('完成ボードのリバートップペアコールを明確コールと言い切らない',function(){
     const ev=humanEval(analyzeHand(limpIsoTopPairHand()),function(e){return e.street==='river'&&e.action==='call';});
-    return !!(ev&&!/明確なコール/.test(ev.comment||'')&&(ev.isMix||/ボーダー|若干|相手依存|ブラフキャッチ/.test(ev.comment||'')));
+    return !!(ev&&ev.evalAxis==='リバーのコール/フォールド'&&ev.axisTags&&ev.axisTags.includes('リバー圧力')&&!/明確なコール/.test(ev.comment||'')&&(ev.isMix||/ボーダー|若干|相手依存|ブラフキャッチ/.test(ev.comment||'')));
   });
 
   function threeBetUnderpairHand(){
@@ -4692,6 +4728,8 @@ function showAnalysis(hr,fromHistory){
       let m='';
       if(ev.position)m+=metaChip('位置',ev.position);
       if(ev.lineContext)m+=metaChip('文脈',ev.lineContext,'var(--accent)');
+      if(ev.evalAxis)m+=metaChip('判断軸',ev.evalAxis,'var(--gold)');
+      if(ev.axisTags&&ev.axisTags.length)m+=metaChip('副軸',ev.axisTags.join(' / '));
       if(ev.toCall>0)m+=metaChip('必要コール',ev.toCall+'T');
       if(ev.potOdds>0)m+=metaChip('必要EQ',Math.round(ev.potOdds*100)+'%');
       if(ev.rawEqPct!=null)m+=metaChip('Raw EQ',ev.rawEqPct+'%');
@@ -4837,6 +4875,8 @@ function buildHandHistoryText(includeContext){
       const meta=[];
       if(ev.position)meta.push('位置='+ev.position);
       if(ev.lineContext)meta.push('文脈='+ev.lineContext);
+      if(ev.evalAxis)meta.push('判断軸='+ev.evalAxis);
+      if(ev.axisTags&&ev.axisTags.length)meta.push('副軸='+ev.axisTags.join(','));
       if(ev.toCall>0)meta.push('必要コール='+ev.toCall);
       if(ev.potOdds>0)meta.push('必要EQ='+Math.round(ev.potOdds*100)+'%');
       if(ev.strategyMix)meta.push('推奨頻度='+ev.strategyMix);
@@ -5002,6 +5042,8 @@ function evaluationSnapshot(hr,an){
         amount:e.amount,
         position:e.position,
         lineContext:e.lineContext||'',
+        evalAxis:e.evalAxis||'',
+        axisTags:e.axisTags||[],
         quality:e.quality,
         deduction:e.deduction||0,
         suggest:e.suggest||'',
