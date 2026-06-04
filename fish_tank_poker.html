@@ -347,6 +347,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,'Hiragino 
       <button class="hud-btn" data-tab="trends">傾向</button>
       <button class="hud-btn" id="btn-reanalyze">再評価</button>
       <button class="hud-btn" id="btn-regression">検査</button>
+      <button class="hud-btn" id="btn-audit-batch">監査</button>
       <button class="hud-btn" id="btn-quit">終了</button>
     </div>
   </div>
@@ -6124,6 +6125,24 @@ function runFishTankRegressionTests(){
     return !!(g.handNum===10&&g._lastActions&&Object.keys(g._lastActions).length===0);
   });
 
+  add('監査バッチが複数モードを回して違和感一覧を返す',function(){
+    const b=runFishTankAuditBatch({perMode:1,seed:24680,maxExamples:8,maxActions:70});
+    return !!(b&&b.totalHands>=6&&b.byMode&&b.byMode.scenario&&Array.isArray(b.suspiciousHands)&&typeof fishTankAuditBatchReportText(b)==='string');
+  });
+
+  add('監査抽出が実ハンド混入FAILをcriticalとして拾う',function(){
+    const hr=regressionHand({heroHole:['As','Kd'],villainHole:['Qh','Qs']});
+    const issues=auditIssuesForHand(hr,{score:80,grade:'B',evals:[],actualHandAudit:{status:'FAIL',hiddenCardTextLeaks:1,evalInvariant:false},premiseAudit:{issues:[],warnings:[]}},'unit');
+    return issues.some(function(i){return i.severity==='critical'&&i.type==='hidden-hand-leak';});
+  });
+
+  add('監査抽出が肯定コメントと大減点の矛盾を拾う',function(){
+    const hr=regressionHand({heroHole:['As','Kd'],villainHole:['Qh','Qs']});
+    const an={score:70,grade:'C',evals:[{street:'river',action:'call',isHuman:true,quality:'bad',deduction:18,comment:'正解。合理的なコールです。'}],actualHandAudit:{status:'PASS'},premiseAudit:{issues:[],warnings:[]}};
+    const issues=auditIssuesForHand(hr,an,'unit');
+    return issues.some(function(i){return i.type==='comment-deduction-contradiction';});
+  });
+
   const results=tests.map(function(t){
     try{return{name:t.name,pass:!!t.fn()};}
     catch(e){return{name:t.name,pass:false,error:e&&e.message?e.message:String(e)};}
@@ -6136,6 +6155,213 @@ function runFishTankRegressionTests(){
 function fishTankRegressionReportText(summary){
   const lines=['Fish Tank 回帰検査: '+summary.passed+'/'+summary.total+' PASS'];
   summary.results.forEach(function(r){lines.push((r.pass?'✓ ':'✗ ')+r.name+(r.error?' — '+r.error:''));});
+  return lines.join('\n');
+}
+
+// [Codex fix 2026-06-05] 監査付き大量プレーテスト。実ハンド混入・文脈ズレ・評価矛盾を機械的に拾う。
+function auditAutoDecision(player,game){
+  let d=null;
+  try{d=aiDecide(player,game,game.aiLevel||'medium');}catch(e){d=null;}
+  const toCall=Math.max(0,game.currentBet-player.currentBet);
+  if(!d||!d.action){
+    if(toCall>0)d={action:toCall>=player.chips?'call':'call'};
+    else d={action:'check'};
+  }
+  if(d.action==='bet')d.action='raise';
+  if(d.action==='raise'&&(!isFinite(d.amount)||d.amount<=player.currentBet)){
+    d.amount=Math.min(player.chips+player.currentBet,Math.max(game.currentBet+game.minRaise,game.bb*2));
+  }
+  if(d.action==='allin')d.amount=player.chips+player.currentBet;
+  return d;
+}
+function playAuditGame(g,maxActions){
+  maxActions=maxActions||90;
+  let guard=0,timeout=false;
+  while(g&&g.street!=='showdown'&&!g.gameOver&&guard<maxActions){
+    guard++;
+    if(g.actionIdx==null||g.actionIdx<0){
+      if(g.street!=='showdown')g._check();
+      if(g.actionIdx==null||g.actionIdx<0){
+        timeout=g.street!=='showdown';
+        break;
+      }
+      continue;
+    }
+    const p=g.players[g.actionIdx];
+    if(!p||!p.active||p.folded||p.allIn){g._check();continue;}
+    const d=auditAutoDecision(p,g);
+    g.processAction(g.actionIdx,d.action,d.amount||0);
+  }
+  if(g&&g.street!=='showdown'&&guard>=maxActions)timeout=true;
+  const hr=g&&g.handHistory&&g.handHistory[0]?g.handHistory[0]:null;
+  if(hr&&timeout)hr.auditTimeout=true;
+  return hr;
+}
+function createAuditRingGame(){
+  const g=new GameEngine({numPlayers:6,sb:2,bb:5,startingChips:500,aiLevel:'hard'});
+  g.startHand();
+  return g;
+}
+function createAuditTournamentGame(focusId){
+  const focus=TOURNAMENT_FOCUS_PRESETS[focusId]||TOURNAMENT_FOCUS_PRESETS.general;
+  const presetId=focus.preset||'middle';
+  const ctx=applyTournamentFocus(cloneTournamentPreset(presetId),focusId);
+  const g=new GameEngine({numPlayers:ctx.players||8,sb:ctx.sb,bb:ctx.bb,startingChips:ctx.bb*(ctx.stackBB||25),aiLevel:'hard',tournamentContext:ctx});
+  g.startHand();
+  return g;
+}
+function createAuditScenarioGame(){
+  const g=new GameEngine({numPlayers:6,sb:2,bb:5,startingChips:500,aiLevel:'hard'});
+  g.startHand();
+  g.players.forEach(function(p){
+    (p.holeCards||[]).forEach(function(c){g.deck.cards.push(c);});
+    p.holeCards=[];
+    p.chips+=p.totalInvested||0;
+    p.totalInvested=0;p.currentBet=0;p.folded=false;p.allIn=false;
+  });
+  g.pot=0;g.currentBet=0;g.minRaise=g.bb;g.currentHandDecisions=[];
+  const baseChips=g.players.map(function(p){return p.chips;});
+  let q=null;
+  for(let i=0;i<16;i++){
+    _resetScenarioAttemptState(g,baseChips);
+    const sc=_genScenarioFlop(g.deck.cards,_pickScenarioCat());
+    g._scenario=sc;
+    _buildAndApplyPreflopStory(g);
+    g.street='flop';
+    g.community=sc.flopCards.slice();
+    g.currentBet=0;g.minRaise=g.bb;
+    g.players.forEach(function(p){p.currentBet=0;p.allIn=false;});
+    g._setOrder();
+    q=trainingSpotQualityAudit(g,{mode:'scenario'});
+    if(q.ok)break;
+  }
+  g._scenarioQuality=q;
+  return g;
+}
+function addAuditIssue(list,severity,type,text,meta){
+  list.push({severity:severity,type:type,text:text,meta:meta||null});
+}
+function auditIssuesForHand(hr,an,label){
+  const issues=[];
+  if(!hr){addAuditIssue(issues,'critical','no-hand','ハンド履歴が生成されませんでした。');return issues;}
+  if(hr.auditTimeout)addAuditIssue(issues,'critical','timeout','自動プレーが規定アクション数内に完了しませんでした。');
+  if(!an){addAuditIssue(issues,'critical','no-analysis','分析結果が生成されませんでした。');return issues;}
+  const leak=an.actualHandAudit||null;
+  if(leak&&leak.status==='FAIL'){
+    addAuditIssue(issues,'critical','hidden-hand-leak','実ハンド混入監査がFAILです。リザルト/AIコピー/評価スナップショットに相手実ハンド由来の情報が混ざる危険があります。',leak);
+  }else if(leak&&leak.status==='WARN'){
+    addAuditIssue(issues,'high','hidden-hand-warn','実ハンド混入監査がWARNです。コメントやスナップショットを確認してください。',leak);
+  }
+  const q=hr.scenarioQuality||null;
+  if(q&&(!q.ok||q.score<70))addAuditIssue(issues,'high','scenario-quality','フロップ練習シナリオの品質が低く、練習として成立しにくい可能性があります。',q);
+  else if(q&&q.score<82)addAuditIssue(issues,'medium','scenario-quality','フロップ練習シナリオに軽い違和感があります。',q);
+  const premise=an.premiseAudit||null;
+  if(premise&&premise.issues&&premise.issues.length)addAuditIssue(issues,'high','premise-context','プリフロップ文脈認識に問題があります。3BET/4BET、リンプ→アイソ、BBディフェンス等の名前付けを確認してください。',premise.issues);
+  if(premise&&premise.warnings&&premise.warnings.length)addAuditIssue(issues,'medium','premise-warning','プリフロップ文脈認識に警告があります。',premise.warnings);
+  (an.evals||[]).forEach(function(e){
+    const c=(e.comment||'').replace(/<[^>]+>/g,'');
+    const dec=e.deduction||0;
+    const street=(e.street||'?').toUpperCase();
+    const action=e.action||'?';
+    if(e.quality==='bad'&&dec>=25)addAuditIssue(issues,'high','large-deduction',street+' '+action+' に大きな減点があります。妥当な重みか確認対象です。',{deduction:dec,comment:c});
+    if(/正解|明確なコール|合理的|許容範囲/.test(c)&&(e.quality==='bad'||dec>=10)){
+      addAuditIssue(issues,'high','comment-deduction-contradiction',street+' '+action+' はコメントが肯定的なのに減点が大きく、説明と採点が矛盾しています。',{deduction:dec,quality:e.quality,comment:c});
+    }
+    if(e.onePairProfile&&e.onePairProfile.verdict==='bad'&&/明確なコール|EV優位/.test(c)){
+      addAuditIssue(issues,'high','one-pair-call-contradiction',street+' '+action+' はワンペア警戒プロファイルと「明確コール」コメントが衝突しています。',{onePairProfile:e.onePairProfile,comment:c});
+    }
+    if(e.street==='flop'&&e.action==='check'&&e.donkProfile&&e.donkProfile.severity==='good'&&dec>=8){
+      addAuditIssue(issues,'medium','donk-check-weight','OOPチェックが自然なドンク抑制局面なのに減点が残っています。',{deduction:dec,donkProfile:e.donkProfile});
+    }
+    if(e.rawEqPct!=null&&e.effectiveEqPct!=null&&Math.abs(e.rawEqPct-e.effectiveEqPct)>=35){
+      addAuditIssue(issues,'medium','raw-effective-gap',street+' '+action+' はRaw EQと実効EQの差が大きい局面です。Raw EQ偏重コメントになっていないか確認してください。',{rawEqPct:e.rawEqPct,effectiveEqPct:e.effectiveEqPct});
+    }
+    if(e.street==='river'&&e.action==='call'&&/(トップペア|ワンペア)/.test(c)&&/明確なコール/.test(c)&&!e.onePairProfile){
+      addAuditIssue(issues,'medium','river-one-pair-missing-profile','リバーのワンペアコールに専用プロファイルが付いていません。完成ボード/ライブ$2/$5補正の監査対象です。',{comment:c});
+    }
+  });
+  return issues;
+}
+function compactAuditHand(hr,an,modeLabel,issues){
+  const human=hr&&hr.players?hr.players.find(function(p){return p.isHuman;}):null;
+  return{
+    mode:modeLabel,
+    handNum:hr?hr.handNum:null,
+    score:an?an.score:null,
+    grade:an?an.grade:null,
+    hero:human&&human.holeCards?human.holeCards.map(function(c){return c.rank+c.suit;}).join(' '):'',
+    board:hr&&hr.community?hr.community.map(function(c){return c.rank+c.suit;}).join(' '):'',
+    issues:issues,
+    snapshot:hr?evaluationSnapshot(hr,an):null
+  };
+}
+function runFishTankAuditBatch(opts){
+  opts=opts||{};
+  const perMode=Math.max(1,Math.min(12,opts.perMode||3));
+  const seed=opts.seed||20260605;
+  const modes=[
+    {id:'ring',label:'リング',make:createAuditRingGame},
+    {id:'scenario',label:'フロップ練習',make:createAuditScenarioGame},
+    {id:'tournament:bubble_call',label:'T:バブル薄コール',make:function(){return createAuditTournamentGame('bubble_call');}},
+    {id:'tournament:bb_defend',label:'T:BBディフェンス',make:function(){return createAuditTournamentGame('bb_defend');}},
+    {id:'tournament:reshove20',label:'T:20BBリショーブ',make:function(){return createAuditTournamentGame('reshove20');}},
+    {id:'tournament:openjam14',label:'T:14BBオープンJam',make:function(){return createAuditTournamentGame('openjam14');}}
+  ];
+  const summary={seed:seed,perMode:perMode,totalHands:0,suspiciousCount:0,criticalCount:0,highCount:0,mediumCount:0,byMode:{},suspiciousHands:[],generatedAt:new Date().toISOString()};
+  return withSeededRandomForAudit(seed,function(){
+    modes.forEach(function(m){
+      summary.byMode[m.id]={label:m.label,hands:0,suspicious:0,critical:0,high:0,medium:0};
+      for(let i=0;i<perMode;i++){
+        let hr=null,an=null,issues=[];
+        try{
+          const g=m.make();
+          hr=playAuditGame(g,opts.maxActions||90);
+          an=hr?analyzeHand(hr):null;
+          issues=auditIssuesForHand(hr,an,m.label);
+        }catch(e){
+          issues=[{severity:'critical',type:'exception',text:'監査中に例外が発生しました: '+(e&&e.message?e.message:String(e)),meta:null}];
+        }
+        summary.totalHands++;
+        summary.byMode[m.id].hands++;
+        if(issues.length){
+          summary.suspiciousCount++;
+          summary.byMode[m.id].suspicious++;
+          const hasC=issues.some(function(x){return x.severity==='critical';});
+          const hasH=issues.some(function(x){return x.severity==='high';});
+          const hasM=issues.some(function(x){return x.severity==='medium';});
+          if(hasC){summary.criticalCount++;summary.byMode[m.id].critical++;}
+          if(hasH){summary.highCount++;summary.byMode[m.id].high++;}
+          if(hasM){summary.mediumCount++;summary.byMode[m.id].medium++;}
+          if(summary.suspiciousHands.length<(opts.maxExamples||24))summary.suspiciousHands.push(compactAuditHand(hr,an,m.label,issues));
+        }
+      }
+    });
+    summary.ok=summary.criticalCount===0;
+    return summary;
+  });
+}
+function fishTankAuditBatchReportText(summary){
+  if(!summary)return'監査バッチ結果がありません。';
+  const lines=[
+    'Fish Tank 監査バッチ: '+summary.totalHands+' hands',
+    '違和感: '+summary.suspiciousCount+' / Critical: '+summary.criticalCount+' / High: '+summary.highCount+' / Medium: '+summary.mediumCount,
+    'Seed: '+summary.seed
+  ];
+  Object.keys(summary.byMode||{}).forEach(function(k){
+    const m=summary.byMode[k];
+    lines.push('- '+m.label+': '+m.suspicious+'/'+m.hands+'件');
+  });
+  if(summary.suspiciousHands&&summary.suspiciousHands.length){
+    lines.push('');
+    lines.push('抽出された確認候補:');
+    summary.suspiciousHands.forEach(function(h,idx){
+      lines.push((idx+1)+'. '+h.mode+' #'+h.handNum+' '+h.hero+' / '+h.board+' / '+h.score+'点 '+h.grade);
+      h.issues.slice(0,4).forEach(function(i){lines.push('   ['+i.severity+'] '+i.type+': '+i.text);});
+      if(h.issues.length>4)lines.push('   ...ほか '+(h.issues.length-4)+' 件');
+    });
+  }else{
+    lines.push('抽出候補なし。少なくとも機械監査では重大な違和感は見つかりませんでした。');
+  }
   return lines.join('\n');
 }
 
@@ -7801,6 +8027,16 @@ if(regressionBtn){
     alert(msg);
   });
 }
+const auditBatchBtn=$('btn-audit-batch');
+if(auditBatchBtn){
+  auditBatchBtn.addEventListener('click',function(){
+    const summary=runFishTankAuditBatch({perMode:3,seed:20260605,maxExamples:18,maxActions:90});
+    const msg=fishTankAuditBatchReportText(summary);
+    console.log(msg,summary);
+    if(typeof toast==='function')toast(summary.ok?'監査バッチ OK: 重大FAILなし':'監査バッチ 要確認: Critical '+summary.criticalCount,summary.ok?'win':'info',6000);
+    alert(msg);
+  });
+}
 const reanalyzeBtn=$('btn-reanalyze');
 if(reanalyzeBtn){
   reanalyzeBtn.addEventListener('click',function(){
@@ -7831,7 +8067,7 @@ document.addEventListener('click',function(e){
   }
 });
 
-window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,liveCashRangeProfile,tournamentRangeProfile};
+window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,runFishTankAuditBatch,fishTankAuditBatchReportText,auditIssuesForHand,playAuditGame,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,liveCashRangeProfile,tournamentRangeProfile};
 
 </script>
 </body>
