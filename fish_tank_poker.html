@@ -1326,6 +1326,84 @@ function preflopPremiseAudit(hr){
   const score=Math.max(0,100-issues.length*18-warnings.length*8);
   return{score,grade:score>=90?'A':score>=75?'B':score>=55?'C':'D',issues,warnings,ok:issues.length===0};
 }
+// [Codex fix 2026-06-04] 出題生成そのものを監査し、低SPR/即オールイン/テーマ不一致の練習スポットを再生成できるようにする。
+function trainingSpotQualityAudit(src,opts){
+  opts=opts||{};
+  if(!src||!src.players)return{score:0,grade:'D',ok:false,issues:[{text:'ゲーム状態を取得できません。'}],warnings:[]};
+  const isEngine=!!src.activePlayers;
+  const players=src.players||[];
+  const bb=src.bb||src.bigBlind||1;
+  const pot=src.pot||0;
+  const currentBet=src.currentBet||0;
+  const street=src.street||'';
+  const community=src.community||[];
+  const scenario=src._scenario||src.scenario||null;
+  const pfStory=src._pfStory||src.pfStory||null;
+  const tctx=src.tournamentContext&&src.tournamentContext.enabled?src.tournamentContext:null;
+  const active=players.map(function(p,i){return{p,i};}).filter(function(x){return x.p&&x.p.active!==false;});
+  const nonFolded=active.filter(function(x){return !x.p.folded;});
+  const live=nonFolded.filter(function(x){return !x.p.allIn&&(x.p.chips||0)>0;});
+  const humanIdx=players.findIndex(function(p){return p&&p.isHuman;});
+  const human=humanIdx>=0?players[humanIdx]:null;
+  const totalP=active.length||players.length||6;
+  const issues=[],warnings=[];
+  const mode=opts.mode||(tctx?'tournament':(scenario||pfStory?'scenario':'normal'));
+  const actionIdx=isEngine?src.actionIdx:null;
+  const spr=human&&pot>0?Math.round((human.chips||0)/pot*10)/10:null;
+  const minScenarioSpr=tctx?1.6:2.0;
+  if(active.length<2)issues.push({text:'アクティブプレイヤーが2人未満です。'});
+  if(!human)issues.push({text:'Heroが見つかりません。'});
+  else{
+    if(human.folded)issues.push({text:'Heroがフォールド済みで、練習対象になっていません。'});
+    if(!human.holeCards||human.holeCards.length<2)issues.push({text:'Heroのホールカードがありません。'});
+    if((human.chips||0)<=0)issues.push({text:'Heroが既にオールイン/0チップで、意思決定の余地がありません。'});
+    else if((scenario||pfStory)&&spr!=null&&spr<minScenarioSpr)issues.push({text:'SPR '+spr+' は低すぎます。フロップ練習としてベット/コール/フォールドの余地が不足します。'});
+    else if((scenario||pfStory)&&spr!=null&&spr<minScenarioSpr+0.8)warnings.push({text:'SPR '+spr+' は浅めです。ワンペアが自動コミット気味になりやすい前提です。'});
+  }
+  if(scenario||pfStory){
+    if(street!=='flop'&&street!=='turn'&&street!=='river')warnings.push({text:'ポストフロップ練習なのに現在ストリートが '+street+' です。'});
+    if(community.length<3)issues.push({text:'フロップカードが3枚ありません。'});
+    if(nonFolded.length<2)issues.push({text:'フロップ参加者が2人未満です。'});
+    if(live.length<2)issues.push({text:'相手を含めたライブプレイヤーが2人未満です。全員オールインに近く、練習になりません。'});
+    if(isEngine&&actionIdx<0)issues.push({text:'次に行動するプレイヤーが存在しません。自動ランアウト状態です。'});
+    if(currentBet>0)warnings.push({text:'生成直後に未処理ベットが残っています。'});
+    if(pfStory&&pfStory.participants){
+      if(humanIdx>=0&&!pfStory.participants.includes(humanIdx))issues.push({text:'プリフロップ前提にHeroが参加していません。'});
+      pfStory.participants.forEach(function(i){
+        const p=players[i];
+        if(!p)return;
+        if(p.folded)issues.push({text:(p.isHuman?'Hero':p.name)+' が参加者扱いなのにフォールド済みです。'});
+        if(!p.holeCards||p.holeCards.length<2)issues.push({text:(p.isHuman?'Hero':p.name)+' が参加者扱いなのにカードがありません。'});
+      });
+    }
+  }
+  if(tctx&&tctx.focusId==='bb_defend'){
+    const hPos=humanIdx>=0?posLabel(humanIdx,src.dealerIndex,totalP):'';
+    if(hPos!=='BB')issues.push({text:'BBディフェンス練習なのにHero位置がBBではありません（現在 '+hPos+'）。'});
+    if(human&&(human.chips||0)<bb*8)issues.push({text:'BBディフェンス練習としてHeroスタックが浅すぎます。push/foldになりやすい前提です。'});
+  }
+  if(tctx&&tctx.focusId==='bbante_steal'){
+    const hPos=humanIdx>=0?posLabel(humanIdx,src.dealerIndex,totalP):'';
+    if(!['CO','BTN','SB'].includes(hPos))warnings.push({text:'BBアンティスチール練習としてHero位置がややテーマ外です（現在 '+hPos+'）。'});
+  }
+  const cardCode=function(c){return c&&c.rank&&c.suit?c.rank+c.suit:String(c||'');};
+  const used=[];
+  community.forEach(function(c){if(c)used.push(cardCode(c));});
+  players.forEach(function(p){(p.holeCards||[]).forEach(function(c){if(c)used.push(cardCode(c));});});
+  const dup=used.filter(function(x,i){return used.indexOf(x)!==i;});
+  if(dup.length)issues.push({text:'カード重複があります: '+[...new Set(dup)].join(', ')});
+  const score=Math.max(0,100-issues.length*22-warnings.length*8);
+  return{mode,score,grade:score>=90?'A':score>=75?'B':score>=55?'C':'D',ok:issues.length===0,issues,warnings,spr,livePlayers:live.length,nonFolded:nonFolded.length};
+}
+function trainingSpotQualityText(q){
+  if(!q)return'';
+  const bits=['品質 '+q.grade+'('+q.score+')'];
+  if(q.spr!=null)bits.push('SPR '+q.spr);
+  if(q.issues&&q.issues.length)bits.push('要修正: '+q.issues.map(function(x){return x.text;}).join(' / '));
+  else if(q.warnings&&q.warnings.length)bits.push('注意: '+q.warnings.map(function(x){return x.text;}).join(' / '));
+  else bits.push('出題前提は成立');
+  return bits.join(' / ');
+}
 // [Codex fix 2026-05-27] テーマ別トレーニングで人間の席を寄せ、狙ったプリフロップ判断を出やすくする。
 function tournamentFocusTargetPositions(focusId){
   const map={
@@ -2356,6 +2434,7 @@ class GameEngine{
       dealerIndex:this.dealerIndex,bigBlind:this.bb,
       numActive:this.nonFolded().length+this.players.filter(p=>p.active&&p.folded).length,
       scenario:this._scenario||null,pfStory:this._pfStory||null,
+      scenarioQuality:this._scenarioQuality||null,
       tournamentContext:this.tournamentContext?{...this.tournamentContext}:null
     });
     this.street='showdown';
@@ -5572,6 +5651,69 @@ function runFishTankRegressionTests(){
     return !!(audit&&audit.issues.length>=1&&/出題前提/.test(audit.issues[0].text));
   });
 
+  add('シナリオ品質監査: 低SPRのフロップ出題を不成立にする',function(){
+    const hr=regressionHand({
+      heroHole:['As','Td'],
+      villainHole:['Kh','Kc'],
+      board:['Ts','9s','4d'],
+      heroChips:180,
+      villainChips:2000,
+      pot:1000,
+      street:'flop',
+      pfStory:{participants:[0,1],narrative:'CO open -> BTN call | ポット 1000T'}
+    });
+    const audit=trainingSpotQualityAudit(hr,{mode:'scenario'});
+    return !!(audit&&!audit.ok&&/SPR/.test(trainingSpotQualityText(audit)));
+  });
+
+  add('シナリオ品質監査: 健全なHUフロップ出題を成立扱いにする',function(){
+    const hr=regressionHand({
+      heroHole:['As','Td'],
+      villainHole:['Kh','Qh'],
+      board:['Ts','9s','4d'],
+      heroChips:4200,
+      villainChips:4200,
+      pot:1000,
+      street:'flop',
+      pfStory:{participants:[0,1],narrative:'CO open -> BTN call | ポット 1000T'}
+    });
+    const audit=trainingSpotQualityAudit(hr,{mode:'scenario'});
+    return !!(audit&&audit.ok&&audit.spr>=4&&audit.livePlayers===2);
+  });
+
+  add('フロップトレーニング生成は品質監査を通る前提を作る',function(){
+    const oldRandom=Math.random;
+    let s=24681357;
+    Math.random=function(){s=(s*48271)%2147483647;return (s-1)/2147483646;};
+    try{
+      const g=new GameEngine({sb:2,bb:5,aiLevel:'medium',startingChips:500,numPlayers:6});
+      g.startHand();
+      g.players.forEach(function(p){
+        (p.holeCards||[]).forEach(function(c){g.deck.cards.push(c);});
+        p.holeCards=[];
+        p.chips+=p.totalInvested;
+        p.totalInvested=0;p.currentBet=0;
+      });
+      g.pot=0;g.deck.shuffle();
+      const baseChips=g.players.map(function(p){return p.chips;});
+      let audit=null;
+      for(let attempt=0;attempt<8;attempt++){
+        _resetScenarioAttemptState(g,baseChips);
+        const sc=_genScenarioFlop(g.deck.cards,_pickScenarioCat());
+        g._scenario=sc;
+        _buildAndApplyPreflopStory(g);
+        g.street='flop';g.community=sc.flopCards;
+        g.currentBet=0;g.players.forEach(function(p){p.currentBet=0;});
+        g._setOrder();
+        audit=trainingSpotQualityAudit(g,{mode:'scenario'});
+        if(audit.ok)break;
+      }
+      return !!(audit&&audit.ok&&g._pfStory&&g._pfStory.participants&&g._pfStory.participants.length>=2&&g.actionIdx>=0);
+    }finally{
+      Math.random=oldRandom;
+    }
+  });
+
   add('ペアボードのAハイフラッシュを全体ナッツ扱いしない',function(){
     const role=handRole(regressionCards(['Ad','8d']),regressionCards(['4d','Qd','6c','9h','6d']),HandEval.evaluate(regressionCards(['Ad','8d','4d','Qd','6c','9h','6d'])));
     return !!(role&&role.isNut===false&&role.isVuln===true&&role.nutFlush===true&&role.riskFlags&&role.riskFlags.strongerFullHouseQuads===true);
@@ -6040,6 +6182,13 @@ function showAnalysis(hr,fromHistory){
     }
     html+='</div></div>';
   }
+  if(hr.scenarioQuality){
+    const sq=hr.scenarioQuality;
+    html+='<div style="margin-top:9px;border-top:1px solid var(--border);padding-top:8px;text-align:left">';
+    html+='<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px"><span style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:.08em">SCENARIO QUALITY</span><span style="font-size:13px;font-weight:900;color:'+(sq.ok?'var(--green)':'var(--orange)')+'">'+sq.grade+'</span></div>';
+    html+='<div style="font-size:10px;color:var(--dim);line-height:1.45">'+trainingSpotQualityText(sq)+'</div>';
+    html+='</div>';
+  }
   if(an.premiseAudit&&(an.premiseAudit.issues.length||an.premiseAudit.warnings.length)){
     const pa=an.premiseAudit;
     html+='<div style="margin-top:9px;border-top:1px solid var(--border);padding-top:8px;text-align:left">';
@@ -6224,6 +6373,7 @@ function buildHandHistoryText(includeContext){
   }
   // [Claude fix 2026-05-23] シナリオモードのプリフロップストーリーを出力
   if(hr.pfStory&&hr.pfStory.narrative)txt+='プリフロップ: '+hr.pfStory.narrative+'\n';
+  if(hr.scenarioQuality)txt+='シナリオ品質: '+trainingSpotQualityText(hr.scenarioQuality)+'\n';
   if(an.premiseAudit&&(an.premiseAudit.issues.length||an.premiseAudit.warnings.length)){
     txt+='ソフト前提監査: '+an.premiseAudit.grade+' / '+an.premiseAudit.score+'pt\n';
     an.premiseAudit.issues.concat(an.premiseAudit.warnings).forEach(function(x){txt+='  - '+x.text+'\n';});
@@ -6446,6 +6596,7 @@ function evaluationSnapshot(hr,an){
     poScore:an.poScore,
     sawFlop:an.sawFlop,
     premiseAudit:an.premiseAudit||null,
+    scenarioQuality:hr.scenarioQuality||null,
     tournamentContext:hr.tournamentContext||null,
     evaluations:an.evals.map(function(e){
       return{
@@ -7222,6 +7373,27 @@ function renderScenarioBanner(){
   el.style.display='block'; // [Claude fix 2026-05-23] ''だとCSSのdisplay:noneにフォールバックするため'block'を明示
   el.textContent=game._pfStory.narrative;
 }
+function _resetScenarioAttemptState(game,baseChips){
+  game.deck.reset();game.deck.shuffle();
+  game.players.forEach(function(p,i){
+    p.holeCards=[];
+    p.folded=false;
+    p.allIn=false;
+    p.currentBet=0;
+    p.totalInvested=0;
+    p.chips=baseChips[i];
+  });
+  game.community=[];
+  game.pot=0;
+  game.currentBet=0;
+  game.minRaise=game.bb;
+  game.actorsRemaining=[];
+  game.actionIdx=-1;
+  game.currentHandDecisions=[];
+  game._scenario=null;
+  game._pfStory=null;
+  game._scenarioQuality=null;
+}
 function startScenarioHand(){
   if(aiTimeout)clearTimeout(aiTimeout);
   game.waitingForHuman=false;game._lastWinners=[];game._handEnded=false;
@@ -7237,16 +7409,27 @@ function startScenarioHand(){
     p.totalInvested=0;p.currentBet=0;
   });
   game.pot=0;game.deck.shuffle();
-  // 3. シナリオフロップ生成（予約カードをデッキから除外）
-  const cat=_pickScenarioCat();
-  const scenario=_genScenarioFlop(game.deck.cards,cat);
-  game._scenario=scenario;
-  // 4. プリフロップストーリー構築 + ハンド配布 + ポット設定
-  _buildAndApplyPreflopStory(game);
-  // 5. フロップへジャンプ
-  game.street='flop';game.community=scenario.flopCards;
-  game.currentBet=0;game.players.forEach(p=>p.currentBet=0);
-  game._setOrder();
+  const baseChips=game.players.map(function(p){return p.chips;});
+  let scenario=null,quality=null;
+  for(let attempt=0;attempt<8;attempt++){
+    _resetScenarioAttemptState(game,baseChips);
+    // 3. シナリオフロップ生成（予約カードをデッキから除外）
+    const cat=_pickScenarioCat();
+    scenario=_genScenarioFlop(game.deck.cards,cat);
+    game._scenario=scenario;
+    // 4. プリフロップストーリー構築 + ハンド配布 + ポット設定
+    _buildAndApplyPreflopStory(game);
+    // 5. フロップへジャンプ
+    game.street='flop';game.community=scenario.flopCards;
+    game.currentBet=0;game.players.forEach(p=>p.currentBet=0);
+    game._setOrder();
+    quality=trainingSpotQualityAudit(game,{mode:'scenario'});
+    if(quality.ok)break;
+  }
+  game._scenarioQuality=quality;
+  if(quality&&!quality.ok&&typeof console!=='undefined'){
+    console.warn('Scenario quality fallback:',trainingSpotQualityText(quality));
+  }
   // 6. リバイ通知
   game.players.forEach(function(p){
     if(p._rebought){
@@ -7429,7 +7612,7 @@ document.addEventListener('click',function(e){
   }
 });
 
-window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,liveCashRangeProfile,tournamentRangeProfile};
+window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,liveCashRangeProfile,tournamentRangeProfile};
 
 </script>
 </body>
