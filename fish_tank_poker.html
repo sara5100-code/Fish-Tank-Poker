@@ -677,6 +677,81 @@ function tournamentFinalTableCollisionProfile(ctx,d,stackRole,stackBB){
   }
   return{opponent,oppBB:oppBB!=null?Math.round(oppBB*10)/10:null,callMultiplier,attackMultiplier,foldMultiplier,postflopCallMultiplier,policy,risk,facing};
 }
+// [Codex fix 2026-06-05] FT専用の簡易レンジ表。立場・衝突相手・有効BBでpush/foldと受けの許容幅を変える。
+function tournamentFinalTableRangeProfile(ctx,d,holeCards,stackBB,pos,stackRole,collision){
+  if(!ctx||!ctx.enabled||ctx.phase!=='FT'||!d||d.street!=='preflop'||!holeCards||holeCards.length<2)return null;
+  const ht=handType(holeCards[0],holeCards[1]);
+  const handFrac=HAND_COMBO_FRAC[ht]||0.99;
+  const shape=simpleHandShape(holeCards[0],holeCards[1]);
+  const bb=stackBB||ctx.stackBB||20;
+  const role=(stackRole&&stackRole.role)||'ミドル';
+  const opponent=(collision&&collision.opponent)||'不明';
+  const facing=!!(d.facingRaise&&(d.toCall||0)>0);
+  const raiseLike=d.action==='raise'||d.action==='allin';
+  const late=['CO','BTN','SB'].includes(pos||d.position||'');
+  const ep=['UTG','UTG+1'].includes(pos||d.position||'');
+  const callCommitRatio=d.playerChipsBefore?((d.amount||d.toCall||0)/Math.max(1,d.playerChipsBefore)):0;
+  const callOff=facing&&d.action==='call'&&(callCommitRatio>=0.45||d.facingAllIn);
+  let lane='open',cap=late?0.34:ep?0.14:0.22,label='Open',baseline='FT標準オープン';
+  if(role==='チップリーダー'){cap+=late?0.14:0.06;}
+  else if(role==='セカンド'){cap+=late?0.04:0.00;}
+  else if(role==='ミドル'){cap-=ep?0.03:0.00;}
+  else if(role==='ショート'){cap+=late?0.08:0.03;}
+  else if(role==='最短ショート'){cap+=late?0.16:0.08;}
+  if(bb<=10)cap+=late?0.08:0.04;
+  else if(bb>=30&&role!=='チップリーダー')cap-=0.02;
+  if(!facing&&d.action==='allin'){
+    lane='openJam';label='Open jam';baseline='FT push/fold先入れ';
+    cap=late?0.34:ep?0.10:0.20;
+    if(role==='チップリーダー')cap+=0.08;
+    else if(role==='最短ショート')cap+=0.18;
+    else if(role==='ショート')cap+=0.12;
+    else if(role==='ミドル')cap-=0.02;
+    if(bb<=8)cap+=0.14;
+    else if(bb<=12)cap+=0.08;
+    else if(bb>18)cap-=0.10;
+  }else if(facing&&raiseLike){
+    lane='reshove';label='Reshove / 3bet jam';baseline='FT押し返し';
+    cap=late?0.18:0.11;
+    if(role==='チップリーダー'&&opponent!=='上位カバー')cap+=0.04;
+    if(opponent==='上位カバー'||opponent==='同格')cap-=0.03;
+    if(shape.wheelAxs)cap+=0.035;
+    if(shape.suitedBroadway)cap+=0.025;
+    if(shape.pair&&shape.lo>=7)cap+=0.035;
+  }else if(facing&&d.action==='call'){
+    lane=callOff?'callOff':(pos==='BB'?'bbDefend':'flat');
+    label=callOff?'All-in call':pos==='BB'?'BB defend':'Flat';
+    baseline=callOff?'FTオールイン受け':'FTコールレンジ';
+    cap=callOff?0.11:(pos==='BB'?0.38:0.08);
+    if(callOff&&opponent==='上位カバー')cap-=role==='セカンド'?0.080:0.040;
+    if(callOff&&opponent==='同格')cap-=0.025;
+    if(callOff&&(opponent==='ショート'||opponent==='下位スタック')&&role==='チップリーダー')cap+=0.12;
+    if(callOff&&(role==='ショート'||role==='最短ショート'))cap+=0.035;
+    if(!callOff&&pos!=='BB'&&role==='ミドル')cap-=0.025;
+    if(shape.suitedBroadway)cap+=callOff?0.015:0.025;
+    if(shape.wheelAxs&&!callOff)cap+=0.025;
+    if(shape.pair)cap+=callOff?(shape.lo>=9?0.04:0.00):0.035;
+  }
+  cap=Math.max(0.025,Math.min(0.72,cap));
+  const margin=cap-handFrac;
+  let verdict='レンジ内',severity='good';
+  if(margin<0&&handFrac<=cap+0.045){verdict='境界';severity='border';}
+  else if(margin<0){verdict='レンジ外';severity='bad';}
+  if(lane==='callOff'&&(opponent==='上位カバー'||opponent==='同格')&&margin<-0.025){verdict='レンジ外';severity='bad';}
+  const mix=severity==='good'
+    ?(lane==='callOff'?'Fold 0-20% / Call 65-90% / Jamなし':lane==='openJam'?'Fold 0-20% / Open jam 60-90% / 小レイズ 0-20%':'Fold 0-20% / 実行 70-95%')
+    :severity==='border'
+      ?(lane==='callOff'?'Fold 45-70% / Call 25-50% / Jamなし':'Fold 35-65% / 実行 25-55%')
+      :(lane==='callOff'?'Fold 80-98% / Call 2-20% / Jamなし':'Fold 75-95% / 実行 5-25%');
+  const risk=lane==='callOff'
+    ?(opponent==='上位カバー'||opponent==='同格'?'受け側はレンジを強く絞る。負けると順位落ちが大きい':'ショート相手でも受けは相手レンジを確認する')
+    :lane==='openJam'||lane==='reshove'?'フォールドエクイティが残る先入れ/押し返しを優先':'FTでは下限オープンと非BBフラットを混同しない';
+  return{handType:ht,handPercent:Math.round(handFrac*100),stackBB:bb,position:pos,lane,label,baseline,capPercent:Math.round(cap*100),marginPercent:Math.round(margin*100),verdict,severity,role,opponent,mix,risk};
+}
+function tournamentFinalTableRangeProfileText(p){
+  if(!p)return'';
+  return p.handType+' 上位'+p.handPercent+'%: '+p.label+'目安 上位'+p.capPercent+'% -> '+p.verdict+' / '+p.role+' vs '+p.opponent+' / '+p.risk;
+}
 function tournamentFinalTableProfile(ctx,d,stackBB,pos,holeCards){
   if(!ctx||!ctx.enabled||ctx.phase!=='FT'||!d)return null;
   const ht=holeCards&&holeCards.length>=2?handType(holeCards[0],holeCards[1]):'';
@@ -687,11 +762,12 @@ function tournamentFinalTableProfile(ctx,d,stackBB,pos,holeCards){
   const covering=d.coverState==='covering'||d.coverState==='mixed_covering';
   const late=['CO','BTN','SB'].includes(pos||d.position||'');
   const callCommitRatio=d.playerChipsBefore?((d.amount||d.toCall||0)/Math.max(1,d.playerChipsBefore)):0;
-  const callOff=facing&&d.action==='call'&&callCommitRatio>=0.45;
+  const callOff=facing&&d.action==='call'&&(callCommitRatio>=0.45||d.facingAllIn);
   const rank=d.stackRank||null;
   const shorter=d.shorterStackCount||0;
   const stackRole=tournamentFinalTableStackRole(ctx,d,stackBB);
   const collision=tournamentFinalTableCollisionProfile(ctx,d,stackRole,stackBB);
+  const ftRange=tournamentFinalTableRangeProfile(ctx,d,holeCards,stackBB,pos,stackRole,collision);
   const payPressure=(ctx.playersLeft||ctx.players||6)<=Math.max((ctx.seatsPaid||3)+3,6)?'高':'中';
   let lane='postflop',severity='normal',verdict='通常',policy='FTはchipEVだけでなく、ペイジャンプと自分のスタック順位を見て衝突相手を選びます。';
   let risk='ペイジャンプをまたぐ局面では、カバーされる薄い受けが一番高くつきます。';
@@ -738,7 +814,7 @@ function tournamentFinalTableProfile(ctx,d,stackBB,pos,holeCards){
   return{
     phase:'FT',lane,severity,verdict,policy,risk,multiplier,
     payPressure,stackRank:rank,shorterStackCount:shorter,coverState:d.coverState||'neutral',
-    stackRole:stackRole?stackRole.role:null,stackRoleProfile:stackRole,collisionProfile:collision,
+    stackRole:stackRole?stackRole.role:null,stackRoleProfile:stackRole,collisionProfile:collision,rangeProfile:ftRange,
     deepAxes:[
       '立場='+(stackRole?stackRole.role:'不明'),
       '衝突相手='+(collision?collision.opponent:'不明'),
@@ -2779,6 +2855,7 @@ class GameEngine{
         dec.villainName=lastAgg.playerName;
         dec.villainPosition=lastAgg.position;
         dec.villainChipsBefore=lastAgg.playerChipsBefore;
+        dec.facingAllIn=lastAgg.action==='allin';
       }
     }
     if(cover){
@@ -4615,6 +4692,7 @@ function analyzeHand(hr){
     const br=ev.bubbleIcmRange||null;
     const mp=ev.middleProfile||null;
     const fp=ev.finalTableProfile||null;
+    const frp=ev.finalTableRangeProfile||(fp&&fp.rangeProfile)||null;
     const hp=ev.headsUpProfile||null;
     const late=['CO','BTN','SB'].includes(ev.position);
     const raiseLike=ev.action==='raise'||ev.action==='allin';
@@ -4718,17 +4796,27 @@ function analyzeHand(hr){
       }
     }else if(phase==='FT'){
       if(facing&&ev.action==='call'){
-        next=Math.round(next*(fp?fp.multiplier:(covered?1.28:1.16)));
+        let mult=fp?fp.multiplier:(covered?1.28:1.16);
+        if(frp&&frp.severity==='bad')mult*=frp.lane==='callOff'?1.18:1.10;
+        else if(frp&&frp.severity==='good'&&(frp.opponent==='ショート'||frp.opponent==='下位スタック'))mult*=0.92;
+        next=Math.round(next*mult);
         notes.push(fp?'FT「'+fp.verdict+'」。'+fp.policy+' '+fp.risk:'FTはペイジャンプが大きく、カバーされるコールの失敗を重めに採点');
+        if(frp)notes.push('FTレンジ表「'+frp.verdict+'」。'+tournamentFinalTableRangeProfileText(frp));
       }else if(facing&&ev.action==='fold'){
         next=Math.round(next*(fp?fp.multiplier:0.82));
         notes.push(fp?'FT「'+fp.verdict+'」。'+fp.policy:'FTではペイジャンプを守るフォールドの価値を加味し、減点を軽く補正');
+        if(frp&&frp.severity==='good')notes.push('FTレンジ表では継続候補だが、受け側のフォールドは相手依存で許容幅あり。'+tournamentFinalTableRangeProfileText(frp));
       }else if(late&&ev.street==='preflop'&&ev.action==='fold'&&!facing){
         next=Math.round(next*(fp?fp.multiplier:1.10));
         notes.push(fp?'FT「'+fp.verdict+'」。'+fp.risk:'FTでも後ろ寄りのアンティ回収機会を逃しすぎるとチップ不足になりやすい');
+        if(frp&&frp.severity==='good')notes.push('FTレンジ表では先入れ候補。'+tournamentFinalTableRangeProfileText(frp));
       }else if(raiseLike&&!facing&&fp){
-        next=Math.round(next*fp.multiplier);
+        let mult=fp.multiplier;
+        if(frp&&frp.severity==='bad')mult*=1.08;
+        else if(frp&&frp.severity==='good')mult*=0.96;
+        next=Math.round(next*mult);
         notes.push('FT「'+fp.verdict+'」。'+fp.policy);
+        if(frp)notes.push('FTレンジ表「'+frp.verdict+'」。'+tournamentFinalTableRangeProfileText(frp));
       }
     }else if(phase==='HU'){
       if(ev.action==='fold'){
@@ -4755,6 +4843,35 @@ function analyzeHand(hr){
       if(ev.phaseWeightNote){
         ev.comment=(ev.comment||'')+' 【フェーズ補正】'+ev.phaseWeightNote+'。';
       }
+    }
+    return next-before;
+  }
+  // [Codex fix 2026-06-05] FTレンジ表が明確にレンジ外なら、基礎評価が甘くても最低減点と説明を作る。
+  function applyFinalTableRangeWeight(ev){
+    const frp=ev.finalTableRangeProfile||null;
+    if(!frp||ev.tournamentPhase!=='FT'||ev.street!=='preflop')return 0;
+    const before=ev.deduction||0;
+    let next=before;
+    const notes=[];
+    if(frp.severity==='bad'&&ev.action!=='fold'){
+      next=Math.max(next,frp.lane==='callOff'?18:10);
+      ev.quality='bad';
+      notes.push('FTレンジ表「'+frp.verdict+'」。'+tournamentFinalTableRangeProfileText(frp));
+      if(!ev.suggest)ev.suggest=frp.lane==='callOff'?'推奨: フォールド。CL級/同格への受けはかなりタイトにする':'推奨: フォールド寄り。先入れか押し返しの形を選ぶ';
+    }else if(frp.severity==='border'&&ev.action!=='fold'){
+      next=Math.max(next,6);
+      if(ev.quality==='good')ev.quality='ok';
+      notes.push('FTレンジ表「境界」。'+tournamentFinalTableRangeProfileText(frp));
+    }else if(frp.severity==='good'&&ev.action==='fold'&&frp.lane!=='callOff'){
+      next=Math.max(next,8);
+      if(ev.quality==='good')ev.quality='ok';
+      notes.push('FTレンジ表では先入れ候補。'+tournamentFinalTableRangeProfileText(frp));
+    }
+    if(frp.mix)ev.strategyMix=frp.mix;
+    if(next!==before){
+      ev.deduction=next;
+      ev.phaseWeightNote=(ev.phaseWeightNote?ev.phaseWeightNote+'。':'')+notes.join('。');
+      ev.comment=(ev.comment||'')+' 【FTレンジ補正】'+notes.join('。')+'。';
     }
     return next-before;
   }
@@ -5292,6 +5409,8 @@ function analyzeHand(hr){
       ev.earlyProfile=tournamentEarlyProfile(hr.tournamentContext,d,human.holeCards,tn.stackBB,tpos,(hr.tournamentContext&&hr.tournamentContext.players)||hr.players.length||6,preCtxEarly);
       ev.middleProfile=tournamentMiddleProfile(hr.tournamentContext,d,tn.stackBB,tpos,human.holeCards);
       ev.finalTableProfile=tournamentFinalTableProfile(hr.tournamentContext,d,tn.stackBB,tpos,human.holeCards);
+      ev.finalTableRangeProfile=ev.finalTableProfile&&ev.finalTableProfile.rangeProfile?ev.finalTableProfile.rangeProfile:null;
+      if(ev.finalTableRangeProfile&&ev.finalTableRangeProfile.mix)ev.strategyMix=ev.finalTableRangeProfile.mix;
       ev.headsUpProfile=tournamentHeadsUpProfile(hr.tournamentContext,d,tn.stackBB,tpos,human.holeCards);
       const tsAdj=tournamentShortStackPreflopAdjust(hr.tournamentContext,d,tpos,thRank,thFrac,handCat(tc1,tc2),tc1.suit===tc2.suit,tc1.rank===tc2.rank);
       if(tsAdj&&!facingFourBetCtx(d)){
@@ -5352,6 +5471,7 @@ function analyzeHand(hr){
       ev.earlyProfile=tournamentEarlyProfile(hr.tournamentContext,d,human.holeCards,tStackBB,d.position||'MP',(hr.tournamentContext&&hr.tournamentContext.players)||hr.players.length||6,{limpers:limpCount});
       ev.middleProfile=tournamentMiddleProfile(hr.tournamentContext,d,tStackBB,d.position||'MP',human.holeCards);
       ev.finalTableProfile=tournamentFinalTableProfile(hr.tournamentContext,d,tStackBB,d.position||'MP',human.holeCards);
+      ev.finalTableRangeProfile=ev.finalTableProfile&&ev.finalTableProfile.rangeProfile?ev.finalTableProfile.rangeProfile:null;
       ev.headsUpProfile=tournamentHeadsUpProfile(hr.tournamentContext,d,tStackBB,d.position||'MP',human.holeCards);
       const mwCommLen={flop:3,turn:4,river:5}[d.street]||0;
       const mwComm=hr.community.slice(0,mwCommLen);
@@ -5363,6 +5483,7 @@ function analyzeHand(hr){
     const scoredBefore=scoredDeduction(ev);
     assignDecisionAxis(ev);
     applyDecisionAxisWeight(ev);
+    applyFinalTableRangeWeight(ev);
     applyTournamentPhaseWeight(ev);
     applyOnePairProfileWeight(ev);
     const scoredAfter=scoredDeduction(ev);
@@ -6128,7 +6249,7 @@ function runFishTankRegressionTests(){
       tournamentContext:ctx,
       decisions:[
         regressionDecision({street:'preflop',action:'allin',amount:11200,pot:4000,toCall:1600,facingRaise:false,position:'CO',playerName:'short',isHuman:false,playerIdx:1,playerChipsBefore:11200,pfRaiseCountBefore:0,pfFacingBetLevel:0,pfActionBetLevel:2}),
-        regressionDecision({street:'preflop',action:'call',amount:11200,pot:15200,toCall:11200,potOdds:11200/26400,facingRaise:true,position:'BTN',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:57600,pfRaiseCountBefore:1,pfFacingBetLevel:2,pfActionBetLevel:2,coverState:'covering',coverLabel:'カバーしている',coverPressure:'攻め可',stackRank:1,shorterStackCount:5,coverCount:5,coveredByCount:0,villainChipsBefore:11200})
+        regressionDecision({street:'preflop',action:'call',amount:11200,pot:15200,toCall:11200,potOdds:11200/26400,facingRaise:true,facingAllIn:true,position:'BTN',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:57600,pfRaiseCountBefore:1,pfFacingBetLevel:2,pfActionBetLevel:2,coverState:'covering',coverLabel:'カバーしている',coverPressure:'攻め可',stackRank:1,shorterStackCount:5,coverCount:5,coveredByCount:0,villainChipsBefore:11200})
       ]
     });
     const ev=humanEval(analyzeHand(hr),e=>e.action==='call');
@@ -6148,6 +6269,50 @@ function runFishTankRegressionTests(){
     });
     const ev=humanEval(analyzeHand(hr),e=>e.action==='call');
     return !!(ev&&ev.finalTableProfile&&ev.finalTableProfile.stackRole==='セカンド'&&ev.finalTableProfile.collisionProfile&&ev.finalTableProfile.collisionProfile.opponent==='上位カバー'&&/セカンドがCL級/.test(ev.finalTableProfile.risk));
+  });
+
+  add('FTレンジ表: セカンドがCL級を受けるQJsはレンジ外にする',function(){
+    const ctx={enabled:true,phase:'FT',stackBB:30,players:6,playersLeft:6,seatsPaid:3,sb:800,bb:1600,bbAnte:1600,bbAnteBB:1,focusId:'ft_payjump',focusLabel:'FTペイジャンプ'};
+    const hr=regressionHand({
+      heroHole:['Qs','Js'],
+      bigBlind:1600,
+      tournamentContext:ctx,
+      decisions:[
+        regressionDecision({street:'preflop',action:'allin',amount:88000,pot:4000,toCall:1600,facingRaise:false,position:'SB',playerName:'CL',isHuman:false,playerIdx:1,playerChipsBefore:88000,pfRaiseCountBefore:0,pfFacingBetLevel:0,pfActionBetLevel:2}),
+        regressionDecision({street:'preflop',action:'call',amount:48000,pot:92000,toCall:48000,potOdds:48000/140000,facingRaise:true,position:'BB',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:48000,pfRaiseCountBefore:1,pfFacingBetLevel:2,pfActionBetLevel:2,coverState:'covered',coverLabel:'カバーされている',coverPressure:'高',stackRank:2,shorterStackCount:4,coverCount:4,coveredByCount:1,villainChipsBefore:88000})
+      ]
+    });
+    const ev=humanEval(analyzeHand(hr),e=>e.action==='call');
+    return !!(ev&&ev.finalTableRangeProfile&&ev.finalTableRangeProfile.lane==='callOff'&&ev.finalTableRangeProfile.severity==='bad'&&/Fold 80-98%/.test(ev.strategyMix||'')&&/FTレンジ表/.test(ev.phaseWeightNote||''));
+  });
+
+  add('FTレンジ表: CLがショートを受けるAToはCL級受けと分ける',function(){
+    const ctx={enabled:true,phase:'FT',stackBB:36,players:6,playersLeft:6,seatsPaid:3,sb:800,bb:1600,bbAnte:1600,bbAnteBB:1,focusId:'ft_payjump',focusLabel:'FTペイジャンプ'};
+    const hr=regressionHand({
+      heroHole:['Ad','Ts'],
+      bigBlind:1600,
+      tournamentContext:ctx,
+      decisions:[
+        regressionDecision({street:'preflop',action:'allin',amount:11200,pot:4000,toCall:1600,facingRaise:false,position:'CO',playerName:'short',isHuman:false,playerIdx:1,playerChipsBefore:11200,pfRaiseCountBefore:0,pfFacingBetLevel:0,pfActionBetLevel:2}),
+        regressionDecision({street:'preflop',action:'call',amount:11200,pot:15200,toCall:11200,potOdds:11200/26400,facingRaise:true,facingAllIn:true,position:'BTN',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:57600,pfRaiseCountBefore:1,pfFacingBetLevel:2,pfActionBetLevel:2,coverState:'covering',coverLabel:'カバーしている',coverPressure:'攻め可',stackRank:1,shorterStackCount:5,coverCount:5,coveredByCount:0,villainChipsBefore:11200})
+      ]
+    });
+    const ev=humanEval(analyzeHand(hr),e=>e.action==='call');
+    return !!(ev&&ev.finalTableRangeProfile&&ev.finalTableRangeProfile.severity==='good'&&ev.finalTableRangeProfile.opponent==='ショート'&&/Call 65-90%/.test(ev.strategyMix||''));
+  });
+
+  add('FTレンジ表: 最短ショートのBTN先入れ候補を降りすぎとして示す',function(){
+    const ctx={enabled:true,phase:'FT',stackBB:7,players:6,playersLeft:6,seatsPaid:3,sb:800,bb:1600,bbAnte:1600,bbAnteBB:1,focusId:'ft_payjump',focusLabel:'FTペイジャンプ'};
+    const hr=regressionHand({
+      heroHole:['Kc','9c'],
+      bigBlind:1600,
+      tournamentContext:ctx,
+      decisions:[
+        regressionDecision({street:'preflop',action:'fold',amount:0,pot:4000,toCall:1600,facingRaise:false,position:'BTN',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:11200,pfRaiseCountBefore:0,pfFacingBetLevel:0,pfActionBetLevel:0,coverState:'covered',coverLabel:'カバーされている',coverPressure:'高',stackRank:6,shorterStackCount:0,coverCount:0,coveredByCount:5,shortestOppStackBB:10})
+      ]
+    });
+    const ev=humanEval(analyzeHand(hr),e=>e.action==='fold');
+    return !!(ev&&ev.finalTableRangeProfile&&ev.finalTableRangeProfile.severity==='good'&&ev.finalTableRangeProfile.lane==='open'&&/FTレンジ表では先入れ候補/.test(ev.phaseWeightNote||''));
   });
 
   add('HUのBB防衛コールは専用プロファイルで広く許容する',function(){
@@ -7256,6 +7421,7 @@ function showAnalysis(hr,fromHistory){
       if(ev.finalTableProfile)m+=metaChip('FT評価',tournamentFinalTableProfileText(ev.finalTableProfile),ev.finalTableProfile.severity==='bad'?'var(--red)':ev.finalTableProfile.severity==='good'?'var(--green)':'var(--gold)');
       if(ev.finalTableProfile&&ev.finalTableProfile.stackRole)m+=metaChip('FT立場',ev.finalTableProfile.stackRole,'var(--gold)');
       if(ev.finalTableProfile&&ev.finalTableProfile.collisionProfile)m+=metaChip('FT衝突相手',ev.finalTableProfile.collisionProfile.opponent+(ev.finalTableProfile.collisionProfile.oppBB?' '+ev.finalTableProfile.collisionProfile.oppBB+'BB':''),'var(--gold)');
+      if(ev.finalTableRangeProfile)m+=metaChip('FTレンジ表',ev.finalTableRangeProfile.verdict+' / '+ev.finalTableRangeProfile.label,ev.finalTableRangeProfile.severity==='bad'?'var(--red)':ev.finalTableRangeProfile.severity==='border'?'var(--gold)':'var(--green)');
       if(ev.finalTableProfile&&ev.finalTableProfile.deepAxes)m+=metaChip('FT5軸',ev.finalTableProfile.deepAxes.join(' / '),'var(--gold)');
       if(ev.headsUpProfile)m+=metaChip('HU評価',tournamentHeadsUpProfileText(ev.headsUpProfile),ev.headsUpProfile.severity==='bad'?'var(--red)':ev.headsUpProfile.severity==='good'?'var(--green)':'var(--gold)');
       if(ev.headsUpProfile&&ev.headsUpProfile.deepAxes)m+=metaChip('HU5軸',ev.headsUpProfile.deepAxes.join(' / '),'var(--gold)');
@@ -7424,6 +7590,7 @@ function buildHandHistoryText(includeContext){
       if(ev.finalTableProfile)meta.push('FT評価='+tournamentFinalTableProfileText(ev.finalTableProfile));
       if(ev.finalTableProfile&&ev.finalTableProfile.stackRole)meta.push('FT立場='+ev.finalTableProfile.stackRole);
       if(ev.finalTableProfile&&ev.finalTableProfile.collisionProfile)meta.push('FT衝突相手='+ev.finalTableProfile.collisionProfile.opponent+(ev.finalTableProfile.collisionProfile.oppBB?' '+ev.finalTableProfile.collisionProfile.oppBB+'BB':''));
+      if(ev.finalTableRangeProfile)meta.push('FTレンジ表='+tournamentFinalTableRangeProfileText(ev.finalTableRangeProfile));
       if(ev.headsUpProfile)meta.push('HU評価='+tournamentHeadsUpProfileText(ev.headsUpProfile));
       if(ev.toCall>0)meta.push('必要コール='+ev.toCall);
       if(ev.potOdds>0)meta.push('必要EQ='+Math.round(ev.potOdds*100)+'%');
@@ -7609,6 +7776,7 @@ function evaluationSnapshot(hr,an){
         earlyDeepSprProfile:e.earlyDeepSprProfile||null,
         middleProfile:e.middleProfile||null,
         finalTableProfile:e.finalTableProfile||null,
+        finalTableRangeProfile:e.finalTableRangeProfile||null,
         headsUpProfile:e.headsUpProfile||null,
         stackRank:e.stackRank||null,
         shortestOppStackBB:e.shortestOppStackBB,
@@ -8618,7 +8786,7 @@ document.addEventListener('click',function(e){
   }
 });
 
-window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,runFishTankAuditBatch,fishTankAuditBatchReportText,buildFishTankAuditRepairQueue,fishTankAuditRepairPlanText,auditIssuesForHand,playAuditGame,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,liveCashRangeProfile,tournamentRangeProfile,tournamentFinalTableProfile,tournamentFinalTableStackRole,tournamentFinalTableCollisionProfile,tournamentHeadsUpProfile};
+window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,runFishTankAuditBatch,fishTankAuditBatchReportText,buildFishTankAuditRepairQueue,fishTankAuditRepairPlanText,auditIssuesForHand,playAuditGame,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,liveCashRangeProfile,tournamentRangeProfile,tournamentFinalTableProfile,tournamentFinalTableStackRole,tournamentFinalTableCollisionProfile,tournamentFinalTableRangeProfile,tournamentFinalTableRangeProfileText,tournamentHeadsUpProfile};
 
 </script>
 </body>
