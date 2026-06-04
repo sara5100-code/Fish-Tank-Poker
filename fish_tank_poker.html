@@ -1404,6 +1404,152 @@ function trainingSpotQualityText(q){
   else bits.push('出題前提は成立');
   return bits.join(' / ');
 }
+var _actualHandAuditRunning=false;
+// [Codex fix 2026-06-04] 評価が相手の実ホールカードではなく公開情報/レンジに基づくかを機械的に監査する。
+function actualHandVisibility(hr){
+  const reachedShowdown=!!(hr&&hr.community&&hr.community.length>=5&&hr.winners&&hr.winners.length>0&&!hr.winners.some(function(w){return w.byFold;}));
+  const hidden=[];
+  const publicShown=[];
+  if(!hr||!hr.players)return{reachedShowdown:false,hiddenCardCount:0,publicCardCount:0,hiddenCodes:[],publicCodes:[]};
+  hr.players.forEach(function(p){
+    if(!p||p.isHuman||!p.holeCards||p.holeCards.length<2)return;
+    const codes=p.holeCards.map(function(c){return c.rank+c.suit;});
+    if(reachedShowdown&&!p.folded)publicShown.push.apply(publicShown,codes);
+    else hidden.push.apply(hidden,codes);
+  });
+  return{reachedShowdown,hiddenCardCount:hidden.length,publicCardCount:publicShown.length,hiddenCodes:hidden,publicCodes:publicShown};
+}
+function cloneCardForAudit(c){return c&&c.rank&&c.suit?new Card(c.rank,c.suit):c;}
+function cloneHandForActualAudit(hr){
+  return{
+    handNum:hr.handNum,
+    winners:hr.winners||[],
+    community:(hr.community||[]).map(cloneCardForAudit),
+    players:(hr.players||[]).map(function(p){
+      return Object.assign({},p,{
+        holeCards:(p.holeCards||[]).map(cloneCardForAudit),
+        handResult:p.handResult||null
+      });
+    }),
+    decisions:(hr.decisions||[]).map(function(d){return Object.assign({},d);}),
+    pot:hr.pot,
+    street:hr.street,
+    dealerIndex:hr.dealerIndex,
+    bigBlind:hr.bigBlind,
+    numActive:hr.numActive,
+    scenario:hr.scenario||null,
+    pfStory:hr.pfStory||null,
+    scenarioQuality:hr.scenarioQuality||null,
+    tournamentContext:hr.tournamentContext?Object.assign({},hr.tournamentContext):null
+  };
+}
+function replaceHiddenOpponentCardsForAudit(hr,variant){
+  const out=cloneHandForActualAudit(hr);
+  const used=new Set();
+  (out.community||[]).forEach(function(c){used.add(c.rank+c.suit);});
+  out.players.forEach(function(p){if(p.isHuman)(p.holeCards||[]).forEach(function(c){used.add(c.rank+c.suit);});});
+  const ranks=variant==='premium'?['A','K','Q','J','T','9','8','7','6','5','4','3','2']:['2','3','4','5','6','7','8','9','T','J','Q','K','A'];
+  const suits=variant==='premium'?['s','h','d','c']:['c','d','h','s'];
+  const pool=[];
+  ranks.forEach(function(r){suits.forEach(function(s){const code=r+s;if(!used.has(code))pool.push(new Card(r,s));});});
+  let ptr=0;
+  const vis=actualHandVisibility(hr);
+  out.players.forEach(function(p,idx){
+    if(p.isHuman||!p.holeCards||p.holeCards.length<2)return;
+    const original=(hr.players[idx].holeCards||[]).map(function(c){return c.rank+c.suit;});
+    const isHidden=original.some(function(code){return vis.hiddenCodes.includes(code);});
+    if(!isHidden)return;
+    p.holeCards=[pool[ptr++],pool[ptr++]];
+  });
+  return out;
+}
+function withSeededRandomForAudit(seed,fn){
+  const oldRandom=Math.random;
+  let s=seed||1357911;
+  Math.random=function(){s=(s*48271)%2147483647;return (s-1)/2147483646;};
+  try{return fn();}finally{Math.random=oldRandom;}
+}
+function actualHandEvalSignature(an){
+  if(!an||!an.evals)return null;
+  return{
+    score:an.score,
+    grade:an.grade,
+    evals:an.evals.map(function(e){
+      return{
+        street:e.street,
+        action:e.action,
+        amount:e.amount,
+        quality:e.quality,
+        deduction:e.deduction||0,
+        rawEqPct:e.rawEqPct,
+        effectiveEqPct:e.effectiveEqPct,
+        realizationPct:e.realizationPct,
+        rangeAdv:e.rangeAdv||'',
+        nutAdv:e.nutAdv||'',
+        suggest:e.suggest||'',
+        comment:(e.comment||'').replace(/<[^>]+>/g,'')
+      };
+    })
+  };
+}
+function actualHandTextLeakCount(hr,an){
+  const vis=actualHandVisibility(hr);
+  if(!vis.hiddenCodes.length||!an)return 0;
+  const hay=[
+    an.gradeLabel||'',
+    (an.evals||[]).map(function(e){
+      return [e.comment||'',e.suggest||'',e.strategyMix||'',e.axisWeightNote||'',e.phaseWeightNote||''].join(' ');
+    }).join(' ')
+  ].join(' ');
+  return vis.hiddenCodes.filter(function(code){return hay.indexOf(code)>=0;}).length;
+}
+function actualHandLeakAuditText(audit){
+  if(!audit)return'';
+  const base=audit.status+' / '+audit.policy;
+  if(audit.showdownPublic)return base+' / ショーダウン公開カードあり';
+  return base+' / 非公開相手カード '+audit.hiddenCardCount+'枚 / 評価不変='+(audit.evalInvariant?'OK':'NG')+' / テキスト漏れ='+(audit.textLeak?'NG':'OK');
+}
+function actualHandLeakAudit(hr,an,opts){
+  opts=opts||{};
+  const vis=actualHandVisibility(hr);
+  const textLeakCount=actualHandTextLeakCount(hr,an);
+  let evalInvariant=true,variantCount=0,diffSummary='';
+  if(vis.hiddenCardCount>0&&!opts.skipInvariance){
+    const oldFlag=_actualHandAuditRunning;
+    _actualHandAuditRunning=true;
+    try{
+      const baseSig=withSeededRandomForAudit(86421,function(){
+        return actualHandEvalSignature(analyzeHand(cloneHandForActualAudit(hr)));
+      });
+      ['low','premium'].forEach(function(v){
+        const sig=withSeededRandomForAudit(86421,function(){
+          return actualHandEvalSignature(analyzeHand(replaceHiddenOpponentCardsForAudit(hr,v)));
+        });
+        variantCount++;
+        if(JSON.stringify(sig)!==JSON.stringify(baseSig)){
+          evalInvariant=false;
+          if(!diffSummary)diffSummary='hidden opponent cards changed evaluation signature on '+v+' variant';
+        }
+      });
+    }finally{
+      _actualHandAuditRunning=oldFlag;
+    }
+  }
+  const ok=textLeakCount===0&&evalInvariant;
+  return{
+    status:ok?'PASS':'FAIL',
+    policy:'相手実ハンド不使用・レンジ評価',
+    showdownPublic:vis.reachedShowdown,
+    hiddenCardCount:vis.hiddenCardCount,
+    publicCardCount:vis.publicCardCount,
+    textLeak:textLeakCount>0,
+    textLeakCount,
+    evalInvariant,
+    variantCount,
+    diffSummary,
+    note:ok?'相手の非公開ホールカードを差し替えてもユーザー評価は変わりません。':'相手実ハンド由来の混入可能性があります。'
+  };
+}
 // [Codex fix 2026-05-27] テーマ別トレーニングで人間の席を寄せ、狙ったプリフロップ判断を出やすくする。
 function tournamentFocusTargetPositions(focusId){
   const map={
@@ -4340,6 +4486,8 @@ function analyzeHand(hr){
 
   for(const d of hr.decisions.filter(d=>d.isHuman)){
     const ev={...d,quality:'ok',comment:'',suggest:'',deduction:0};
+    ev.hiddenInfoPolicy='相手実ハンド不使用';
+    ev.equitySource=d.street==='preflop'?'レンジ表/公開アクション':'Hero手札+公開ボードのレンジ推定EQ';
     if(d.street==='preflop'){
       ev.lineContext=preflopLineContext(d);
       if(!human.holeCards||human.holeCards.length<2)continue;
@@ -4985,7 +5133,9 @@ function analyzeHand(hr){
   gl=glMap[grade]||gl;
   if(onlyFoldedPF)gl='プリフロップフォールド。ポジション・ハンドランクに基づく適切な判断です。';
   const premiseAudit=preflopPremiseAudit(hr);
-  return{grade,gradeLabel:gl,score,evals,human,hr,pfScore,poScore,sawFlop,tournamentScores,premiseAudit};
+  const result={grade,gradeLabel:gl,score,evals,human,hr,pfScore,poScore,sawFlop,tournamentScores,premiseAudit};
+  if(!_actualHandAuditRunning)result.actualHandAudit=actualHandLeakAudit(hr,result);
+  return result;
 }
 
 // ---- REGRESSION TESTS ----
@@ -5617,6 +5767,61 @@ function runFishTankRegressionTests(){
     }
   });
 
+  add('実ハンド混入監査をPASSとして評価結果に保持する',function(){
+    const hr=regressionHand({
+      heroHole:['Qs','Td'],
+      villainHole:['Ah','Ac'],
+      board:['Tc','4c','9d','8c','5h'],
+      decisions:[
+        regressionDecision({street:'flop',action:'check',amount:0,pot:1526,toCall:0,facingRaise:false,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:4387}),
+        regressionDecision({street:'turn',action:'raise',amount:504,pot:1526,toCall:0,facingRaise:false,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:4387}),
+        regressionDecision({street:'river',action:'call',amount:1395,pot:3929,toCall:1395,potOdds:1395/(3929+1395),facingRaise:true,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:3883})
+      ],
+      pot:5324
+    });
+    const an=analyzeHand(hr);
+    const ev=humanEval(an,function(e){return e.street==='river'&&e.action==='call';});
+    return !!(an.actualHandAudit&&an.actualHandAudit.status==='PASS'&&an.actualHandAudit.hiddenCardCount===2&&an.actualHandAudit.evalInvariant&&ev&&ev.equitySource&&/実ハンド不使用/.test(ev.hiddenInfoPolicy||''));
+  });
+
+  add('ハンド履歴コピーに実ハンド監査を出し非公開相手カードを漏らさない',function(){
+    const oldHR=window._lastHR,oldAN=window._lastAN;
+    const hr=regressionHand({
+      heroHole:['Qs','Td'],
+      villainHole:['Ah','Ac'],
+      board:['Tc','4c','9d','8c','5h'],
+      decisions:[
+        regressionDecision({street:'river',action:'call',amount:1395,pot:3929,toCall:1395,potOdds:1395/(3929+1395),facingRaise:true,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:3883})
+      ],
+      winners:[{player:null,playerIdx:0,amount:5324,byFold:true}],
+      pot:5324
+    });
+    hr.winners[0].player=hr.players[0];
+    try{
+      window._lastHR=hr;window._lastAN=analyzeHand(hr);
+      const txt=buildHandHistoryText(false);
+      return /実ハンド混入監査: PASS/.test(txt)&&/相手ハンド: 非公開/.test(txt)&&!/Ah|Ac/.test(txt)&&/EQ基準=/.test(txt);
+    }finally{
+      window._lastHR=oldHR;window._lastAN=oldAN;
+    }
+  });
+
+  add('評価JSONに実ハンド監査を保持し非公開相手カードを含めない',function(){
+    const hr=regressionHand({
+      heroHole:['Qs','Td'],
+      villainHole:['Ah','Ac'],
+      board:['Tc','4c','9d','8c','5h'],
+      decisions:[
+        regressionDecision({street:'river',action:'call',amount:1395,pot:3929,toCall:1395,potOdds:1395/(3929+1395),facingRaise:true,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:3883})
+      ],
+      pot:5324
+    });
+    const an=analyzeHand(hr);
+    const snap=evaluationSnapshot(hr,an);
+    const js=JSON.stringify(snap);
+    return !!(snap&&snap.actualHandAudit&&snap.actualHandAudit.status==='PASS'&&snap.evaluations[0].equitySource&&!/Ah|Ac/.test(js));
+  });
+
   add('プリフロップ文脈ラベルでBBディフェンスを区別する',function(){
     const hr=regressionHand({
       heroHole:['Jc','9c'],
@@ -6189,6 +6394,13 @@ function showAnalysis(hr,fromHistory){
     html+='<div style="font-size:10px;color:var(--dim);line-height:1.45">'+trainingSpotQualityText(sq)+'</div>';
     html+='</div>';
   }
+  if(an.actualHandAudit){
+    const aha=an.actualHandAudit;
+    html+='<div style="margin-top:9px;border-top:1px solid var(--border);padding-top:8px;text-align:left">';
+    html+='<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px"><span style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:.08em">HIDDEN HAND AUDIT</span><span style="font-size:13px;font-weight:900;color:'+(aha.status==='PASS'?'var(--green)':'var(--red)')+'">'+aha.status+'</span></div>';
+    html+='<div style="font-size:10px;color:var(--dim);line-height:1.45">'+actualHandLeakAuditText(aha)+'</div>';
+    html+='</div>';
+  }
   if(an.premiseAudit&&(an.premiseAudit.issues.length||an.premiseAudit.warnings.length)){
     const pa=an.premiseAudit;
     html+='<div style="margin-top:9px;border-top:1px solid var(--border);padding-top:8px;text-align:left">';
@@ -6257,6 +6469,7 @@ function showAnalysis(hr,fromHistory){
       if(ev.position)m+=metaChip('位置',ev.position);
       if(ev.lineContext)m+=metaChip('文脈',ev.lineContext,'var(--accent)');
       if(ev.evalAxis)m+=metaChip('判断軸',ev.evalAxis,'var(--gold)');
+      if(ev.equitySource)m+=metaChip('EQ基準',ev.equitySource,'var(--green)');
       if(ev.axisTags&&ev.axisTags.length)m+=metaChip('副軸',ev.axisTags.join(' / '));
       if(ev.axisWeightNote)m+=metaChip('軸補正',ev.axisWeightNote,'var(--gold)');
       if(ev.onePairProfile)m+=metaChip('ワンペア監査',onePairPressureProfileText(ev.onePairProfile),ev.onePairProfile.verdict==='bad'?'var(--red)':ev.onePairProfile.verdict==='good'?'var(--green)':'var(--gold)');
@@ -6374,6 +6587,7 @@ function buildHandHistoryText(includeContext){
   // [Claude fix 2026-05-23] シナリオモードのプリフロップストーリーを出力
   if(hr.pfStory&&hr.pfStory.narrative)txt+='プリフロップ: '+hr.pfStory.narrative+'\n';
   if(hr.scenarioQuality)txt+='シナリオ品質: '+trainingSpotQualityText(hr.scenarioQuality)+'\n';
+  if(an.actualHandAudit)txt+='実ハンド混入監査: '+actualHandLeakAuditText(an.actualHandAudit)+'\n';
   if(an.premiseAudit&&(an.premiseAudit.issues.length||an.premiseAudit.warnings.length)){
     txt+='ソフト前提監査: '+an.premiseAudit.grade+' / '+an.premiseAudit.score+'pt\n';
     an.premiseAudit.issues.concat(an.premiseAudit.warnings).forEach(function(x){txt+='  - '+x.text+'\n';});
@@ -6426,6 +6640,7 @@ function buildHandHistoryText(includeContext){
       if(ev.position)meta.push('位置='+ev.position);
       if(ev.lineContext)meta.push('文脈='+ev.lineContext);
       if(ev.evalAxis)meta.push('判断軸='+ev.evalAxis);
+      if(ev.equitySource)meta.push('EQ基準='+ev.equitySource);
       if(ev.axisTags&&ev.axisTags.length)meta.push('副軸='+ev.axisTags.join(','));
       if(ev.axisWeightNote)meta.push('軸補正='+ev.axisWeightNote);
       if(ev.onePairProfile)meta.push('ワンペア監査='+onePairPressureProfileText(ev.onePairProfile));
@@ -6538,6 +6753,7 @@ function buildWallReviewPrompt(){
     latest&&latest.tournamentContext&&latest.tournamentContext.enabled?'- GTO理論だけでなく、国内アミューズメントのチケット戦・小規模トーナメントの実戦傾向も考慮してください。':'- GTO理論だけでなく、海外ライブ$2/$5の実戦傾向も考慮してください。',
     latest&&latest.tournamentContext&&latest.tournamentContext.enabled?'- トーナメントモードではBBアンティ、有効BB、ICM、バブル圧、チケット獲得率を重視してください。':'',
     '- 相手の実ハンドが表示されている場合でも、それはショーダウン確認用です。評価は実ハンドを当てにせず、相手のポジション・ライン・サイズから推定されるレンジで行ってください。',
+    '- 「実ハンド混入監査」がFAILなら、ソフト評価ロジックに相手の非公開ホールカード由来の情報が混ざっている可能性を優先的に指摘してください。',
     '- プリフロップは「唯一の正解」と断定せず、Fold / Call / 3bet のミックス頻度と実戦向け推奨を示してください。',
     '- フロップトレーニングモードでは、プリフロップをユーザーのミスとして採点しすぎず、シナリオ生成の妥当性とポストフロップ判断を分けてレビューしてください。',
     '- ポストフロップはRaw EQだけで判断せず、実効EQ、エクイティ実現率、ポジション、マルチウェイ、レンジ優位、ナッツ優位を確認してください。',
@@ -6596,6 +6812,7 @@ function evaluationSnapshot(hr,an){
     poScore:an.poScore,
     sawFlop:an.sawFlop,
     premiseAudit:an.premiseAudit||null,
+    actualHandAudit:an.actualHandAudit||null,
     scenarioQuality:hr.scenarioQuality||null,
     tournamentContext:hr.tournamentContext||null,
     evaluations:an.evals.map(function(e){
@@ -6606,6 +6823,8 @@ function evaluationSnapshot(hr,an){
         position:e.position,
         lineContext:e.lineContext||'',
         evalAxis:e.evalAxis||'',
+        hiddenInfoPolicy:e.hiddenInfoPolicy||'',
+        equitySource:e.equitySource||'',
         axisTags:e.axisTags||[],
         axisWeightNote:e.axisWeightNote||'',
         onePairProfile:e.onePairProfile||null,
@@ -7612,7 +7831,7 @@ document.addEventListener('click',function(e){
   }
 });
 
-window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,liveCashRangeProfile,tournamentRangeProfile};
+window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,liveCashRangeProfile,tournamentRangeProfile};
 
 </script>
 </body>
