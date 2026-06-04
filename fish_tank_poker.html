@@ -587,6 +587,54 @@ function tournamentAxisSummary(ctx,stackBB){
   return 'スタック帯: '+a.stackBand+' / ICM圧: '+a.icmPressure+' / 主軸: '+a.primary+' / フェーズ軸: '+a.phaseAxis;
 }
 // [Codex fix 2026-06-05] FTはペイジャンプ・スタック順位・カバー関係で、同じハンドの攻め/受けを分ける。
+// [Codex fix 2026-06-05] FTは順位だけでなく、カバー関係と下位スタック数から立場を分けて減点重みを変える。
+function tournamentFinalTableStackRole(ctx,d,stackBB){
+  const players=(ctx&&((ctx.playersLeft&&ctx.playersLeft<=9?ctx.playersLeft:null)||ctx.players))||6;
+  const rank=d&&d.stackRank!=null?d.stackRank:null;
+  const shorter=d&&d.shorterStackCount!=null?d.shorterStackCount:0;
+  const coverCount=d&&d.coverCount!=null?d.coverCount:shorter;
+  const coveredBy=d&&d.coveredByCount!=null?d.coveredByCount:0;
+  const shortestOpp=d&&d.shortestOppStackBB!=null?d.shortestOppStackBB:null;
+  const bb=stackBB||((ctx&&ctx.stackBB)||20);
+  let role='ミドル';
+  if(rank===1||(coverCount>=Math.max(3,players-2)&&coveredBy===0))role='チップリーダー';
+  else if(rank===2||(coverCount>=Math.max(2,players-3)&&coveredBy<=1))role='セカンド';
+  else if(bb<=7||rank===players||shorter===0||(shortestOpp!=null&&bb<=shortestOpp+2))role='最短ショート';
+  else if(bb<=12||shorter<=1)role='ショート';
+  else if(coveredBy>=1&&coverCount>=1)role='ミドル';
+  const profile={
+    role,
+    callMultiplier:1.0,
+    attackMultiplier:1.0,
+    foldMultiplier:1.0,
+    postflopCallMultiplier:1.0,
+    missedStealMultiplier:1.0,
+    policy:'FTでは自分の立場により、同じハンドでも攻める価値と受ける危険度が変わります。',
+    risk:'スタック立場を無視すると、守るべきミドルが飛びすぎたり、攻めるべきカバー側がチップを増やせません。'
+  };
+  if(role==='チップリーダー'){
+    profile.callMultiplier=0.96;profile.attackMultiplier=0.86;profile.foldMultiplier=1.08;profile.postflopCallMultiplier=0.96;profile.missedStealMultiplier=1.14;
+    profile.policy='チップリーダーはカバー圧を使い、特に後ろが中位/ショートなら先に攻める価値が高い立場です。';
+    profile.risk='ただしセカンド級との巨大衝突は避け、圧をかける相手を選びます。';
+  }else if(role==='セカンド'){
+    profile.callMultiplier=1.10;profile.attackMultiplier=0.96;profile.foldMultiplier=0.96;profile.postflopCallMultiplier=1.06;profile.missedStealMultiplier=1.02;
+    profile.policy='セカンドは下位に圧をかけられますが、チップリーダーとの衝突はペイジャンプEVを大きく失います。';
+    profile.risk='CLにカバーされる局面の薄いコール/リレイズは、chipEVよりICM損失を重く見ます。';
+  }else if(role==='ミドル'){
+    profile.callMultiplier=1.24;profile.attackMultiplier=1.02;profile.foldMultiplier=0.84;profile.postflopCallMultiplier=1.16;profile.missedStealMultiplier=0.96;
+    profile.policy='ミドルは最もICM圧を受けやすく、カバーされる薄い受けを避ける一方、降りすぎない攻め所を選びます。';
+    profile.risk='下に短いスタックがいるのに中途半端なコールで飛ぶのが、FTで一番高い失点になりやすいです。';
+  }else if(role==='ショート'){
+    profile.callMultiplier=0.98;profile.attackMultiplier=0.92;profile.foldMultiplier=1.10;profile.postflopCallMultiplier=0.98;profile.missedStealMultiplier=1.16;
+    profile.policy='ショートは待つだけではアンティで削られるため、先に入れるpush/foldの実行力を重視します。';
+    profile.risk='受けオールインは相手レンジが強くなりやすいので、コールより先入れのフォールドエクイティを優先します。';
+  }else if(role==='最短ショート'){
+    profile.callMultiplier=0.92;profile.attackMultiplier=0.84;profile.foldMultiplier=1.20;profile.postflopCallMultiplier=0.96;profile.missedStealMultiplier=1.28;
+    profile.policy='最短ショートはペイジャンプを待つ余地が小さく、良い先入れスポットを逃す減点を重く見ます。';
+    profile.risk='それでも受けで飛ぶより、フォールドエクイティが残る先入れを優先します。';
+  }
+  return profile;
+}
 function tournamentFinalTableProfile(ctx,d,stackBB,pos,holeCards){
   if(!ctx||!ctx.enabled||ctx.phase!=='FT'||!d)return null;
   const ht=holeCards&&holeCards.length>=2?handType(holeCards[0],holeCards[1]):'';
@@ -600,6 +648,7 @@ function tournamentFinalTableProfile(ctx,d,stackBB,pos,holeCards){
   const callOff=facing&&d.action==='call'&&callCommitRatio>=0.45;
   const rank=d.stackRank||null;
   const shorter=d.shorterStackCount||0;
+  const stackRole=tournamentFinalTableStackRole(ctx,d,stackBB);
   const payPressure=(ctx.playersLeft||ctx.players||6)<=Math.max((ctx.seatsPaid||3)+3,6)?'高':'中';
   let lane='postflop',severity='normal',verdict='通常',policy='FTはchipEVだけでなく、ペイジャンプと自分のスタック順位を見て衝突相手を選びます。';
   let risk='ペイジャンプをまたぐ局面では、カバーされる薄い受けが一番高くつきます。';
@@ -626,10 +675,21 @@ function tournamentFinalTableProfile(ctx,d,stackBB,pos,holeCards){
     severity=covered?'border':'normal';verdict=covered?'カバーされるポストフロップ受け注意':'ポストフロップ受け';
     multiplier=covered?1.12:1.04;
   }
+  if(stackRole){
+    if(lane==='callOff'||lane==='flat')multiplier*=stackRole.callMultiplier;
+    else if(lane==='fold')multiplier*=stackRole.foldMultiplier;
+    else if(lane==='open'||lane==='openJam')multiplier*=stackRole.attackMultiplier;
+    else if(lane==='missedSteal')multiplier*=stackRole.missedStealMultiplier;
+    else if(lane==='postflopCall')multiplier*=stackRole.postflopCallMultiplier;
+    policy=policy+' '+stackRole.policy;
+    risk=risk+' '+stackRole.risk;
+  }
   return{
     phase:'FT',lane,severity,verdict,policy,risk,multiplier,
     payPressure,stackRank:rank,shorterStackCount:shorter,coverState:d.coverState||'neutral',
+    stackRole:stackRole?stackRole.role:null,stackRoleProfile:stackRole,
     deepAxes:[
+      '立場='+(stackRole?stackRole.role:'不明'),
       'ペイジャンプ圧='+payPressure,
       'スタック順位='+(rank!=null?rank:'不明'),
       '下位スタック='+shorter+'人',
@@ -640,7 +700,7 @@ function tournamentFinalTableProfile(ctx,d,stackBB,pos,holeCards){
 }
 function tournamentFinalTableProfileText(p){
   if(!p)return'';
-  return p.verdict+' / '+p.policy;
+  return (p.stackRole?p.stackRole+' / ':'')+p.verdict+' / '+p.policy;
 }
 // [Codex fix 2026-06-05] HUはICMよりレンジ幅・主導権・BB防衛を優先して評価する。
 function tournamentHeadsUpProfile(ctx,d,stackBB,pos,holeCards){
@@ -5939,6 +5999,49 @@ function runFishTankRegressionTests(){
     return !!(ev&&ev.tournamentPhaseAxis==='FTのペイジャンプ/スタック順位'&&ev.finalTableProfile&&ev.finalTableProfile.lane==='callOff'&&/FT/.test(ev.phaseWeightNote||'')&&(ev.deduction||0)>=18);
   });
 
+  add('FT立場分類: チップリーダーの先制攻撃はカバー圧として扱う',function(){
+    const ctx={enabled:true,phase:'FT',stackBB:34,players:6,playersLeft:6,seatsPaid:3,sb:800,bb:1600,bbAnte:1600,bbAnteBB:1,focusId:'ft_payjump',focusLabel:'FTペイジャンプ'};
+    const hr=regressionHand({
+      heroHole:['As','8s'],
+      bigBlind:1600,
+      tournamentContext:ctx,
+      decisions:[
+        regressionDecision({street:'preflop',action:'raise',amount:3600,pot:4000,toCall:1600,facingRaise:false,position:'BTN',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:54400,pfRaiseCountBefore:0,pfFacingBetLevel:0,pfActionBetLevel:2,coverState:'covering',coverLabel:'カバーしている',coverPressure:'高',stackRank:1,shorterStackCount:5,coverCount:5,coveredByCount:0})
+      ]
+    });
+    const ev=humanEval(analyzeHand(hr),e=>e.action==='raise');
+    return !!(ev&&ev.finalTableProfile&&ev.finalTableProfile.stackRole==='チップリーダー'&&ev.finalTableProfile.lane==='open'&&ev.finalTableProfile.deepAxes&&ev.finalTableProfile.deepAxes.includes('立場=チップリーダー')&&ev.finalTableProfile.multiplier<1);
+  });
+
+  add('FT立場分類: ミドルはカバーされる薄い受けを最重視する',function(){
+    const ctx={enabled:true,phase:'FT',stackBB:19,players:6,playersLeft:6,seatsPaid:3,sb:800,bb:1600,bbAnte:1600,bbAnteBB:1,focusId:'ft_payjump',focusLabel:'FTペイジャンプ'};
+    const hr=regressionHand({
+      heroHole:['Ks','9d'],
+      bigBlind:1600,
+      tournamentContext:ctx,
+      decisions:[
+        regressionDecision({street:'preflop',action:'allin',amount:48000,pot:4000,toCall:1600,facingRaise:false,position:'CO',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:52000,pfRaiseCountBefore:0,pfFacingBetLevel:0,pfActionBetLevel:2}),
+        regressionDecision({street:'preflop',action:'call',amount:30400,pot:52000,toCall:30400,potOdds:30400/82400,facingRaise:true,position:'BB',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:30400,pfRaiseCountBefore:1,pfFacingBetLevel:2,pfActionBetLevel:2,coverState:'covered',coverLabel:'カバーされている',coverPressure:'高',stackRank:4,shorterStackCount:2,coverCount:2,coveredByCount:3})
+      ]
+    });
+    const ev=humanEval(analyzeHand(hr),e=>e.action==='call');
+    return !!(ev&&ev.finalTableProfile&&ev.finalTableProfile.stackRole==='ミドル'&&ev.finalTableProfile.lane==='callOff'&&ev.finalTableProfile.multiplier>1.55);
+  });
+
+  add('FT立場分類: 最短ショートは降りすぎ警告を強める',function(){
+    const ctx={enabled:true,phase:'FT',stackBB:7,players:6,playersLeft:6,seatsPaid:3,sb:800,bb:1600,bbAnte:1600,bbAnteBB:1,focusId:'ft_payjump',focusLabel:'FTペイジャンプ'};
+    const hr=regressionHand({
+      heroHole:['Kc','9c'],
+      bigBlind:1600,
+      tournamentContext:ctx,
+      decisions:[
+        regressionDecision({street:'preflop',action:'fold',amount:0,pot:4000,toCall:1600,facingRaise:false,position:'BTN',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:11200,pfRaiseCountBefore:0,pfFacingBetLevel:0,pfActionBetLevel:0,coverState:'covered',coverLabel:'カバーされている',coverPressure:'高',stackRank:6,shorterStackCount:0,coverCount:0,coveredByCount:5,shortestOppStackBB:10})
+      ]
+    });
+    const ev=humanEval(analyzeHand(hr),e=>e.action==='fold');
+    return !!(ev&&ev.finalTableProfile&&ev.finalTableProfile.stackRole==='最短ショート'&&ev.finalTableProfile.lane==='missedSteal'&&ev.finalTableProfile.multiplier>1.25&&/最短ショート/.test(tournamentFinalTableProfileText(ev.finalTableProfile)));
+  });
+
   add('HUのBB防衛コールは専用プロファイルで広く許容する',function(){
     const ctx={enabled:true,phase:'HU',stackBB:25,players:2,playersLeft:2,seatsPaid:1,sb:1000,bb:2000,bbAnte:0,bbAnteBB:0,focusId:'hu_aggression',focusLabel:'HU攻防'};
     const hr=regressionHand({
@@ -7043,6 +7146,7 @@ function showAnalysis(hr,fromHistory){
       if(ev.middleProfile)m+=metaChip('中盤方針',ev.middleProfile.policy,'var(--gold)');
       if(ev.middleProfile&&ev.middleProfile.deepAxes)m+=metaChip('中盤5軸',ev.middleProfile.deepAxes.join(' / '),'var(--gold)');
       if(ev.finalTableProfile)m+=metaChip('FT評価',tournamentFinalTableProfileText(ev.finalTableProfile),ev.finalTableProfile.severity==='bad'?'var(--red)':ev.finalTableProfile.severity==='good'?'var(--green)':'var(--gold)');
+      if(ev.finalTableProfile&&ev.finalTableProfile.stackRole)m+=metaChip('FT立場',ev.finalTableProfile.stackRole,'var(--gold)');
       if(ev.finalTableProfile&&ev.finalTableProfile.deepAxes)m+=metaChip('FT5軸',ev.finalTableProfile.deepAxes.join(' / '),'var(--gold)');
       if(ev.headsUpProfile)m+=metaChip('HU評価',tournamentHeadsUpProfileText(ev.headsUpProfile),ev.headsUpProfile.severity==='bad'?'var(--red)':ev.headsUpProfile.severity==='good'?'var(--green)':'var(--gold)');
       if(ev.headsUpProfile&&ev.headsUpProfile.deepAxes)m+=metaChip('HU5軸',ev.headsUpProfile.deepAxes.join(' / '),'var(--gold)');
@@ -7209,6 +7313,7 @@ function buildHandHistoryText(includeContext){
       if(ev.earlyDeepSprProfile)meta.push('序盤深SPR='+tournamentEarlyDeepSprProfileText(ev.earlyDeepSprProfile));
       if(ev.middleProfile)meta.push('中盤帯='+tournamentMiddleProfileText(ev.middleProfile));
       if(ev.finalTableProfile)meta.push('FT評価='+tournamentFinalTableProfileText(ev.finalTableProfile));
+      if(ev.finalTableProfile&&ev.finalTableProfile.stackRole)meta.push('FT立場='+ev.finalTableProfile.stackRole);
       if(ev.headsUpProfile)meta.push('HU評価='+tournamentHeadsUpProfileText(ev.headsUpProfile));
       if(ev.toCall>0)meta.push('必要コール='+ev.toCall);
       if(ev.potOdds>0)meta.push('必要EQ='+Math.round(ev.potOdds*100)+'%');
