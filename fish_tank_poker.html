@@ -6143,6 +6143,22 @@ function runFishTankRegressionTests(){
     return issues.some(function(i){return i.type==='comment-deduction-contradiction';});
   });
 
+  add('監査バッチ候補に再現用のmodeIdとsampleIndexを保持する',function(){
+    const b=runFishTankAuditBatch({perMode:1,seed:97531,maxExamples:8,maxActions:70});
+    const h=b.suspiciousHands&&b.suspiciousHands[0];
+    return !h||!!(h.modeId&&h.sampleIndex>=1);
+  });
+
+  add('監査修正キューがissue種別ごとに優先度を作る',function(){
+    const summary={seed:1,perMode:1,suspiciousHands:[
+      {mode:'unit',modeId:'ring',sampleIndex:1,handNum:1,hero:'As Kd',board:'',issues:[{severity:'high',type:'premise-context',text:'x'}]},
+      {mode:'unit',modeId:'ring',sampleIndex:2,handNum:2,hero:'Qs Qd',board:'',issues:[{severity:'critical',type:'hidden-hand-leak',text:'y'}]}
+    ]};
+    summary.repairQueue=buildFishTankAuditRepairQueue(summary);
+    const text=fishTankAuditRepairPlanText(summary);
+    return summary.repairQueue.queue[0].type==='hidden-hand-leak'&&/再現: runFishTankAuditBatch/.test(text);
+  });
+
   const results=tests.map(function(t){
     try{return{name:t.name,pass:!!t.fn()};}
     catch(e){return{name:t.name,pass:false,error:e&&e.message?e.message:String(e)};}
@@ -6282,10 +6298,12 @@ function auditIssuesForHand(hr,an,label){
   });
   return issues;
 }
-function compactAuditHand(hr,an,modeLabel,issues){
+function compactAuditHand(hr,an,modeLabel,issues,modeId,sampleIndex){
   const human=hr&&hr.players?hr.players.find(function(p){return p.isHuman;}):null;
   return{
     mode:modeLabel,
+    modeId:modeId||'',
+    sampleIndex:sampleIndex||0,
     handNum:hr?hr.handNum:null,
     score:an?an.score:null,
     grade:an?an.grade:null,
@@ -6294,6 +6312,58 @@ function compactAuditHand(hr,an,modeLabel,issues){
     issues:issues,
     snapshot:hr?evaluationSnapshot(hr,an):null
   };
+}
+function auditIssuePriorityWeight(issue){
+  const sev={critical:400,high:250,medium:120,low:40}[issue&&issue.severity]||40;
+  const type={
+    'hidden-hand-leak':180,
+    'exception':170,
+    'timeout':160,
+    'premise-context':145,
+    'comment-deduction-contradiction':130,
+    'one-pair-call-contradiction':120,
+    'scenario-quality':95,
+    'large-deduction':80,
+    'donk-check-weight':70,
+    'river-one-pair-missing-profile':65,
+    'raw-effective-gap':45
+  }[issue&&issue.type]||30;
+  return sev+type;
+}
+function auditRepairSuggestion(type){
+  const map={
+    'hidden-hand-leak':'相手実ハンドを参照する経路を最優先で遮断。評価・AIコピー・スナップショットは相手レンジ前提だけに固定する。',
+    'exception':'監査中の例外を先に潰す。自動プレーで落ちる局面は通常プレーでも壊れる可能性が高い。',
+    'timeout':'アクション進行/オールイン自動ランアウトを確認。プレーが止まるスポット生成は練習価値を落とす。',
+    'premise-context':'プリフロップの名前付けを修正。リンプ→アイソ、3BET→4BET、BBディフェンスを誤ると後続評価もずれる。',
+    'comment-deduction-contradiction':'コメント生成と減点結果の最終整合レイヤーを追加。「正当なら最初から正当」と書かせる。',
+    'one-pair-call-contradiction':'リバーワンペアのコール/フォールド軸を優先確認。完成ボード・大サイズ・複数ストリート圧力を重く見る。',
+    'scenario-quality':'フロップ練習の生成条件を見直す。SPR/参加人数/ヒーロー行動余地がある出題だけ通す。',
+    'large-deduction':'大減点の理由がユーザーに伝わるか確認。サイズ違い・ライン違い・局面違いを分けて説明する。',
+    'donk-check-weight':'OOP側チェックを自然扱いする主導権/ドンク判定を見直す。',
+    'river-one-pair-missing-profile':'リバーのワンペアコールには必ず専用プロファイルを付ける。',
+    'raw-effective-gap':'Raw EQと実効EQの差が大きい局面で、Raw EQだけを根拠にした説明を避ける。'
+  };
+  return map[type]||'該当issueの発生ハンドを確認し、説明と減点が同じ判断軸を見ているか確認する。';
+}
+function buildFishTankAuditRepairQueue(summary){
+  const buckets={};
+  (summary&&summary.suspiciousHands||[]).forEach(function(h){
+    (h.issues||[]).forEach(function(issue){
+      const key=issue.type||'unknown';
+      if(!buckets[key])buckets[key]={type:key,severity:issue.severity||'low',count:0,score:0,examples:[],suggestion:auditRepairSuggestion(key)};
+      const b=buckets[key];
+      b.count++;
+      b.score+=auditIssuePriorityWeight(issue);
+      if(({critical:4,high:3,medium:2,low:1}[issue.severity]||1)>(({critical:4,high:3,medium:2,low:1}[b.severity])||1))b.severity=issue.severity;
+      if(b.examples.length<3)b.examples.push({mode:h.mode,modeId:h.modeId,sampleIndex:h.sampleIndex,handNum:h.handNum,hero:h.hero,board:h.board,text:issue.text});
+    });
+  });
+  const queue=Object.keys(buckets).map(function(k){return buckets[k];}).sort(function(a,b){
+    if(b.score!==a.score)return b.score-a.score;
+    return b.count-a.count;
+  });
+  return{seed:summary?summary.seed:null,totalBuckets:queue.length,totalIssues:queue.reduce(function(s,b){return s+b.count;},0),queue:queue};
 }
 function runFishTankAuditBatch(opts){
   opts=opts||{};
@@ -6332,11 +6402,12 @@ function runFishTankAuditBatch(opts){
           if(hasC){summary.criticalCount++;summary.byMode[m.id].critical++;}
           if(hasH){summary.highCount++;summary.byMode[m.id].high++;}
           if(hasM){summary.mediumCount++;summary.byMode[m.id].medium++;}
-          if(summary.suspiciousHands.length<(opts.maxExamples||24))summary.suspiciousHands.push(compactAuditHand(hr,an,m.label,issues));
+          if(summary.suspiciousHands.length<(opts.maxExamples||24))summary.suspiciousHands.push(compactAuditHand(hr,an,m.label,issues,m.id,i+1));
         }
       }
     });
     summary.ok=summary.criticalCount===0;
+    summary.repairQueue=buildFishTankAuditRepairQueue(summary);
     return summary;
   });
 }
@@ -6351,17 +6422,40 @@ function fishTankAuditBatchReportText(summary){
     const m=summary.byMode[k];
     lines.push('- '+m.label+': '+m.suspicious+'/'+m.hands+'件');
   });
+  if(summary.repairQueue&&summary.repairQueue.queue&&summary.repairQueue.queue.length){
+    lines.push('');
+    lines.push('修正優先度トップ:');
+    summary.repairQueue.queue.slice(0,3).forEach(function(b,idx){
+      lines.push((idx+1)+'. '+b.type+' ['+b.severity+'] '+b.count+'件');
+    });
+  }
   if(summary.suspiciousHands&&summary.suspiciousHands.length){
     lines.push('');
     lines.push('抽出された確認候補:');
     summary.suspiciousHands.forEach(function(h,idx){
-      lines.push((idx+1)+'. '+h.mode+' #'+h.handNum+' '+h.hero+' / '+h.board+' / '+h.score+'点 '+h.grade);
+      lines.push((idx+1)+'. '+h.mode+' '+h.modeId+'['+h.sampleIndex+'] #'+h.handNum+' '+h.hero+' / '+h.board+' / '+h.score+'点 '+h.grade);
       h.issues.slice(0,4).forEach(function(i){lines.push('   ['+i.severity+'] '+i.type+': '+i.text);});
       if(h.issues.length>4)lines.push('   ...ほか '+(h.issues.length-4)+' 件');
     });
   }else{
     lines.push('抽出候補なし。少なくとも機械監査では重大な違和感は見つかりませんでした。');
   }
+  return lines.join('\n');
+}
+function fishTankAuditRepairPlanText(summary){
+  const rq=summary&&summary.repairQueue?summary.repairQueue:buildFishTankAuditRepairQueue(summary);
+  if(!rq||!rq.queue||!rq.queue.length)return'修正キューは空です。重大な監査候補はありません。';
+  const lines=['Fish Tank 修正キュー: '+rq.totalIssues+' issues / '+rq.totalBuckets+' buckets'];
+  rq.queue.forEach(function(b,idx){
+    lines.push('');
+    lines.push((idx+1)+'. '+b.type+' ['+b.severity+'] '+b.count+'件');
+    lines.push('   方針: '+b.suggestion);
+    b.examples.forEach(function(ex){
+      lines.push('   例: '+ex.mode+' '+ex.modeId+'['+ex.sampleIndex+'] #'+ex.handNum+' '+ex.hero+' / '+ex.board);
+    });
+  });
+  lines.push('');
+  lines.push('再現: runFishTankAuditBatch({perMode:'+(summary&&summary.perMode||3)+', seed:'+(summary&&summary.seed||20260605)+'})');
   return lines.join('\n');
 }
 
@@ -8032,7 +8126,11 @@ if(auditBatchBtn){
   auditBatchBtn.addEventListener('click',function(){
     const summary=runFishTankAuditBatch({perMode:3,seed:20260605,maxExamples:18,maxActions:90});
     const msg=fishTankAuditBatchReportText(summary);
+    const plan=fishTankAuditRepairPlanText(summary);
+    window.__fishTankLastAuditBatch=summary;
+    try{localStorage.setItem('fish_tank_last_audit_batch',JSON.stringify(summary));}catch(e){}
     console.log(msg,summary);
+    console.log(plan);
     if(typeof toast==='function')toast(summary.ok?'監査バッチ OK: 重大FAILなし':'監査バッチ 要確認: Critical '+summary.criticalCount,summary.ok?'win':'info',6000);
     alert(msg);
   });
@@ -8067,7 +8165,7 @@ document.addEventListener('click',function(e){
   }
 });
 
-window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,runFishTankAuditBatch,fishTankAuditBatchReportText,auditIssuesForHand,playAuditGame,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,liveCashRangeProfile,tournamentRangeProfile};
+window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,runFishTankAuditBatch,fishTankAuditBatchReportText,buildFishTankAuditRepairQueue,fishTankAuditRepairPlanText,auditIssuesForHand,playAuditGame,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,liveCashRangeProfile,tournamentRangeProfile};
 
 </script>
 </body>
