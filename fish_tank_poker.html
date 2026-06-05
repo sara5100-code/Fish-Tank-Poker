@@ -1044,6 +1044,82 @@ function tournamentHeadsUpProfileText(p){
   if(!p)return'';
   return p.verdict+' / '+p.policy;
 }
+// [Codex fix 2026-06-05] HUリバーは広いレンジを理由に、薄いワンペア受け/大きすぎる薄バリューを雑に正当化しない。
+function tournamentHeadsUpRiverProfile(ctx,hr,d,role,tex,stackBB,pos){
+  if(!ctx||!ctx.enabled||ctx.phase!=='HU'||!d||d.street!=='river'||!role)return null;
+  const lane=d.action==='check'?'check':d.action==='call'?'call':(d.action==='raise'||d.action==='bet'||d.action==='allin')?'bet':d.action;
+  const basePot=lane==='call'?Math.max(1,(d.pot||0)-(d.toCall||0)):Math.max(1,d.pot||1);
+  const sizePct=lane==='call'?Math.round((d.toCall||d.amount||0)/basePot*100):(d.pot?Math.round((d.amount||0)/Math.max(1,d.pot)*100):0);
+  const pairTier=role.pairTier||'';
+  const note=role.note||'';
+  const onePair=!!pairTier||/ワンペア|トップペア|中・低ペア|ミドルペア|オーバーペア/.test(note);
+  const strongOnePair=['top_pair','overpair'].includes(pairTier)&&(role.role==='strong'||role.role==='value');
+  const weakShowdown=onePair&&!strongOnePair;
+  const strongMade=!!(role.isNut||role.role==='nutted'||(!onePair&&(role.role==='strong'||role.role==='value')));
+  const danger=!!(tex&&(tex.flushy>=3||tex.paired||tex.straightDraw||tex.dynamic));
+  const idx=streetDecisionIndex(hr,d);
+  const before=idx>=0?hr.decisions.slice(0,idx):hr.decisions;
+  const villainBets=before.filter(function(x){return !x.isHuman&&(x.action==='raise'||x.action==='bet'||x.action==='allin')&&(x.street==='flop'||x.street==='turn'||x.street==='river');}).length;
+  let verdict='normal';
+  let severity='normal';
+  let policy='HUのリバーはレンジが広いため、薄いバリューとブラフキャッチが増えます。ただしサイズと完成ボードで分けます。';
+  let risk='サイズ'+sizePct+'%pot / '+(danger?'完成・動的ボード':'比較的静的')+' / 相手圧力'+villainBets+'回';
+  if(lane==='call'){
+    if((weakShowdown&&sizePct>=45)||(onePair&&sizePct>=75)||(onePair&&danger&&sizePct>=55&&villainBets>=1)){
+      verdict='thinCatch';
+      severity=(weakShowdown||sizePct>=75)?'bad':'border';
+      policy='HUでもリバーの大きいベットにワンペアで自動コールしません。相手のバリュー密度とブロッカーを見て、受けすぎを防ぎます。';
+    }else if(strongOnePair&&sizePct>=45&&(danger||villainBets>=1)){
+      verdict='bluffCatch';
+      severity='border';
+      policy='強いトップペアでも、HUリバーの中〜大サイズは明確コールではなくブラフキャッチです。相手傾向でCall/Foldを混ぜます。';
+    }else if(strongMade){
+      verdict='valueCall';
+      severity='good';
+      policy='強いメイドハンドはHUの広いベットレンジに対して受ける価値があります。';
+    }
+  }else if(lane==='bet'){
+    if(onePair&&sizePct>=80&&(danger||!strongOnePair)){
+      verdict='thinValueOverdo';
+      severity='bad';
+      policy='HUでもワンペアの大きすぎる薄バリューは、悪いレンジだけにコールされやすく危険です。小〜中サイズへ落とします。';
+    }else if(onePair&&sizePct<=55){
+      verdict='thinValue';
+      severity='good';
+      policy='HUでは強いワンペアの小〜中サイズ薄バリューが重要です。チェックだけに寄せず、コールされる下のレンジを残します。';
+    }else if(role.role==='air'&&sizePct<=70){
+      verdict='riverStab';
+      severity='border';
+      policy='HUではリバーのブラフ頻度も必要ですが、相手がコール寄りなら無理に増やしません。';
+    }
+  }else if(lane==='check'){
+    if(onePair&&(danger||!strongOnePair)){
+      verdict='potControl';
+      severity='good';
+      policy='危険ボードや弱めのワンペアは、HUでもチェックでショーダウン価値を守る判断が自然です。';
+    }else if(strongOnePair&&!danger){
+      verdict='missedThinValue';
+      severity='border';
+      policy='クリーン寄りのHUリバーでは、強いトップペアは小さめ薄バリューも候補です。';
+    }
+  }else if(lane==='fold'){
+    if(onePair&&sizePct>=70&&(danger||villainBets>=1)){
+      verdict='disciplinedFold';
+      severity='good';
+      policy='HUでも大サイズ・完成ボード・相手圧力が揃うワンペアは降りられることが利益になります。';
+    }else if(strongOnePair&&sizePct<=45&&!danger){
+      verdict='overFold';
+      severity='bad';
+      policy='HUの小〜中サイズに強いトップペアを降りすぎると、相手のブラフを許しすぎます。';
+    }
+  }
+  return{phase:'HU',lane,sizePct,onePair,strongOnePair,weakShowdown,strongMade,danger,villainBets,verdict,severity,policy,risk,position:pos,stackBB};
+}
+function tournamentHeadsUpRiverProfileText(p){
+  if(!p)return'';
+  const lane={check:'チェック',call:'コール',bet:'ベット/レイズ',fold:'フォールド'}[p.lane]||p.lane;
+  return 'RIVER / '+lane+' / '+p.verdict+'：'+p.policy+' 注意: '+p.risk;
+}
 // [Codex fix 2026-06-03] バブル付近は単なるICM高ではなく、スタック立場とカバー関係で評価軸を分ける。
 function tournamentBubbleProfile(ctx,d,stackBB,pos){
   if(!ctx||!ctx.enabled||!d)return null;
@@ -5085,6 +5161,44 @@ function analyzeHand(hr){
     }
     return next-before;
   }
+  // [Codex fix 2026-06-05] HUリバー専用に、薄いバリュー/ブラフキャッチ/ポット管理の重みを分ける。
+  function applyHeadsUpRiverWeight(ev){
+    const hp=ev.headsUpRiverProfile||null;
+    if(!hp||ev.tournamentPhase!=='HU'||ev.street!=='river')return 0;
+    const before=ev.deduction||0;
+    let next=before;
+    const notes=[];
+    if(hp.severity==='bad'){
+      next=Math.max(next,hp.lane==='call'?16:hp.lane==='bet'?12:10);
+      ev.quality='bad';
+      notes.push(tournamentHeadsUpRiverProfileText(hp));
+      if(hp.lane==='call'){
+        ev.comment=(ev.comment||'').replace(/^正解。?/,'').replace(/EV優位（[^）]+）で明確なコールです。/,'HUリバー補正後は、必要EQだけでは正当化しないブラフキャッチです。');
+        if(!ev.suggest)ev.suggest='推奨: 相手傾向次第でFold寄り。大サイズ・完成ボードではワンペア受けを絞る';
+      }else if(hp.lane==='bet'&&!ev.suggest){
+        ev.suggest='推奨: チェックまたは小〜中サイズ。ワンペアで大きく膨らませない';
+      }
+    }else if(hp.severity==='border'){
+      next=Math.max(next,6);
+      if(ev.quality==='good')ev.quality='ok';
+      notes.push(tournamentHeadsUpRiverProfileText(hp));
+      if(hp.lane==='call'&&!ev.suggest)ev.suggest='相手依存: アグレッシブ相手はコール、パッシブ相手はフォールド寄り';
+      else if(hp.lane==='check'&&!ev.suggest)ev.suggest='候補: 小さめ薄バリューも混ぜる';
+    }else if(hp.severity==='good'&&before>0){
+      next=Math.min(next,hp.lane==='check'?5:8);
+      if(ev.quality==='bad')ev.quality='ok';
+      notes.push(tournamentHeadsUpRiverProfileText(hp));
+    }else if(hp.severity==='good'){
+      notes.push(tournamentHeadsUpRiverProfileText(hp));
+    }
+    next=Math.max(0,Math.min(45,next));
+    if(next!==before||notes.length){
+      ev.deduction=next;
+      ev.headsUpRiverWeightNote=notes.join('。');
+      if(ev.headsUpRiverWeightNote)ev.comment=(ev.comment||'')+' 【HUリバー補正】'+ev.headsUpRiverWeightNote+'。';
+    }
+    return next-before;
+  }
   // [Codex fix 2026-06-05] FTポストフロップは、カバーされる側の薄い受け/打ちすぎを一般ワンペア監査より重く見る。
   function applyFinalTablePostflopWeight(ev){
     const fp=ev.finalTablePostflopProfile||null;
@@ -5682,6 +5796,7 @@ function analyzeHand(hr){
       const mwComm=hr.community.slice(0,mwCommLen);
       const mwEval=human.holeCards&&human.holeCards.length>=2&&mwComm.length>=3?HandEval.evaluate([...human.holeCards,...mwComm]):null;
       const mwRole=mwEval?handRole(human.holeCards,mwComm,mwEval):null;
+      ev.headsUpRiverProfile=tournamentHeadsUpRiverProfile(hr.tournamentContext,hr,d,mwRole,mwComm.length>=3?boardTex(mwComm):null,tStackBB,d.position||'MP');
       ev.earlyMultiwayProfile=tournamentEarlyMultiwayProfile(hr.tournamentContext,d,mwRole,ev.streetOpps||oppsAtStreet(d.street),d.position||'MP');
       ev.earlyDeepSprProfile=tournamentEarlyDeepSprProfile(hr.tournamentContext,d,mwRole,mwComm.length>=3?boardTex(mwComm):null,d.position||'MP');
       ev.finalTablePostflopProfile=tournamentFinalTablePostflopProfile(hr.tournamentContext,d,mwRole,mwComm.length>=3?boardTex(mwComm):null,tStackBB,d.position||'MP',ev.finalTableProfile,ev.streetOpps||oppsAtStreet(d.street));
@@ -5692,6 +5807,7 @@ function analyzeHand(hr){
     applyFinalTableRangeWeight(ev);
     applyTournamentPhaseWeight(ev);
     applyOnePairProfileWeight(ev);
+    applyHeadsUpRiverWeight(ev);
     applyFinalTablePostflopWeight(ev);
     ev.finalTableLearningPoint=tournamentFinalTableLearningPoint(ev);
     const scoredAfter=scoredDeduction(ev);
@@ -6704,6 +6820,52 @@ function runFishTankRegressionTests(){
     });
     const ev=humanEval(analyzeHand(hr),e=>e.street==='flop'&&e.action==='raise');
     return !!(ev&&ev.headsUpProfile&&ev.headsUpProfile.lane==='postflopSmallBet'&&ev.headsUpProfile.severity==='good');
+  });
+
+  add('HUリバー深掘り: 完成ボード大サイズへのワンペアコールを明確コールと言い切らない',function(){
+    const ctx={enabled:true,phase:'HU',stackBB:25,players:2,playersLeft:2,seatsPaid:1,sb:1000,bb:2000,bbAnte:0,bbAnteBB:0,focusId:'hu_aggression',focusLabel:'HU攻防'};
+    const hr=regressionHand({
+      heroHole:['Kd','Qh'],
+      board:['Ks','9s','6c','4s','2d'],
+      bigBlind:2000,
+      tournamentContext:ctx,
+      decisions:[
+        regressionDecision({street:'river',action:'raise',amount:8000,pot:10000,toCall:0,facingRaise:false,position:'BTN',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:50000}),
+        regressionDecision({street:'river',action:'call',amount:8000,pot:18000,toCall:8000,potOdds:8000/26000,facingRaise:true,position:'BB',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:50000})
+      ]
+    });
+    const ev=humanEval(analyzeHand(hr),e=>e.street==='river'&&e.action==='call');
+    return !!(ev&&ev.headsUpRiverProfile&&ev.headsUpRiverProfile.verdict==='thinCatch'&&ev.headsUpRiverProfile.severity==='bad'&&ev.quality==='bad'&&!/明確なコール/.test(ev.comment||''));
+  });
+
+  add('HUリバー深掘り: 強いワンペアの小さめ薄バリューを肯定する',function(){
+    const ctx={enabled:true,phase:'HU',stackBB:25,players:2,playersLeft:2,seatsPaid:1,sb:1000,bb:2000,bbAnte:0,bbAnteBB:0,focusId:'hu_aggression',focusLabel:'HU攻防'};
+    const hr=regressionHand({
+      heroHole:['Kd','Qh'],
+      board:['Kh','8s','4d','2c','Jd'],
+      bigBlind:2000,
+      tournamentContext:ctx,
+      decisions:[
+        regressionDecision({street:'river',action:'raise',amount:4500,pot:10000,toCall:0,facingRaise:false,position:'BTN',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:50000})
+      ]
+    });
+    const ev=humanEval(analyzeHand(hr),e=>e.street==='river'&&e.action==='raise');
+    return !!(ev&&ev.headsUpRiverProfile&&ev.headsUpRiverProfile.verdict==='thinValue'&&ev.headsUpRiverProfile.severity==='good'&&ev.quality!=='bad');
+  });
+
+  add('HUリバー深掘り: 危険ボードのワンペアチェックをポット管理として扱う',function(){
+    const ctx={enabled:true,phase:'HU',stackBB:25,players:2,playersLeft:2,seatsPaid:1,sb:1000,bb:2000,bbAnte:0,bbAnteBB:0,focusId:'hu_aggression',focusLabel:'HU攻防'};
+    const hr=regressionHand({
+      heroHole:['Kd','Qh'],
+      board:['Ks','9s','6c','4s','2d'],
+      bigBlind:2000,
+      tournamentContext:ctx,
+      decisions:[
+        regressionDecision({street:'river',action:'check',amount:0,pot:10000,toCall:0,facingRaise:false,position:'BB',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:50000})
+      ]
+    });
+    const ev=humanEval(analyzeHand(hr),e=>e.street==='river'&&e.action==='check');
+    return !!(ev&&ev.headsUpRiverProfile&&ev.headsUpRiverProfile.verdict==='potControl'&&ev.headsUpRiverProfile.severity==='good'&&ev.quality!=='bad');
   });
 
   add('HUのBB防衛コールは専用プロファイルで広く許容する',function(){
@@ -7838,6 +8000,7 @@ function showAnalysis(hr,fromHistory){
       if(ev.finalTableProfile&&ev.finalTableProfile.deepAxes)m+=metaChip('FT5軸',ev.finalTableProfile.deepAxes.join(' / '),'var(--gold)');
       if(ev.headsUpProfile)m+=metaChip('HU評価',tournamentHeadsUpProfileText(ev.headsUpProfile),ev.headsUpProfile.severity==='bad'?'var(--red)':ev.headsUpProfile.severity==='good'?'var(--green)':'var(--gold)');
       if(ev.headsUpProfile&&ev.headsUpProfile.deepAxes)m+=metaChip('HU5軸',ev.headsUpProfile.deepAxes.join(' / '),'var(--gold)');
+      if(ev.headsUpRiverProfile)m+=metaChip('HUリバー',tournamentHeadsUpRiverProfileText(ev.headsUpRiverProfile),ev.headsUpRiverProfile.severity==='bad'?'var(--red)':ev.headsUpRiverProfile.severity==='good'?'var(--green)':'var(--gold)');
       if(ev.toCall>0)m+=metaChip('必要コール',ev.toCall+'T');
       if(ev.potOdds>0)m+=metaChip('必要EQ',Math.round(ev.potOdds*100)+'%');
       if(ev.rawEqPct!=null)m+=metaChip('Raw EQ',ev.rawEqPct+'%');
@@ -8019,6 +8182,7 @@ function buildHandHistoryText(includeContext){
       if(ev.finalTablePostflopProfile)meta.push('FTポストF='+tournamentFinalTablePostflopProfileText(ev.finalTablePostflopProfile));
       if(ev.finalTableLearningPoint)meta.push('FT学習='+tournamentFinalTableLearningPointText(ev.finalTableLearningPoint));
       if(ev.headsUpProfile)meta.push('HU評価='+tournamentHeadsUpProfileText(ev.headsUpProfile));
+      if(ev.headsUpRiverProfile)meta.push('HUリバー='+tournamentHeadsUpRiverProfileText(ev.headsUpRiverProfile));
       if(ev.toCall>0)meta.push('必要コール='+ev.toCall);
       if(ev.potOdds>0)meta.push('必要EQ='+Math.round(ev.potOdds*100)+'%');
       if(ev.strategyMix)meta.push('推奨頻度='+ev.strategyMix);
@@ -8208,6 +8372,8 @@ function evaluationSnapshot(hr,an){
         finalTablePostflopWeightNote:e.finalTablePostflopWeightNote||'',
         finalTableLearningPoint:e.finalTableLearningPoint||null,
         headsUpProfile:e.headsUpProfile||null,
+        headsUpRiverProfile:e.headsUpRiverProfile||null,
+        headsUpRiverWeightNote:e.headsUpRiverWeightNote||'',
         stackRank:e.stackRank||null,
         shortestOppStackBB:e.shortestOppStackBB,
         bbInHands:e.bbInHands,
