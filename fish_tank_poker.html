@@ -2437,7 +2437,8 @@ function aiTournamentPreflopDecision(player,game,handFrac,ri,pos,isRaisedPot,toC
   if(!tctx||!tctx.enabled)return null;
   const bb=game.bigBlind||1;
   const stackBB=Math.max(1,Math.round(player.chips/bb));
-  if(stackBB>25)return null;
+  // [Codex fix 2026-06-05] 20BB reshove練習は周辺スタックのAIも通常flatへ戻さず、30BBまでは専用前提を保つ。
+  if(stackBB>25&&!(tctx.focusId==='reshove20'&&stackBB<=30))return null;
   const bubble=tctx.phase==='バブル';
   const cover=stackCoverInfo(player,game.players,bb);
   const covered=cover.coverState==='covered'||cover.coverState==='mixed_covered';
@@ -2466,6 +2467,13 @@ function aiTournamentPreflopDecision(player,game,handFrac,ri,pos,isRaisedPot,toC
     // [Codex fix 2026-05-28] Keep non-BB AI from turning BB defense scenarios into squeeze/jam spots.
     if(tctx.focusId==='bb_defend'&&pos!=='BB'){
       if(canFlatByShape&&handFrac<=r.flatCap*1.25&&toCall<player.chips)return{action:'call'};
+      return{action:'fold'};
+    }
+    // [Codex fix 2026-06-05] 20BB reshove練習では、非BBのAI前提もflatで濁さずreshove/foldに寄せる。
+    if(tctx.focusId==='reshove20'&&pos!=='BB'){
+      if(handFrac<=r.reshoveCap*jamAdj&&canJamByShape&&Math.random()<((tags.premium?0.94:r.reshoveFreq)*jamAdj)){
+        return{action:'allin'};
+      }
       return{action:'fold'};
     }
     if(pos==='BB'){
@@ -6983,6 +6991,12 @@ function runFishTankRegressionTests(){
   add('監査バッチが複数モードを回して違和感一覧を返す',function(){
     const b=runFishTankAuditBatch({perMode:1,seed:24680,maxExamples:8,maxActions:70});
     return !!(b&&b.totalHands>=6&&b.byMode&&b.byMode.scenario&&Array.isArray(b.suspiciousHands)&&typeof fishTankAuditBatchReportText(b)==='string');
+  });
+
+  add('20BB reshove監査でAI非BBフラット前提を出さない',function(){
+    const b=runFishTankAuditBatch({perMode:1,seed:20260605,maxExamples:12,maxActions:90});
+    const h=(b.suspiciousHands||[]).filter(function(x){return x.modeId==='tournament:reshove20';});
+    return !h.some(function(x){return (x.issues||[]).some(function(i){return i.type==='premise-context';});});
   });
 
   add('監査抽出が実ハンド混入FAILをcriticalとして拾う',function(){
