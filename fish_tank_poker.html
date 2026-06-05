@@ -962,38 +962,58 @@ function tournamentHeadsUpProfile(ctx,d,stackBB,pos,holeCards){
   const suited=!!(c1&&c2&&c1.suit===c2.suit),pair=!!(c1&&c2&&c1.rank===c2.rank);
   const r1=c1?RANK_VAL[c1.rank]||0:0,r2=c2?RANK_VAL[c2.rank]||0:0;
   const hi=Math.max(r1,r2),lo=Math.min(r1,r2),gap=hi-lo;
-  const playable=pair||suited||hi>=11||gap<=4||frac<=0.68;
+  const playable=pair||suited||hi>=11||gap<=4||frac<=0.72;
+  const strongDefend=pair||suited||hi>=12||gap<=2||frac<=0.46;
   const facing=!!(d.facingRaise&&(d.toCall||0)>0);
   const sb=(pos==='BTN'||pos==='SB');
   const bb=pos==='BB';
+  const pot=Math.max(1,d.pot||0);
+  const sizePct=d.amount?Math.round((d.amount||0)/pot*100):0;
   let lane='postflop',severity='normal',verdict='HU標準',policy='HUではレンジが大きく広がり、降りすぎるとブラインドだけで削られます。';
   let risk='リングやフルリングの感覚で待ちすぎると、HUでは参加頻度不足になります。';
   let multiplier=1.0;
   if(d.street==='preflop'&&!facing&&d.action==='fold'&&sb){
     lane='sbFold';
-    severity=frac<=0.72?'bad':'border';
-    verdict=severity==='bad'?'SB/BTNの降りすぎ':'SB/BTNフォールド下限';
-    multiplier=severity==='bad'?1.36:1.14;
-  }else if(d.street==='preflop'&&!facing&&(d.action==='raise'||d.action==='call'||d.action==='allin')&&sb){
-    lane=d.action==='call'?'sbLimp':d.action==='allin'?'sbJam':'sbOpen';
-    severity='good';verdict='SB/BTNの参加は自然';multiplier=0.86;
-    policy='HUのSB/BTNは非常に広く参加します。レイズ中心に、相手次第でリンプも混ぜます。';
+    severity=playable?'bad':'border';
+    verdict=playable?'SB/BTNの降りすぎ':'SB/BTNフォールド下限';
+    multiplier=playable?1.38:1.12;
+    policy='HUのSB/BTNは非常に広く参加します。弱すぎる手以外は、レイズ・リンプ・一部jamで先に主導権を取りに行きます。';
+  }else if(d.street==='preflop'&&!facing&&d.action==='call'&&sb){
+    lane='sbLimp';
+    severity=playable?'good':'border';
+    verdict=playable?'SB/BTNリンプ混合':'弱いSB/BTNリンプ';
+    multiplier=playable?0.90:1.06;
+    policy='HUのSB/BTNリンプは逃げではなく混合戦略です。相手が3bet/押し返し過多なら、リンプでポットを制御する価値があります。';
+  }else if(d.street==='preflop'&&!facing&&(d.action==='raise'||d.action==='allin')&&sb){
+    lane=d.action==='allin'?'sbJam':'sbOpen';
+    severity=playable?'good':'border';
+    verdict=d.action==='allin'?'SB/BTNの先入れjam':'SB/BTNの主導権オープン';
+    multiplier=playable?0.84:1.06;
+    policy='HUのSB/BTNはレイズ中心で広く参加します。小さめオープンでBBに圧をかけ、降りすぎを許しません。';
   }else if(d.street==='preflop'&&facing&&bb&&d.action==='fold'){
     lane='bbFold';
     severity=playable?'bad':'border';
     verdict=playable?'BB防衛の降りすぎ':'BB防衛下限フォールド';
-    multiplier=playable?1.30:1.08;
+    multiplier=playable?1.32:1.08;
     risk='HUのBBは相手SBレンジが広いため、フルリングよりかなり広く守ります。';
   }else if(d.street==='preflop'&&facing&&bb&&d.action==='call'){
     lane='bbDefend';
     severity=playable?'good':'border';
     verdict=playable?'BB防衛として自然':'弱いBB防衛';
     multiplier=playable?0.88:1.06;
+    policy='HUのBBコールは広くて自然です。ただし弱いオフスーツは、コール後の実現率が落ちます。';
   }else if(d.street==='preflop'&&facing&&bb&&(d.action==='raise'||d.action==='allin')){
     lane='bb3bet';
-    severity=frac<=0.34||pair||suited?'good':'border';
-    verdict='BBの押し返し';
-    multiplier=severity==='good'?0.90:1.08;
+    severity=strongDefend?'good':'border';
+    verdict=d.action==='allin'?'BBの押し返しjam':'BBの3bet圧';
+    multiplier=strongDefend?0.88:1.08;
+    policy='HUのBBはコールだけでなく、ペア・強いスーテッド・ブロッカーで押し返す頻度も必要です。';
+  }else if(d.street!=='preflop'&&(d.action==='raise'||d.action==='allin')&&d.toCall===0){
+    lane=sizePct<=45?'postflopSmallBet':sizePct>=90?'postflopBigBet':'postflopBet';
+    severity=sizePct<=45?'good':'normal';
+    verdict=sizePct<=45?'HU小ベットで主導権':'HUポストフロップベット';
+    multiplier=sizePct<=45?0.90:0.98;
+    policy='HUのポストフロップは小さなベットで広いレンジを押し、薄いバリューとプロテクションを取りに行く頻度が増えます。';
   }else if(d.street!=='preflop'&&d.action==='check'&&d.toCall===0){
     lane='postflopCheck';
     severity='border';verdict='HUの受け身チェック';
@@ -1010,12 +1030,12 @@ function tournamentHeadsUpProfile(ctx,d,stackBB,pos,holeCards){
   }
   return{
     phase:'HU',lane,severity,verdict,policy,risk,multiplier,
-    playable,handFrac:Math.round(frac*100),position:pos,stackBB,
+    playable,strongDefend,handFrac:Math.round(frac*100),position:pos,stackBB,sizePct,
     deepAxes:[
-      'SB参加頻度=広い',
-      'BB防衛=広いが選別',
-      '3bet/押し返し=ブロッカーとペア重視',
-      'ポストフロップ=小ベット/薄い受け増加',
+      'SB参加頻度=レイズ中心+リンプ混合',
+      'BB防衛=広いが弱オフは選別',
+      '3bet/押し返し=ペア/スーテッド/ブロッカー',
+      'ポストフロップ=小ベットと薄い受けが増加',
       'ICM圧=低'
     ]
   };
@@ -4811,6 +4831,17 @@ function analyzeHand(hr){
   // [Codex fix 2026-06-03] Tモードでは同じ判断軸でも序盤/中盤/バブル/FT/HUで減点の教育重みを変える。
   function applyTournamentPhaseWeight(ev){
     const before=ev.deduction||0;
+    const earlyHu=ev.headsUpProfile||null;
+    // [Codex fix 2026-06-05] HUの参加/防衛不足は、通常レンジ判定が正当フォールドにしてもHU文脈のミスとして先に扱う。
+    if(!before&&ev.tournamentPhase==='HU'&&earlyHu&&earlyHu.severity==='bad'&&ev.action==='fold'){
+      const next=earlyHu.lane==='sbFold'?18:earlyHu.lane==='bbFold'?16:10;
+      ev.deduction=next;
+      ev.quality='bad';
+      ev.phaseWeightNote='HU「'+earlyHu.verdict+'」。'+earlyHu.policy+' '+earlyHu.risk;
+      ev.comment=(ev.comment||'').replace(/^正解。?/,'')+' 【フェーズ判定】'+ev.phaseWeightNote+'。';
+      ev.suggest=earlyHu.lane==='sbFold'?'推奨: レイズ/リンプ中心。弱すぎる手以外は参加頻度を確保':'推奨: BBは相手SBレンジに対して広めに防衛';
+      return next-before;
+    }
     if(!before||!ev.tournamentPhase)return 0;
     let next=before;
     const notes=[];
@@ -4952,6 +4983,8 @@ function analyzeHand(hr){
     }else if(phase==='HU'){
       if(ev.action==='fold'){
         next=Math.round(next*(hp?hp.multiplier:1.28));
+        if(hp&&hp.severity==='bad'&&hp.lane==='sbFold')next=Math.max(next,18);
+        else if(hp&&hp.severity==='bad'&&hp.lane==='bbFold')next=Math.max(next,16);
         notes.push(hp?'HU「'+hp.verdict+'」。'+hp.policy+' '+hp.risk:'HUはレンジが大きく広がるため、降りすぎを重く採点');
       }else if(ev.action==='check'&&ev.quality==='bad'){
         next=Math.round(next*(hp?hp.multiplier:1.15));
@@ -6613,6 +6646,64 @@ function runFishTankRegressionTests(){
     const ev=humanEval(analyzeHand(hr),e=>e.action==='call');
     const lp=ev&&ev.finalTableLearningPoint;
     return !!(lp&&lp.category==='FTフラット過多'&&ev.quality==='bad'&&!/^正解/.test(ev.comment||''));
+  });
+
+  add('HU深掘り: SB/BTNリンプを混合戦略として区別する',function(){
+    const ctx={enabled:true,phase:'HU',stackBB:25,players:2,playersLeft:2,seatsPaid:1,sb:1000,bb:2000,bbAnte:0,bbAnteBB:0,focusId:'hu_aggression',focusLabel:'HU攻防'};
+    const hr=regressionHand({
+      heroHole:['Js','8s'],
+      bigBlind:2000,
+      tournamentContext:ctx,
+      decisions:[
+        regressionDecision({street:'preflop',action:'call',amount:1000,pot:3000,toCall:1000,potOdds:1000/4000,facingRaise:false,position:'BTN',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:50000,pfRaiseCountBefore:0,pfFacingBetLevel:0,pfActionBetLevel:1})
+      ]
+    });
+    const ev=humanEval(analyzeHand(hr),e=>e.action==='call');
+    return !!(ev&&ev.headsUpProfile&&ev.headsUpProfile.lane==='sbLimp'&&ev.headsUpProfile.severity==='good');
+  });
+
+  add('HU深掘り: SB/BTNのプレイアブルハンド降りすぎを重く見る',function(){
+    const ctx={enabled:true,phase:'HU',stackBB:25,players:2,playersLeft:2,seatsPaid:1,sb:1000,bb:2000,bbAnte:0,bbAnteBB:0,focusId:'hu_aggression',focusLabel:'HU攻防'};
+    const hr=regressionHand({
+      heroHole:['Qd','2c'],
+      bigBlind:2000,
+      tournamentContext:ctx,
+      decisions:[
+        regressionDecision({street:'preflop',action:'fold',amount:0,pot:3000,toCall:1000,facingRaise:false,position:'BTN',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:50000,pfRaiseCountBefore:0,pfFacingBetLevel:0,pfActionBetLevel:0})
+      ]
+    });
+    const ev=humanEval(analyzeHand(hr),e=>e.action==='fold');
+    return !!(ev&&ev.headsUpProfile&&ev.headsUpProfile.lane==='sbFold'&&ev.headsUpProfile.severity==='bad'&&(ev.deduction||0)>=18);
+  });
+
+  add('HU深掘り: BBのAxs押し返しを3bet圧として肯定する',function(){
+    const ctx={enabled:true,phase:'HU',stackBB:25,players:2,playersLeft:2,seatsPaid:1,sb:1000,bb:2000,bbAnte:0,bbAnteBB:0,focusId:'hu_aggression',focusLabel:'HU攻防'};
+    const hr=regressionHand({
+      heroHole:['Ad','5d'],
+      bigBlind:2000,
+      tournamentContext:ctx,
+      decisions:[
+        regressionDecision({street:'preflop',action:'raise',amount:4000,pot:3000,toCall:1000,facingRaise:false,position:'BTN',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:50000,pfRaiseCountBefore:0,pfFacingBetLevel:0,pfActionBetLevel:2}),
+        regressionDecision({street:'preflop',action:'raise',amount:12000,pot:7000,toCall:2000,potOdds:2000/9000,facingRaise:true,position:'BB',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:50000,pfRaiseCountBefore:1,pfFacingBetLevel:2,pfActionBetLevel:3})
+      ]
+    });
+    const ev=humanEval(analyzeHand(hr),e=>e.isHuman&&e.position==='BB'&&e.action==='raise');
+    return !!(ev&&ev.headsUpProfile&&ev.headsUpProfile.lane==='bb3bet'&&ev.headsUpProfile.severity==='good'&&ev.quality!=='bad');
+  });
+
+  add('HU深掘り: ポストフロップ小ベットを主導権維持として区別する',function(){
+    const ctx={enabled:true,phase:'HU',stackBB:25,players:2,playersLeft:2,seatsPaid:1,sb:1000,bb:2000,bbAnte:0,bbAnteBB:0,focusId:'hu_aggression',focusLabel:'HU攻防'};
+    const hr=regressionHand({
+      heroHole:['Kd','7d'],
+      board:['Qh','7s','2c'],
+      bigBlind:2000,
+      tournamentContext:ctx,
+      decisions:[
+        regressionDecision({street:'flop',action:'raise',amount:1600,pot:5000,toCall:0,facingRaise:false,position:'BTN',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:50000})
+      ]
+    });
+    const ev=humanEval(analyzeHand(hr),e=>e.street==='flop'&&e.action==='raise');
+    return !!(ev&&ev.headsUpProfile&&ev.headsUpProfile.lane==='postflopSmallBet'&&ev.headsUpProfile.severity==='good');
   });
 
   add('HUのBB防衛コールは専用プロファイルで広く許容する',function(){
