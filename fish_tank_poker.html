@@ -7846,61 +7846,96 @@ function firstUsefulSentence(s){
   const skip=/^(正解|チェック|コール|フォールド|ベット|レイズ|オールイン|Raw EQ|EQ約|EV優位|EV損失|若干|GTOソルバー|推定では|サイズ|評価メタ)/;
   return (parts.find(p=>!skip.test(p))||parts[0]||'').replace(/（Raw EQ約[^）]+）/g,'').replace(/（EQ約[^）]+）/g,'');
 }
+function naturalRiskText(risk,actor){
+  const txt=plainReviewText(risk);
+  if(!txt)return'';
+  let m=txt.match(/サイズ(\d+)%pot\s*\/\s*([^\/]+)\s*\/\s*相手圧力(\d+)回/);
+  if(m){
+    const board=m[2].replace(/ボード/g,'').replace(/\s+/g,'').trim();
+    const pressure=+m[3]>0?'ここまで相手の圧力は'+m[3]+'回入っています。':'ここまで相手の強い圧力は入っていません。';
+    return (actor||'サイズ')+'は'+m[1]+'%potで、ボードは'+board+'寄り。'+pressure;
+  }
+  m=txt.match(/SPR約([^\/]+)\s*\/\s*([^\/]+)\s*\/\s*圧力(\d+)段階/);
+  if(m)return'SPRは約'+m[1].trim()+'、ボードは'+m[2].trim()+'。相手の圧力は'+m[3]+'段階あります。';
+  return txt.replace(/\s*\/\s*/g,'、');
+}
+function naturalRecommendationText(rec){
+  let r=plainReviewText(rec).replace(/^推奨:\s*/,'').replace(/^候補:\s*/,'').replace(/^相手依存:\s*/,'相手次第では');
+  r=r.replace(/^推奨頻度:\s*/,'頻度感は');
+  return r;
+}
+function recommendationClose(action,quality,rec,hasSuggest){
+  rec=naturalRecommendationText(rec);
+  if(quality==='bad'){
+    const cut=rec.indexOf('。');
+    const first=(cut>=0?rec.slice(0,cut):rec).trim();
+    const rest=(cut>=0?rec.slice(cut+1).trim():'');
+    let phrase=first;
+    if(/寄り$/.test(phrase))phrase+='にしたいです';
+    else if(!/(です|ます|する|しない|絞る|混ぜる|選ぶ)$/.test(phrase))phrase+='に寄せたいです';
+    return 'なので、今回は'+action+'よりも'+phrase+'。'+(rest?rest+'。':'');
+  }
+  if(quality==='good')return '今回の'+action+'は、その方針に合っています。'+(hasSuggest?'次も'+rec+'。':'');
+  return '今回の'+action+'はありですが、'+rec+'くらいの温度感です。';
+}
 function coachReviewText(ev){
   if(!ev)return'';
   const action={fold:'フォールド',check:'チェック',call:'コール',raise:(ev.street==='preflop'?'レイズ':'ベット'),allin:'オールイン'}[ev.action]||ev.action;
-  const verdict=ev.quality==='bad'?'この判断は見直し対象です。':ev.quality==='good'?'この判断は自然です。':'この判断は許容範囲ですが、条件付きです。';
+  const verdict=ev.quality==='bad'?'ここは修正したいです。':ev.quality==='good'?'ここはかなり自然です。':'ここはミックス寄りです。';
   let scene='';
   let reason='';
   let rec=ev.suggest||'';
   if(ev.headsUpRiverProfile){
     const p=ev.headsUpRiverProfile;
-    scene='HUのリバーで、'+p.risk+'です。';
+    const actor=p.lane==='call'?'相手のベット':p.lane==='bet'?'今回のベット':'サイズ';
+    scene='HUのリバーです。'+naturalRiskText(p.risk,actor);
     reason=p.policy;
   }else if(ev.finalTablePostflopProfile){
     const p=ev.finalTablePostflopProfile;
-    scene='FTのポストフロップで、'+p.risk+'です。';
+    const actor=p.lane==='call'?'相手のベット':p.lane==='bet'?'今回のベット':'サイズ';
+    scene='FTのポストフロップです。'+naturalRiskText(p.risk,actor);
     reason=p.policy;
   }else if(ev.finalTableRangeProfile){
     const p=ev.finalTableRangeProfile;
-    scene='FTのプリフロップで、'+(p.role||'現在の立場')+' / '+(p.opponent||'相手')+'との衝突です。';
-    reason=tournamentFinalTableRangeProfileText(p);
+    scene='FTのプリフロップです。'+(p.role||'今のスタック')+'で、'+(p.opponent||'相手')+'とぶつかる形です。';
+    reason=p.severity==='bad'?'この立場では受けるレンジをかなり絞りたいところです。':tournamentFinalTableRangeProfileText(p);
   }else if(ev.finalTableProfile){
     const p=ev.finalTableProfile;
-    scene='FTで、'+(p.stackRole||'スタック立場')+'としての判断です。';
+    scene='FTで、'+(p.stackRole||'このスタック')+'として動く場面です。';
     reason=p.policy||tournamentFinalTableProfileText(p);
   }else if(ev.bubbleProfile){
     const p=ev.bubbleProfile;
     scene='バブル付近で、'+p.archetype+'の立場です。';
-    reason=p.policy+' '+p.risk;
+    reason=p.policy+' '+naturalRiskText(p.risk);
   }else if(ev.middleProfile){
     const p=ev.middleProfile;
     scene='中盤の'+p.band+'です。';
-    reason=p.policy+' '+p.risk;
+    reason=p.policy+' '+naturalRiskText(p.risk);
   }else if(ev.earlyProfile){
     const p=ev.earlyProfile;
     scene='序盤の参加判断です。';
-    reason=(p.participationLeak||p.verdict)+'。'+(p.recommendedRoute?' 推奨経路は'+p.recommendedRoute+'です。':'');
+    reason=(p.participationLeak||p.verdict)+'。'+(p.recommendedRoute?' 参加するなら'+p.recommendedRoute+'に整理したいです。':'');
   }else if(ev.headsUpProfile){
     const p=ev.headsUpProfile;
-    scene='HUで、'+p.verdict+'の場面です。';
-    reason=p.policy+' '+p.risk;
+    scene='HUで、'+p.verdict+'がテーマになる場面です。';
+    reason=p.policy+' '+naturalRiskText(p.risk);
   }else if(ev.onePairProfile){
     const p=ev.onePairProfile;
-    scene='ワンペアの扱いが主題です。';
-    reason=p.policy+' '+p.risk;
+    scene='ワンペアをどこまで信じるかがテーマです。';
+    reason=p.policy+' '+naturalRiskText(p.risk);
   }else{
     scene=firstUsefulSentence(ev.comment)||'この場面の判断です。';
     reason='';
   }
   if(!rec&&ev.strategyMix)rec='推奨頻度: '+ev.strategyMix;
   if(!rec){
-    if(ev.quality==='bad')rec='推奨は別ラインを選ぶことです。';
-    else if(ev.quality==='good')rec='同じ方針で問題ありません。';
-    else rec='相手傾向とサイズ次第で混ぜます。';
+    if(ev.quality==='bad')rec='別ラインに寄せたいです';
+    else if(ev.quality==='good')rec='この方針で大丈夫です';
+    else rec='相手傾向とサイズ次第で混ぜます';
   }
-  const sizeHint=(ev.suggest&&/(%pot|ポット|BB|T)/.test(ev.suggest))?'':'';
-  return verdict+' '+scene+(reason?' '+reason:'')+' 今回の'+action+'に対しては、'+rec.replace(/^推奨:\s*/,'')+sizeHint;
+  rec=naturalRecommendationText(rec);
+  const close=recommendationClose(action,ev.quality,rec,!!ev.suggest);
+  return (verdict+' '+scene+(reason?' '+reason:'')+' '+close).replace(/\s+/g,' ').replace(/。。+/g,'。').trim();
 }
 function compactReviewDetailsHTML(ev,metaHTML){
   if(!metaHTML)return'';
