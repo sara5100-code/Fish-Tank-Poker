@@ -810,6 +810,65 @@ function tournamentFinalTablePostflopProfileText(p){
   const lane={check:'チェック',call:'コール',bet:'ベット/レイズ'}[p.lane]||p.lane;
   return p.street.toUpperCase()+' / '+lane+' / '+p.verdict+'：'+p.policy+' 注意: '+p.risk;
 }
+// [Codex fix 2026-06-05] FT評価の複数軸を、利用者が次に直すべき一つの学習テーマへ集約する。
+function tournamentFinalTableLearningPoint(ev){
+  if(!ev||ev.tournamentPhase!=='FT')return null;
+  const fp=ev.finalTableProfile||null;
+  const frp=ev.finalTableRangeProfile||(fp&&fp.rangeProfile)||null;
+  const fpp=ev.finalTablePostflopProfile||null;
+  const role=fp&&fp.stackRole||frp&&frp.role||fpp&&fpp.stackRole||'不明';
+  const opponent=(fp&&fp.collisionProfile&&fp.collisionProfile.opponent)||frp&&frp.opponent||fpp&&fpp.opponent||'不明';
+  let category='',title='',point='',drill='',severity='normal',priority=0;
+  if(frp&&frp.lane==='callOff'&&frp.severity==='bad'){
+    category='FT受けすぎ';
+    title=role+'が'+opponent+'を受けるレンジを絞る';
+    point='FTのオールイン受けは、必要EQより「負けた時に順位が崩れる相手か」を先に見ます。';
+    drill='同じ手で Call ではなく Fold を選ぶ相手、受けてよい相手を分ける。';
+    severity='bad';priority=95;
+  }else if(fpp&&fpp.lane==='call'&&fpp.severity==='bad'){
+    category='FTワンペア受け';
+    title='カバーされる側のリバー/大きめコールを減らす';
+    point='FTで上位/同格にカバーされる時、ワンペアや弱いSDVはchipEVより順位落ちの痛みが大きくなります。';
+    drill='リバーで「相手がバリュー過多なら降りる」を先に宣言してからコール判断する。';
+    severity='bad';priority=90;
+  }else if(fpp&&fpp.lane==='bet'&&fpp.severity==='bad'){
+    category='FTポット管理';
+    title='カバーされる側で自分から大きなポットを作らない';
+    point='FTではワンペア/弱いSDVから大きく打つほど、失敗時にペイジャンプを捨てる形になります。';
+    drill='危険ボードではチェックまたは小サイズを第一候補に置く。';
+    severity='bad';priority=82;
+  }else if(frp&&frp.severity==='good'&&ev.action==='fold'&&frp.lane!=='callOff'){
+    category='FT先入れ不足';
+    title=role+'の先入れスポットを逃さない';
+    point='FTでも待ちすぎるとアンティで順位が落ちます。特に最短ショートはフォールドエクイティが残るうちに入れます。';
+    drill='後ろ寄りで先に入れる候補を、Fold前にOpen/Open jamへ置き換えて確認する。';
+    severity='border';priority=78;
+  }else if(fp&&fp.lane==='callOff'&&fp.collisionProfile&&(opponent==='上位カバー'||opponent==='同格')){
+    category='FT衝突相手';
+    title='ぶつかる相手を選ぶ';
+    point='同じハンドでも、ショート相手とCL級相手では受ける価値が変わります。';
+    drill='アクション前に「負けても残る相手か、飛ばされる相手か」を声に出す。';
+    severity='border';priority=70;
+  }else if(fpp&&fpp.lane==='check'&&fpp.severity==='good'){
+    category='FTポット管理';
+    title='チェックで順位を守る判断を肯定する';
+    point='カバーされる側のチェックは弱さではなく、SPRと順位を守る手段です。';
+    drill='危険ボードでは「打つ理由」より先に「打たない価値」を確認する。';
+    severity='good';priority=52;
+  }else if(fpp&&fpp.severity==='good'&&fp&&fp.stackRole==='チップリーダー'){
+    category='FTカバー圧';
+    title='カバー側は相手を選んで圧を使う';
+    point='ショート相手にはカバー圧と強いSDVを活かせます。CL級との衝突とは別物です。';
+    drill='相手がショートなら受け/バリュー、同格以上なら衝突回避を切り替える。';
+    severity='good';priority=45;
+  }
+  if(!title)return null;
+  return{phase:'FT',category,title,point,drill,severity,priority,role,opponent};
+}
+function tournamentFinalTableLearningPointText(p){
+  if(!p)return'';
+  return p.category+'：'+p.title+'。'+p.point+' 練習: '+p.drill;
+}
 function tournamentFinalTableProfile(ctx,d,stackBB,pos,holeCards){
   if(!ctx||!ctx.enabled||ctx.phase!=='FT'||!d)return null;
   const ht=holeCards&&holeCards.length>=2?handType(holeCards[0],holeCards[1]):'';
@@ -5584,6 +5643,7 @@ function analyzeHand(hr){
     applyTournamentPhaseWeight(ev);
     applyOnePairProfileWeight(ev);
     applyFinalTablePostflopWeight(ev);
+    ev.finalTableLearningPoint=tournamentFinalTableLearningPoint(ev);
     const scoredAfter=scoredDeduction(ev);
     if(scoredAfter!==scoredBefore)score-=(scoredAfter-scoredBefore);
     evals.push(ev);
@@ -6458,6 +6518,54 @@ function runFishTankRegressionTests(){
     return !!(ev&&ev.finalTablePostflopProfile&&ev.finalTablePostflopProfile.verdict==='coverValue'&&ev.finalTablePostflopProfile.severity==='good');
   });
 
+  add('FT学習テーマ: CL級への受けすぎを一つの修正テーマにする',function(){
+    const ctx={enabled:true,phase:'FT',stackBB:30,players:6,playersLeft:6,seatsPaid:3,sb:800,bb:1600,bbAnte:1600,bbAnteBB:1,focusId:'ft_payjump',focusLabel:'FTペイジャンプ'};
+    const hr=regressionHand({
+      heroHole:['Qs','Js'],
+      bigBlind:1600,
+      tournamentContext:ctx,
+      decisions:[
+        regressionDecision({street:'preflop',action:'allin',amount:88000,pot:4000,toCall:1600,facingRaise:false,position:'SB',playerName:'CL',isHuman:false,playerIdx:1,playerChipsBefore:88000,pfRaiseCountBefore:0,pfFacingBetLevel:0,pfActionBetLevel:2}),
+        regressionDecision({street:'preflop',action:'call',amount:48000,pot:92000,toCall:48000,potOdds:48000/140000,facingRaise:true,position:'BB',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:48000,pfRaiseCountBefore:1,pfFacingBetLevel:2,pfActionBetLevel:2,coverState:'covered',coverLabel:'カバーされている',coverPressure:'高',stackRank:2,shorterStackCount:4,coverCount:4,coveredByCount:1,villainChipsBefore:88000})
+      ]
+    });
+    const ev=humanEval(analyzeHand(hr),e=>e.action==='call');
+    const lp=ev&&ev.finalTableLearningPoint;
+    return !!(lp&&lp.category==='FT受けすぎ'&&/上位カバー/.test(lp.title)&&/受け/.test(tournamentFinalTableLearningPointText(lp)));
+  });
+
+  add('FT学習テーマ: リバーワンペア受けをFTワンペア受けに集約する',function(){
+    const ctx={enabled:true,phase:'FT',stackBB:24,players:6,playersLeft:6,seatsPaid:3,sb:800,bb:1600,bbAnte:1600,bbAnteBB:1,focusId:'ft_payjump',focusLabel:'FTペイジャンプ'};
+    const hr=regressionHand({
+      heroHole:['Kd','Qd'],
+      board:['Qh','9h','8s','2c','3d'],
+      bigBlind:1600,
+      tournamentContext:ctx,
+      decisions:[
+        regressionDecision({street:'river',action:'call',amount:9600,pot:25600,toCall:9600,potOdds:9600/35200,facingRaise:true,position:'BB',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:38400,coverState:'covered',coverLabel:'カバーされている',coverPressure:'高',stackRank:4,shorterStackCount:2,coverCount:2,coveredByCount:2,villainChipsBefore:88000})
+      ]
+    });
+    const ev=humanEval(analyzeHand(hr),e=>e.street==='river'&&e.action==='call');
+    const lp=ev&&ev.finalTableLearningPoint;
+    return !!(lp&&lp.category==='FTワンペア受け'&&lp.severity==='bad');
+  });
+
+  add('FT学習テーマ: 良いポット管理チェックを肯定テーマにする',function(){
+    const ctx={enabled:true,phase:'FT',stackBB:24,players:6,playersLeft:6,seatsPaid:3,sb:800,bb:1600,bbAnte:1600,bbAnteBB:1,focusId:'ft_payjump',focusLabel:'FTペイジャンプ'};
+    const hr=regressionHand({
+      heroHole:['Kd','Qd'],
+      board:['Qh','9h','8s','2c'],
+      bigBlind:1600,
+      tournamentContext:ctx,
+      decisions:[
+        regressionDecision({street:'turn',action:'check',amount:0,pot:9600,toCall:0,facingRaise:false,position:'BB',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:38400,coverState:'covered',coverLabel:'カバーされている',coverPressure:'高',stackRank:4,shorterStackCount:2,coverCount:2,coveredByCount:2,villainChipsBefore:88000})
+      ]
+    });
+    const ev=humanEval(analyzeHand(hr),e=>e.street==='turn'&&e.action==='check');
+    const lp=ev&&ev.finalTableLearningPoint;
+    return !!(lp&&lp.category==='FTポット管理'&&lp.severity==='good'&&/チェック/.test(tournamentFinalTableLearningPointText(lp)));
+  });
+
   add('HUのBB防衛コールは専用プロファイルで広く許容する',function(){
     const ctx={enabled:true,phase:'HU',stackBB:25,players:2,playersLeft:2,seatsPaid:1,sb:1000,bb:2000,bbAnte:0,bbAnteBB:0,focusId:'hu_aggression',focusLabel:'HU攻防'};
     const hr=regressionHand({
@@ -7033,6 +7141,15 @@ function auditIssuesForHand(hr,an,label){
     if(e.onePairProfile&&e.onePairProfile.verdict==='bad'&&/明確なコール|EV優位/.test(c)){
       addAuditIssue(issues,'high','one-pair-call-contradiction',street+' '+action+' はワンペア警戒プロファイルと「明確コール」コメントが衝突しています。',{onePairProfile:e.onePairProfile,comment:c});
     }
+    if(e.finalTableLearningPoint&&e.finalTableLearningPoint.severity==='bad'&&e.quality==='good'){
+      addAuditIssue(issues,'high','ft-learning-contradiction',street+' '+action+' はFT学習テーマが危険扱いなのに、評価が良判定になっています。',{finalTableLearningPoint:e.finalTableLearningPoint,comment:c});
+    }
+    if(e.finalTablePostflopProfile&&e.finalTablePostflopProfile.severity==='bad'&&!e.finalTableLearningPoint){
+      addAuditIssue(issues,'medium','ft-learning-missing',street+' '+action+' はFTポストフロップで危険扱いなのに、利用者向け学習テーマに集約されていません。',{finalTablePostflopProfile:e.finalTablePostflopProfile,comment:c});
+    }
+    if(e.finalTableRangeProfile&&e.finalTableRangeProfile.severity==='bad'&&!e.finalTableLearningPoint){
+      addAuditIssue(issues,'medium','ft-learning-missing',street+' '+action+' はFTレンジ表で危険扱いなのに、利用者向け学習テーマに集約されていません。',{finalTableRangeProfile:e.finalTableRangeProfile,comment:c});
+    }
     if(e.street==='flop'&&e.action==='check'&&e.donkProfile&&e.donkProfile.severity==='good'&&dec>=8){
       addAuditIssue(issues,'medium','donk-check-weight','OOPチェックが自然なドンク抑制局面なのに減点が残っています。',{deduction:dec,donkProfile:e.donkProfile});
     }
@@ -7069,6 +7186,8 @@ function auditIssuePriorityWeight(issue){
     'premise-context':145,
     'comment-deduction-contradiction':130,
     'one-pair-call-contradiction':120,
+    'ft-learning-contradiction':118,
+    'ft-learning-missing':92,
     'scenario-quality':95,
     'large-deduction':80,
     'donk-check-weight':70,
@@ -7085,6 +7204,8 @@ function auditRepairSuggestion(type){
     'premise-context':'プリフロップの名前付けを修正。リンプ→アイソ、3BET→4BET、BBディフェンスを誤ると後続評価もずれる。',
     'comment-deduction-contradiction':'コメント生成と減点結果の最終整合レイヤーを追加。「正当なら最初から正当」と書かせる。',
     'one-pair-call-contradiction':'リバーワンペアのコール/フォールド軸を優先確認。完成ボード・大サイズ・複数ストリート圧力を重く見る。',
+    'ft-learning-contradiction':'FT学習テーマと最終品質判定を同期する。危険テーマが出る時は肯定コメントで正当化しない。',
+    'ft-learning-missing':'FTレンジ表/FTポストフロップの危険判定を、利用者が次に直す一つの学習テーマへ集約する。',
     'scenario-quality':'フロップ練習の生成条件を見直す。SPR/参加人数/ヒーロー行動余地がある出題だけ通す。',
     'large-deduction':'大減点の理由がユーザーに伝わるか確認。サイズ違い・ライン違い・局面違いを分けて説明する。',
     'donk-check-weight':'OOP側チェックを自然扱いする主導権/ドンク判定を見直す。',
@@ -7518,6 +7639,7 @@ function showAnalysis(hr,fromHistory){
     for(const ev of an.evals){if(!stEvMap[ev.street])stEvMap[ev.street]=[];stEvMap[ev.street].push(ev);}
     // [Codex fix 2026-05-30] 同じTモード学習ポイントが各ストリートに重なると読みにくいため、リザルト内では一度だけ表示する。
     const shownTournamentLessons=new Set();
+    const shownFinalTableLessons=new Set();
     const stLbl={preflop:'PREFLOP',flop:'FLOP',turn:'TURN',river:'RIVER'};
     const gradeCol={'S':'#d4a820','A':'#22a46c','B':'#3d6cf0','C':'#d87020','D':'#e04848','F':'#9333ea'};
     function metaChip(label,value,color){
@@ -7566,6 +7688,7 @@ function showAnalysis(hr,fromHistory){
       if(ev.finalTableProfile&&ev.finalTableProfile.collisionProfile)m+=metaChip('FT衝突相手',ev.finalTableProfile.collisionProfile.opponent+(ev.finalTableProfile.collisionProfile.oppBB?' '+ev.finalTableProfile.collisionProfile.oppBB+'BB':''),'var(--gold)');
       if(ev.finalTableRangeProfile)m+=metaChip('FTレンジ表',ev.finalTableRangeProfile.verdict+' / '+ev.finalTableRangeProfile.label,ev.finalTableRangeProfile.severity==='bad'?'var(--red)':ev.finalTableRangeProfile.severity==='border'?'var(--gold)':'var(--green)');
       if(ev.finalTablePostflopProfile)m+=metaChip('FTポストF',tournamentFinalTablePostflopProfileText(ev.finalTablePostflopProfile),ev.finalTablePostflopProfile.severity==='bad'?'var(--red)':ev.finalTablePostflopProfile.severity==='good'?'var(--green)':'var(--gold)');
+      if(ev.finalTableLearningPoint)m+=metaChip('FT学習',ev.finalTableLearningPoint.category+' / '+ev.finalTableLearningPoint.title,ev.finalTableLearningPoint.severity==='bad'?'var(--red)':ev.finalTableLearningPoint.severity==='good'?'var(--green)':'var(--gold)');
       if(ev.finalTableProfile&&ev.finalTableProfile.deepAxes)m+=metaChip('FT5軸',ev.finalTableProfile.deepAxes.join(' / '),'var(--gold)');
       if(ev.headsUpProfile)m+=metaChip('HU評価',tournamentHeadsUpProfileText(ev.headsUpProfile),ev.headsUpProfile.severity==='bad'?'var(--red)':ev.headsUpProfile.severity==='good'?'var(--green)':'var(--gold)');
       if(ev.headsUpProfile&&ev.headsUpProfile.deepAxes)m+=metaChip('HU5軸',ev.headsUpProfile.deepAxes.join(' / '),'var(--gold)');
@@ -7609,13 +7732,20 @@ function showAnalysis(hr,fromHistory){
         const poStr=ev.potOdds>0?' <span style="color:var(--dim)">(PO '+Math.round(ev.potOdds*100)+'%)</span>':'';
         const suggestHTML=ev.suggest?'<div style="margin-top:4px;color:var(--gold);font-size:10px;font-weight:600">▶ '+ev.suggest+'</div>':'';
         let tLessonHTML='';
+        let ftLessonHTML='';
         if(ev.tournamentLesson&&!shownTournamentLessons.has(ev.tournamentLesson)){
           shownTournamentLessons.add(ev.tournamentLesson);
           tLessonHTML='<div style="margin-top:6px;padding:6px 8px;border-left:3px solid var(--gold);background:rgba(212,168,32,.08);border-radius:6px;color:var(--text);font-size:10px;line-height:1.55"><strong style="color:var(--gold)">Tモード学習ポイント:</strong> '+ev.tournamentLesson+'</div>';
         }
+        if(ev.finalTableLearningPoint&&!shownFinalTableLessons.has(ev.finalTableLearningPoint.title)){
+          shownFinalTableLessons.add(ev.finalTableLearningPoint.title);
+          const lp=ev.finalTableLearningPoint;
+          const col=lp.severity==='bad'?'var(--red)':lp.severity==='good'?'var(--green)':'var(--gold)';
+          ftLessonHTML='<div style="margin-top:6px;padding:6px 8px;border-left:3px solid '+col+';background:rgba(212,168,32,.07);border-radius:6px;color:var(--text);font-size:10px;line-height:1.55"><strong style="color:'+col+'">FT学習テーマ:</strong> '+tournamentFinalTableLearningPointText(lp)+'</div>';
+        }
         const tRangeHTML=ev.tournamentRangeHint?'<div style="margin-top:5px;padding:5px 8px;border:1px dashed var(--border);background:var(--panel);border-radius:6px;color:var(--dim);font-size:10px;line-height:1.5"><strong style="color:var(--text)">Tレンジ目安:</strong> '+ev.tournamentRangeHint+'</div>':'';
         const tProfileHTML=ev.tournamentRangeProfile?'<div style="margin-top:5px;padding:5px 8px;border:1px solid rgba(61,108,240,.18);background:rgba(61,108,240,.06);border-radius:6px;color:var(--text);font-size:10px;line-height:1.5"><strong style="color:var(--accent)">Tレンジ判定:</strong> '+tournamentRangeProfileText(ev.tournamentRangeProfile)+'</div>':'';
-        html+='<div class="decision-row '+ev.quality+'"><div class="dr-action '+ev.quality+'">'+actLabel+'</div><div>'+decisionMeta(ev)+ev.comment+poStr+tLessonHTML+tRangeHTML+tProfileHTML+suggestHTML+'</div></div>';
+        html+='<div class="decision-row '+ev.quality+'"><div class="dr-action '+ev.quality+'">'+actLabel+'</div><div>'+decisionMeta(ev)+ev.comment+poStr+tLessonHTML+ftLessonHTML+tRangeHTML+tProfileHTML+suggestHTML+'</div></div>';
       }
     }
     html+='</div>';
@@ -7736,6 +7866,7 @@ function buildHandHistoryText(includeContext){
       if(ev.finalTableProfile&&ev.finalTableProfile.collisionProfile)meta.push('FT衝突相手='+ev.finalTableProfile.collisionProfile.opponent+(ev.finalTableProfile.collisionProfile.oppBB?' '+ev.finalTableProfile.collisionProfile.oppBB+'BB':''));
       if(ev.finalTableRangeProfile)meta.push('FTレンジ表='+tournamentFinalTableRangeProfileText(ev.finalTableRangeProfile));
       if(ev.finalTablePostflopProfile)meta.push('FTポストF='+tournamentFinalTablePostflopProfileText(ev.finalTablePostflopProfile));
+      if(ev.finalTableLearningPoint)meta.push('FT学習='+tournamentFinalTableLearningPointText(ev.finalTableLearningPoint));
       if(ev.headsUpProfile)meta.push('HU評価='+tournamentHeadsUpProfileText(ev.headsUpProfile));
       if(ev.toCall>0)meta.push('必要コール='+ev.toCall);
       if(ev.potOdds>0)meta.push('必要EQ='+Math.round(ev.potOdds*100)+'%');
@@ -7924,6 +8055,7 @@ function evaluationSnapshot(hr,an){
         finalTableRangeProfile:e.finalTableRangeProfile||null,
         finalTablePostflopProfile:e.finalTablePostflopProfile||null,
         finalTablePostflopWeightNote:e.finalTablePostflopWeightNote||'',
+        finalTableLearningPoint:e.finalTableLearningPoint||null,
         headsUpProfile:e.headsUpProfile||null,
         stackRank:e.stackRank||null,
         shortestOppStackBB:e.shortestOppStackBB,
@@ -8933,7 +9065,7 @@ document.addEventListener('click',function(e){
   }
 });
 
-window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,runFishTankAuditBatch,fishTankAuditBatchReportText,buildFishTankAuditRepairQueue,fishTankAuditRepairPlanText,auditIssuesForHand,playAuditGame,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,liveCashRangeProfile,tournamentRangeProfile,tournamentFinalTableProfile,tournamentFinalTableStackRole,tournamentFinalTableCollisionProfile,tournamentFinalTableRangeProfile,tournamentFinalTableRangeProfileText,tournamentFinalTablePostflopProfile,tournamentFinalTablePostflopProfileText,tournamentHeadsUpProfile};
+window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,runFishTankAuditBatch,fishTankAuditBatchReportText,buildFishTankAuditRepairQueue,fishTankAuditRepairPlanText,auditIssuesForHand,playAuditGame,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,liveCashRangeProfile,tournamentRangeProfile,tournamentFinalTableProfile,tournamentFinalTableStackRole,tournamentFinalTableCollisionProfile,tournamentFinalTableRangeProfile,tournamentFinalTableRangeProfileText,tournamentFinalTablePostflopProfile,tournamentFinalTablePostflopProfileText,tournamentFinalTableLearningPoint,tournamentFinalTableLearningPointText,tournamentHeadsUpProfile};
 
 </script>
 </body>
