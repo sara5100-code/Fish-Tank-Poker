@@ -7836,6 +7836,76 @@ function setRaise(amt){
 }
 
 var _analysisFromHistory=false;
+function plainReviewText(s){
+  return String(s||'').replace(/<[^>]+>/g,'').replace(/【[^】]+】/g,'').replace(/評価メタ:[^。]*。?/g,'').replace(/\s+/g,' ').trim();
+}
+function firstUsefulSentence(s){
+  const txt=plainReviewText(s);
+  if(!txt)return'';
+  const parts=txt.split('。').map(x=>x.trim()).filter(Boolean);
+  const skip=/^(正解|チェック|コール|フォールド|ベット|レイズ|オールイン|Raw EQ|EQ約|EV優位|EV損失|若干|GTOソルバー|推定では|サイズ|評価メタ)/;
+  return (parts.find(p=>!skip.test(p))||parts[0]||'').replace(/（Raw EQ約[^）]+）/g,'').replace(/（EQ約[^）]+）/g,'');
+}
+function coachReviewText(ev){
+  if(!ev)return'';
+  const action={fold:'フォールド',check:'チェック',call:'コール',raise:(ev.street==='preflop'?'レイズ':'ベット'),allin:'オールイン'}[ev.action]||ev.action;
+  const verdict=ev.quality==='bad'?'この判断は見直し対象です。':ev.quality==='good'?'この判断は自然です。':'この判断は許容範囲ですが、条件付きです。';
+  let scene='';
+  let reason='';
+  let rec=ev.suggest||'';
+  if(ev.headsUpRiverProfile){
+    const p=ev.headsUpRiverProfile;
+    scene='HUのリバーで、'+p.risk+'です。';
+    reason=p.policy;
+  }else if(ev.finalTablePostflopProfile){
+    const p=ev.finalTablePostflopProfile;
+    scene='FTのポストフロップで、'+p.risk+'です。';
+    reason=p.policy;
+  }else if(ev.finalTableRangeProfile){
+    const p=ev.finalTableRangeProfile;
+    scene='FTのプリフロップで、'+(p.role||'現在の立場')+' / '+(p.opponent||'相手')+'との衝突です。';
+    reason=tournamentFinalTableRangeProfileText(p);
+  }else if(ev.finalTableProfile){
+    const p=ev.finalTableProfile;
+    scene='FTで、'+(p.stackRole||'スタック立場')+'としての判断です。';
+    reason=p.policy||tournamentFinalTableProfileText(p);
+  }else if(ev.bubbleProfile){
+    const p=ev.bubbleProfile;
+    scene='バブル付近で、'+p.archetype+'の立場です。';
+    reason=p.policy+' '+p.risk;
+  }else if(ev.middleProfile){
+    const p=ev.middleProfile;
+    scene='中盤の'+p.band+'です。';
+    reason=p.policy+' '+p.risk;
+  }else if(ev.earlyProfile){
+    const p=ev.earlyProfile;
+    scene='序盤の参加判断です。';
+    reason=(p.participationLeak||p.verdict)+'。'+(p.recommendedRoute?' 推奨経路は'+p.recommendedRoute+'です。':'');
+  }else if(ev.headsUpProfile){
+    const p=ev.headsUpProfile;
+    scene='HUで、'+p.verdict+'の場面です。';
+    reason=p.policy+' '+p.risk;
+  }else if(ev.onePairProfile){
+    const p=ev.onePairProfile;
+    scene='ワンペアの扱いが主題です。';
+    reason=p.policy+' '+p.risk;
+  }else{
+    scene=firstUsefulSentence(ev.comment)||'この場面の判断です。';
+    reason='';
+  }
+  if(!rec&&ev.strategyMix)rec='推奨頻度: '+ev.strategyMix;
+  if(!rec){
+    if(ev.quality==='bad')rec='推奨は別ラインを選ぶことです。';
+    else if(ev.quality==='good')rec='同じ方針で問題ありません。';
+    else rec='相手傾向とサイズ次第で混ぜます。';
+  }
+  const sizeHint=(ev.suggest&&/(%pot|ポット|BB|T)/.test(ev.suggest))?'':'';
+  return verdict+' '+scene+(reason?' '+reason:'')+' 今回の'+action+'に対しては、'+rec.replace(/^推奨:\s*/,'')+sizeHint;
+}
+function compactReviewDetailsHTML(ev,metaHTML){
+  if(!metaHTML)return'';
+  return '<details class="review-details" style="margin-top:7px"><summary style="cursor:pointer;color:var(--dim);font-size:10px;font-weight:700">詳細データ</summary><div style="margin-top:5px">'+metaHTML+'</div></details>';
+}
 function showAnalysis(hr,fromHistory){
   _analysisFromHistory=!!fromHistory;
   const an=analyzeHand(hr);
@@ -8059,7 +8129,9 @@ function showAnalysis(hr,fromHistory){
         }
         const tRangeHTML=ev.tournamentRangeHint?'<div style="margin-top:5px;padding:5px 8px;border:1px dashed var(--border);background:var(--panel);border-radius:6px;color:var(--dim);font-size:10px;line-height:1.5"><strong style="color:var(--text)">Tレンジ目安:</strong> '+ev.tournamentRangeHint+'</div>':'';
         const tProfileHTML=ev.tournamentRangeProfile?'<div style="margin-top:5px;padding:5px 8px;border:1px solid rgba(61,108,240,.18);background:rgba(61,108,240,.06);border-radius:6px;color:var(--text);font-size:10px;line-height:1.5"><strong style="color:var(--accent)">Tレンジ判定:</strong> '+tournamentRangeProfileText(ev.tournamentRangeProfile)+'</div>':'';
-        html+='<div class="decision-row '+ev.quality+'"><div class="dr-action '+ev.quality+'">'+actLabel+'</div><div>'+decisionMeta(ev)+ev.comment+poStr+tLessonHTML+ftLessonHTML+tRangeHTML+tProfileHTML+suggestHTML+'</div></div>';
+        const coachHTML='<div class="coach-review" style="font-size:12px;line-height:1.75;color:var(--text)">'+coachReviewText(ev)+'</div>';
+        const detailHTML=compactReviewDetailsHTML(ev,decisionMeta(ev)+poStr+tLessonHTML+ftLessonHTML+tRangeHTML+tProfileHTML+(ev.suggest?'<div style="margin-top:4px;color:var(--gold);font-size:10px;font-weight:600">推奨詳細: '+ev.suggest+'</div>':'')+'<div style="margin-top:5px;color:var(--dim);font-size:10px;line-height:1.5">'+plainReviewText(ev.comment)+'</div>');
+        html+='<div class="decision-row '+ev.quality+'"><div class="dr-action '+ev.quality+'">'+actLabel+'</div><div>'+coachHTML+detailHTML+'</div></div>';
       }
     }
     html+='</div>';
@@ -8155,7 +8227,8 @@ function buildHandHistoryText(includeContext){
       const aLabel=plainActionText(ev);
       const qual={good:'✓',ok:'△',bad:'✗'}[ev.quality]||'';
       // HTMLタグを除去してプレーンテキスト化
-      const comment=ev.comment.replace(/<[^>]+>/g,'');
+      const comment=plainReviewText(ev.comment);
+      const coach=coachReviewText(ev);
       txt+=qual+' ['+ev.street.toUpperCase()+'] '+aLabel+'\n';
       const meta=[];
       if(ev.position)meta.push('位置='+ev.position);
@@ -8194,9 +8267,9 @@ function buildHandHistoryText(includeContext){
       if(ev.tournamentRangeHint)meta.push('Tレンジ='+ev.tournamentRangeHint);
       if(ev.tournamentRangeProfile)meta.push('Tレンジ判定='+tournamentRangeProfileText(ev.tournamentRangeProfile));
       if(ev.deduction>0)meta.push('減点='+ev.deduction+'pt');
-      if(meta.length)txt+='   評価メタ: '+meta.join(' / ')+'\n';
-      txt+='   '+comment+'\n';
-      if(ev.suggest)txt+='   ▶ '+ev.suggest+'\n';
+      txt+='   コーチコメント: '+coach+'\n';
+      if(comment&&comment!==coach)txt+='   詳細説明: '+comment+'\n';
+      if(meta.length)txt+='   詳細メタ: '+meta.join(' / ')+'\n';
     }
   }
   return txt;
@@ -8380,6 +8453,7 @@ function evaluationSnapshot(hr,an){
         nextBBPressure:e.nextBBPressure||'',
         quality:e.quality,
         deduction:e.deduction||0,
+        coachComment:coachReviewText(e),
         suggest:e.suggest||'',
         strategyMix:e.strategyMix||'',
         rawEqPct:e.rawEqPct,
