@@ -1997,7 +1997,7 @@ function liveCashSpotProfile(hr,d,holeCards,role,tex,nOpponents,lineContext){
         risk='コールやリンプでは後ろからアイソされ、ポジション不利のまま難しいポストフロップになりやすいです。';
         suggest='推奨: 2.5〜3BBでオープン検討。ポジションと卓傾向次第';
       }else{
-        policy='参加レンジ外の手はポットに入らずフォールドするのが長期的に安定します。';
+        policy='参加レンジ外の手はコールやリンプをせずにフォールドするのが長期的に安定します。';
         risk='コールやリンプで参加してもトップペアでキッカー負けやOOP実現率の悪さに悩まされやすいです。';
         suggest='推奨: フォールドで問題ありません。参加レンジ外は無理に触らない';
       }
@@ -2412,7 +2412,12 @@ function liveCashRiverDecisionProfile(hr,d,role,tex,nOpponents){
   let lane='',verdict='',severity='border',policy='',risk='',suggest='';
   if(action==='call'&&facing&&onePair&&!strongMade){
     lane='riverOnePairCatch';
-    const heavy=sizePct>=65||pressure>=2||completed||multiway||weakPair||villainBetRiver&&villainCallRiver;
+    // [Claude fix 2026-06-10] strongOnePair(TPTK/トップペア等)はpressure>=2だけでheavy=trueにしない。
+    // KK66型でvillainがターンレイズ+リバーベットしても、TPTKは43%pot程度なら明確コール。
+    // heavyはsizePct>=65 OR 非strongOnePairのpressure>=2 OR weakPair等の時のみ。
+    const heavy=sizePct>=65||(pressure>=2&&!strongOnePair)||pressure>=3||
+                (completed&&!strongOnePair)||multiway&&(sizePct>=45||!strongOnePair)||
+                weakPair||villainBetRiver&&villainCallRiver;
     severity=heavy?'bad':'border';
     verdict=heavy?'ワンペアのリバーコール過多':'ワンペアのブラフキャッチ境界';
     policy='リバーのワンペアは「勝っていそう」ではなく、相手のサイズとラインにブラフが残るかで判断します。';
@@ -4385,7 +4390,11 @@ function handRole(holeCards,comm,evalResult){
         const kickNote=isAhigh?'A-high。ショーダウン価値あり。ブラフキャッチ・SDV役割が主。':
                       isKhigh?'K-high。ショーダウン価値は限定的。':
                       'ハイカード。ショーダウン価値なし。';
-        return{role:kickRole,note:'ボードペア（ホールカードはキッカーのみ）。'+kickNote+'バリューベットは難しく、ポットコントロールまたはブラフキャッチが基本。'+madeDraw.note,isNut:false,isVuln:true,pairTier:'board_pair',kicker:kick,draw:madeDraw.draw,dynamic:madeDraw.dynamic};
+        // [Claude fix 2026-06-09] isOvercard: ホールカードの最大値がボードペアのランク(boardRanks[0])を上回るか。
+        // KJ on 774 → K(13) > 7 → isOvercard=true。この場合ワンペア管理ではなくオーバーカードCB局面として扱う。
+        const isOvercard=kick>boardRanks[0];
+        const overcardNote=isOvercard?'ペアドボードでのオーバーカード。PFRならレンジCBが推奨（25〜40%pot）。':'';
+        return{role:kickRole,note:'ボードペア（ホールカードはキッカーのみ）。'+kickNote+(overcardNote?' '+overcardNote:'')+'バリューベットは難しく、ポットコントロールまたはブラフキャッチが基本。'+madeDraw.note,isNut:false,isVuln:true,pairTier:'board_pair',kicker:kick,isOvercard,draw:madeDraw.draw,dynamic:madeDraw.dynamic};
       }
     }
     const isTop=pairVal===boardRanks[0];
@@ -4442,7 +4451,9 @@ function handRole(holeCards,comm,evalResult){
     }else{
       note='ツーペア'+(vuln?' ボードペアによるカウンターフィット（格下げ）リスクあり。check-call中心に。':' 強いバリューハンド。積極的にベット推奨。');
     }
-    return{role:isBoardCompletedTP?'value':(isTopTwo?'strong':'value'),note,isNut:false,isVuln:vuln};
+    // [Claude fix 2026-06-10] isBoardCompletedTPはトップペア相当 → pairTier='top_pair'を明示。
+    // これにより下流のstrongOnePairフラグが正しくtrueになり、turn/riverの誤'bad'判定を防ぐ。
+    return{role:isBoardCompletedTP?'value':(isTopTwo?'strong':'value'),note,isNut:false,isVuln:vuln,pairTier:isBoardCompletedTP?'top_pair':undefined};
   }
 
   if(cat===3){// トリップス or セット
@@ -4497,11 +4508,32 @@ function handRole(holeCards,comm,evalResult){
     const suitCnt={};
     comm.forEach(function(c){suitCnt[c.suit]=(suitCnt[c.suit]||0)+1;});
     const flushPossible=Object.values(suitCnt).some(function(v){return v>=3;});
+    // [Claude fix 2026-06-09] ナッツストレート判定:
+    // ヒーローのストレートより高いストレートが相手の2枚以下で作れるか確認。
+    // 作れないならナッツ。(例: 7h6h on 8s5h4dAc2h → 4-5-6-7-8ストレート high=8。
+    // 上位ストレート9-high以上はいずれも相手3枚以上必要 → ナッツ)
+    const boardVals=comm.map(function(c){return c.value||(RANK_VAL?RANK_VAL[c.rank]:0)||0;});
+    const strHighCard=evalResult&&evalResult.co&&evalResult.co[0]?evalResult.co[0].v:0;
+    let higherStrPossible=false;
+    if(strHighCard>=5){
+      for(let top=strHighCard+1;top<=14;top++){
+        const needed=[top,top-1,top-2,top-3,top-4];
+        const fromBoard=needed.filter(function(v){return boardVals.indexOf(v)>=0;}).length;
+        if(5-fromBoard<=2){higherStrPossible=true;break;}
+      }
+    }
+    const isNutStr=strHighCard>=5&&!higherStrPossible;
+    const isNut=isNutStr&&!flushPossible&&!tex.paired;
     const warnings=[];
     if(flushPossible)warnings.push('フラッシュ');
     if(tex.paired)warnings.push('フルハウス/クアッズ');
-    const note='ストレート。'+(warnings.length?warnings.join('・')+'の可能性には注意しつつ、バリューを取りましょう。':'このボードではフラッシュもフルハウスも完成しにくく、強いバリューハンドです。');
-    return{role:'strong',note,isNut:false,isVuln:flushPossible||tex.paired,riskFlags:{flushPossible:flushPossible,pairedBoard:tex.paired,strongerFullHouseQuads:tex.paired}};
+    let note;
+    if(isNut){
+      note='ナッツストレート。このボードで最強のハンドです。積極的にバリューを最大化しましょう。';
+    }else{
+      note='ストレート。'+(warnings.length?warnings.join('・')+'の可能性には注意しつつ、バリューを取りましょう。':'このボードではフラッシュもフルハウスも完成しにくく、強いバリューハンドです。');
+    }
+    return{role:isNut?'nutted':'strong',note,isNut,isVuln:!isNut&&(flushPossible||tex.paired),riskFlags:{flushPossible:flushPossible,pairedBoard:tex.paired,strongerFullHouseQuads:tex.paired}};
   }
   if(cat===5){
     const isNutFlush=hi===14&&holeCards.some(c=>RANK_VAL[c.rank]===14&&comm.some(b=>b.suit===c.suit));
@@ -4722,13 +4754,51 @@ function onePairPressureProfile(hr,d,role,tex,nOpponents){
   let policy='ワンペアは相手レンジとサイズ次第で、薄いバリュー/ブラフキャッチ/ポット管理に分けます。';
   let risk='SPR約'+spr+' / '+(danger?'動的または完成寄りボード':'比較的静的なボード')+' / 圧力'+pressureCount+'段階';
   if(nOpponents>=2)risk+=' / マルチウェイ';
-  if(lane==='check'){
+  // [Claude fix 2026-06-09] フォールドレーンの明示的処理。
+  // evalFoldはcat=1(ワンペア)の生EQで判断するためボードペアでのフォールドを誤って'bad'と判定しやすい。
+  // board_pair/under_pair等のweakPairフォールドは大半のシーンで正しいため、ここで補正。
+  if(lane==='fold'){
+    if(weakPair){
+      if(sizePct<=20&&pressureCount===0&&spr>=6){
+        // 非常に小さいベットで圧力なし: ボードペアでも一部コールできるボーダーライン
+        verdict='border';
+        policy='ボードペアはキッカーのみのショーダウン価値。極小サイズベットなら少頻度コールも考えられますが、フォールドでも問題ありません。';
+      }else{
+        // 通常サイズ以上、または圧力あり: ボードペアのフォールドは適切
+        verdict='good';
+        policy='ボードペアはキッカー勝負で実質的なハンド強度はありません。相手のベットに対してフォールドは適切な判断です。生EQに惑わされず、実現率が低いハンドでポットを大きくしないことが重要です。';
+      }
+    }
+  }else if(lane==='check'){
     if(danger||spr>=7||nOpponents>=2){
       verdict='good';
       policy='このワンペアはチェックでショーダウン価値を守るポット管理が自然です。';
     }
   }else if(lane==='bet'){
-    if(weakPair||(d.street==='river'&&!strongOnePair)||sizePct>=75||(danger&&sizePct>=55&&spr>=7)){
+    // [Claude fix 2026-06-09] ボードペア+オーバーカード(isOvercard)の専用ロジック。
+    // KJ on 774 のようにホールカードがボードに絡まないPFRのオーバーカードは、
+    // 「ワンペア管理」ではなく「レンジ優位を活かす小CB」フレームで評価する。
+    // ペアドボードはBBが7xを持つ頻度が極めて低くPFRのCB頻度が最大になるカテゴリの一つ。
+    const isBoardPairOvercard=pairTier==='board_pair'&&!!(role&&role.isOvercard);
+    // ペアドボード自体(tex.paired)を除いた「追加の危険」= フラッシュ/高連番ストレートのみ
+    const dangerExPaired=!!(tex&&(tex.flushy>=3||tex.flushDraw||(tex.straightDraw&&tex.highConnect)));
+    if(isBoardPairOvercard&&hasStrongDraw&&sizePct<=65){
+      // ケース1: オーバーカード + フラッシュドロー等の強ドロー → セミブラフとして正常
+      verdict='normal';
+      policy='ペアドボードのオーバーカード+フラッシュドローはセミブラフとして理想的な候補。降ろせばそのまま勝ち、コールされてもドロー完成のEVがあります。';
+    }else if(isBoardPairOvercard&&sizePct<=45&&!dangerExPaired){
+      // ケース2: オーバーカード + 小CB + ドライボード → レンジCBとして正常
+      verdict='normal';
+      policy='ペアドライボードのオーバーカードはPFRのレンジCBが推奨（25〜40%pot）。BBが7xを持つ頻度は低く、フォールドエクイティを安価に取れます。';
+    }else if(isBoardPairOvercard&&sizePct>45){
+      // ケース3: オーバーカード + やや大きいサイズ → borderに留める（bad は過剰）
+      verdict='border';
+      policy='ペアドボードのオーバーカードCBとして方向性は正しい。サイズは25〜40%potが推奨（強い手だけ続けられる大サイズは避ける）。';
+    }else if(hasStrongDraw&&sizePct<=65&&d.street!=='river'){
+      // ケース4: 一般的な強ドロー付きベット → badではなくborder
+      verdict='border';
+      policy='8アウト以上のドローはセミブラフとしてのベットを正当化します。降ろせばそのまま勝ち、コールされてもリバーで改善のEVがあります。';
+    }else if(weakPair||(d.street==='river'&&!strongOnePair)||sizePct>=75||(danger&&sizePct>=55&&spr>=7)){
       verdict=weakPair||sizePct>=75?'bad':'border';
       policy='ワンペアで大きいポットを作りすぎない。打つなら小〜中サイズ、危険なターン/リバーはチェックも自然です。';
     }
@@ -4739,7 +4809,9 @@ function onePairPressureProfile(hr,d,role,tex,nOpponents){
         verdict='border';
         policy='弱いワンペアでも8アウト以上のドローが付く場合、インプライドオッズが補正します。ドロー完成時のバリューを含めて判断してください。';
       }else{
-        verdict=weakPair||pressureCount>=2||sizePct>=75?'bad':'border';
+        // [Claude fix 2026-06-10] strongOnePair(TPTK等)はsizePct>=75やpressureCount>=2だけで'bad'にしない。
+        // EV的に+EVでも「ワンペアだから」という定性ルールで上書きする内部矛盾を解消。
+        verdict=(weakPair||(pressureCount>=2&&!strongOnePair)||(sizePct>=75&&!strongOnePair))?'bad':'border';
         policy='ワンペア受けを必要EQだけで正当化せず、相手の複数ストリート圧力と次ストリートの難しさを重く見ます。';
       }
     }else if((strongOnePair||mediumTopPair)&&sizePct>=50&&(villainBetTurn||(d.street==='river'&&villainBetFlop))){
@@ -4753,7 +4825,8 @@ function onePairPressureProfile(hr,d,role,tex,nOpponents){
     verdict='border';
     policy='ターンでこちらの薄いバリューにコールされ、リバーで打たれた形はトップペアでも相手依存のブラフキャッチです。';
   }
-  return{street:d.street,lane,spr,sizePct,weakPair,mediumTopPair,strongOnePair,danger,pressureCount,verdict,policy,risk};
+  const isBoardPairOvercardRet=pairTier==='board_pair'&&!!(role&&role.isOvercard);
+  return{street:d.street,lane,spr,sizePct,weakPair,mediumTopPair,strongOnePair,danger,pressureCount,verdict,policy,risk,isBoardPairOvercard:isBoardPairOvercardRet};
 }
 function onePairPressureProfileText(profile){
   if(!profile)return'';
@@ -6503,8 +6576,15 @@ function analyzeHand(hr){
       notes.push(onePairPressureProfileText(op));
       if(!ev.suggest)ev.suggest='推奨: フォールド寄り。相手が明確にブラフ過多の時だけコール';
     }else if(op.lane==='call'&&op.verdict==='border'){
-      next=Math.max(next,6);
-      if(ev.quality==='good')ev.quality='ok';
+      // [Claude fix 2026-06-10] strongOnePair(TPTK等)のborderはqualityを'good'から'ok'に落とさない。
+      // EV+の強ペアコールをborderと判定した場合は軽微な注記のみ(deduction最大3)。
+      if(op.strongOnePair){
+        next=Math.max(next,3);
+        // quality: 'good'のままにする（EV+のTPTKコールは正解）
+      }else{
+        next=Math.max(next,6);
+        if(ev.quality==='good')ev.quality='ok';
+      }
       ev.comment=(ev.comment||'').replace(/EV優位（[^。]+）で明確なコールです。/,'ワンペア監査後は、明確コールではなく相手依存のブラフキャッチです。');
       notes.push(onePairPressureProfileText(op));
       if(!ev.suggest)ev.suggest='相手依存: パッシブ相手にはフォールド寄り、ブラフ頻度が高い相手にはコール';
@@ -6521,6 +6601,20 @@ function analyzeHand(hr){
       next=Math.min(next,6);
       if(ev.quality==='bad')ev.quality='ok';
       notes.push(onePairPressureProfileText(op));
+    }else if(op.lane==='fold'&&op.weakPair){
+      // [Claude fix 2026-06-09] ボードペア/弱いワンペアでのフォールド:
+      // evalFoldは生EQ(cat=1)で判断するため誤って'bad'になりやすい。正しいフォールドとして補正。
+      if(op.verdict==='good'){
+        next=Math.min(next,4);
+        if(ev.quality==='bad')ev.quality='ok';
+        ev.comment=(ev.comment||'').replace(/^正解。?/,'').replace(/EV損失.*?です。/,'ボードペアのフォールドは正しい判断です。');
+        notes.push(onePairPressureProfileText(op));
+        if(!ev.suggest)ev.suggest='推奨: フォールド。ボードペアでは相手の圧力に受け過ぎない';
+      }else if(op.verdict==='border'){
+        next=Math.min(next,8);
+        if(ev.quality==='bad')ev.quality='ok';
+        notes.push(onePairPressureProfileText(op));
+      }
     }
     next=Math.max(0,Math.min(45,next));
     if(next!==before||notes.length){
@@ -6546,8 +6640,15 @@ function analyzeHand(hr){
         ev.comment=(ev.comment||'').replace(/^正解。?/,'').replace(/EV優位（[^。]+）で明確なコールです。/,'リバー金額監査後は、必要EQだけでは正当化しないブラフキャッチです。');
         if(!ev.suggest)ev.suggest=rv.suggest;
       }else{
-        next=Math.max(next,8);
-        if(ev.quality==='good')ev.quality='ok';
+        // [Claude fix 2026-06-10] strongOnePair(TPTK等)のborderはquality='good'のまま保持。
+        // 弱ペアのborderのみok→降格させる。強ペアは軽微な注記で留める。
+        if(rv.strongOnePair){
+          next=Math.max(next,4);
+          // quality: 変更しない（EV+のTPTKリバーコールは正解）
+        }else{
+          next=Math.max(next,8);
+          if(ev.quality==='good')ev.quality='ok';
+        }
         ev.comment=(ev.comment||'').replace(/EV優位（[^。]+）で明確なコールです。/,'リバー金額監査後は、明確コールではなく相手依存のブラフキャッチです。');
       }
       notes.push(liveCashRiverDecisionProfileText(rv));
@@ -9941,6 +10042,28 @@ function naturalRecommendationText(rec){
   r=r.replace(/^推奨頻度:\s*/,'頻度感は');
   return r;
 }
+// [Claude fix 2026-06-09] プリフロップフォールドのコメントから手とポジションを自然な文で取り出す
+// 例: "正解。K7o（...）のCOレイズへのフォールド。" → "K7oのCOレイズへのフォールド"
+//     "正解。K7o（...）はUTGのオープンレンジ外..." → "K7oでのUTGからのフォールド"
+function extractFoldContext(comment){
+  if(!comment)return null;
+  const clean=comment.replace(/^(正解。|概ね正解。|【[^】]+】\s*)/,'');
+  // 括弧内のランク情報を除去
+  const stripped=clean.replace(/（[^）]*）/g,'');
+  const handM=stripped.match(/^([A-Za-z0-9+]+)/);
+  if(!handM)return null;
+  const hand=handM[1];
+  // "K7oのCOレイズへのフォールド" or "K7oのSBフォールド" (ポジション名が英大文字)
+  const m1=stripped.match(/の([A-Z][A-Z+0-9]*)(レイズへのフォールド|フォールド)/);
+  if(m1)return hand+'の'+m1[1]+m1[2];
+  // "K7oはUTGの..." → ポジション特定してフォールドと明示
+  const m2=stripped.match(/は([A-Z][A-Z+0-9]*)の/);
+  if(m2)return hand+'での'+m2[1]+'からのフォールド';
+  // "T8sのリンプポットフォールド" など日本語混じりのフォールドフレーズ
+  const m3=stripped.match(/の(.{0,15}フォールド)/);
+  if(m3)return hand+'の'+m3[1];
+  return hand+'のフォールド';
+}
 function recommendationClose(action,quality,rec,hasSuggest){
   rec=naturalRecommendationText(rec);
   if(quality==='bad'){
@@ -9958,7 +10081,8 @@ function recommendationClose(action,quality,rec,hasSuggest){
 function coachReviewText(ev){
   if(!ev)return'';
   const action={fold:'フォールド',check:'チェック',call:'コール',raise:(ev.street==='preflop'?'レイズ':'ベット'),allin:'オールイン'}[ev.action]||ev.action;
-  const verdict=ev.quality==='bad'?'改善が必要なアクションです。':ev.quality==='good'?'この場面では正しい判断です。':'複数のラインが成立する場面です。';
+  // [Claude fix 2026-06-09] let に変更: liveCashSpotProfileなど場面別により具体的な verdict を後で上書き
+  let verdict=ev.quality==='bad'?'改善が必要なアクションです。':ev.quality==='good'?'この場面では正しい判断です。':'複数のラインが成立する場面です。';
   let scene='';
   let reason='';
   let rec=ev.suggest||'';
@@ -10016,11 +10140,39 @@ function coachReviewText(ev){
     reason=p.policy;
   }else if(ev.liveCashSpotProfile){
     const p=ev.liveCashSpotProfile;
-    scene='リングゲームの'+p.label+'です。';
+    // [Claude fix 2026-06-09] openFold/vsRaiseFold: ev.commentから手とポジションを取り出して自然な場面説明に変換
+    if(p.lane==='openFold'||p.lane==='vsRaiseFold'){
+      const foldCtx=extractFoldContext(ev.comment);
+      scene=(foldCtx||p.label)+'。';
+      // 場面説明の中に判断の根拠を組み込む（汎用的な「この場面では正しい判断」を上書き）
+      if(ev.quality==='good'){
+        verdict=p.lane==='openFold'
+          ?'オープンレンジ外の弱いハンドでの正しい判断です。'
+          :'コールレンジ外の弱いハンドでの正しい判断です。';
+      }else if(ev.quality==='bad'){
+        verdict=p.lane==='openFold'
+          ?'このポジションなら参加できるハンドです。改善の余地があります。'
+          :'コールレンジ内の可能性があります。見直しが必要です。';
+      }
+    }else{
+      scene='リングゲームの'+p.label+'です。';
+    }
     reason=p.policy+' '+naturalRiskText(p.risk);
   }else if(ev.onePairProfile){
     const p=ev.onePairProfile;
-    scene='ワンペアをどこまで信じるかがテーマです。';
+    // [Claude fix 2026-06-09] board_pair のオーバーカードはワンペア管理ではなくレンジCB/セミブラフ局面。
+    // isBoardPairOvercard=true: KJ on 774 のようにホールカードが絡まないPFRのCB場面
+    // weakPair(非overcard): アンダーペア/ボードペア等のポット管理場面
+    if(p.isBoardPairOvercard){
+      scene='ペアドボードでホールカードが絡まないオーバーカード。ワンペア管理ではなくレンジ優位を活かすCB局面です。';
+    }else if(p.weakPair){
+      scene='ボードのペアにキッカーが乗るだけで、ホールカードは実質未絡みの場面です。';
+    }else if(p.strongOnePair){
+      // [Claude fix 2026-06-10] isBoardCompletedTP(KK66型)等のTPTK場面は専用テキスト
+      scene='トップペア相当のハンドで、相手のサイズとラインにどこまで耐えるかが鍵です。';
+    }else{
+      scene='ワンペアをどこまで信じるかがテーマです。';
+    }
     reason=p.policy+' '+naturalRiskText(p.risk);
   }else{
     scene=firstUsefulSentence(ev.comment)||'この場面の判断です。';
