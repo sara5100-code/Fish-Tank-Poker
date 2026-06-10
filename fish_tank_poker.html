@@ -338,6 +338,9 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,'Hiragino 
     <div class="form-row"><label>AI難易度</label>
       <select id="cfg-ai"><option value="easy">Loose</option><option value="medium" selected>Standard</option><option value="hard">Tough</option></select>
     </div>
+    <div class="form-row"><label>レンジ判定</label>
+      <select id="cfg-range-mode"><option value="live" selected>ライブ$2/$5（ブラフ不足を加味）</option><option value="gto">GTO（均衡・EV基準）</option></select>
+    </div>
     <button class="btn-primary" id="btn-start">ゲーム開始</button>
   </div>
 </div>
@@ -456,6 +459,21 @@ const RANKS=['2','3','4','5','6','7','8','9','T','J','Q','K','A'];
 const SUITS=['s','h','d','c'];
 const SUIT_SYM={s:'♠',h:'♥',d:'♦',c:'♣'};
 const RANK_VAL={};RANKS.forEach((r,i)=>RANK_VAL[r]=i+2);
+// [feature 2026-06-10] レンジ判定モード。'live'=$2/$5母集団(大ベットはブラフ不足→フォールド寄り)、'gto'=均衡前提(EV基準で正直に評価)。
+let RANGE_MODE='live';
+function getRangeMode(){return RANGE_MODE==='gto'?'gto':'live';}
+function setRangeMode(m){RANGE_MODE=(m==='gto')?'gto':'live';return RANGE_MODE;}
+// [feature 2026-06-10] プレッシャー割引のモード連動。GTOは均衡相手なので割引を弱める(1.0方向へ寄せる)が、ゼロにはしない(均衡でもベットレンジは偏る)。
+const GTO_PRESSURE_RELAX=0.6; // GTO時は割引強度をLiveの約60%に緩める
+function relaxPressureForMode(factor){
+  if(getRangeMode()!=='gto'||!(factor<1))return factor;
+  return 1-(1-factor)*GTO_PRESSURE_RELAX;
+}
+// [feature 2026-06-10] AI相手のブラフ頻度をモード連動。Liveは母集団の過小ブラフを再現(リバー/大ポットで顕著)、GTOは均衡のまま。
+function aiBluffModeMult(isRiver){
+  if(getRangeMode()!=='live')return 1.0;
+  return isRiver?0.45:0.65;
+}
 const RANK_JP={A:'エース',K:'キング',Q:'クイーン',J:'ジャック',T:'テン',
   '9':'ナイン','8':'エイト','7':'セブン','6':'シックス','5':'ファイブ','4':'フォー','3':'スリー','2':'デュース'};
 const HAND_NAMES=['ハイカード','ワンペア','ツーペア','スリーオブアカインド',
@@ -1821,6 +1839,10 @@ function liveCashRangeProfile(hr,d,holeCards,pos){
   const before=hr.decisions.slice(0,hr.decisions.indexOf(d));
   const firstAgg=before.find(function(x){return x.street==='preflop'&&(x.action==='raise'||x.action==='allin');});
   const openerPos=firstAgg?firstAgg.position:null;
+  // [feature 2026-06-10] プリフロップのモード/マルチウェイ連動。Live=$2/$5基準(現状維持)、GTOで3bet/flatを調整。
+  const _pfMode=getRangeMode();
+  const _aggIdx=firstAgg?before.indexOf(firstAgg):-1;
+  const callersBetween=_aggIdx>=0?before.filter(function(x,i){return x.street==='preflop'&&x.action==='call'&&i>_aggIdx;}).length:0;
   const pct=x=>Math.round(Math.max(0,Math.min(1,x))*100);
   const facing=!!(d.facingRaise&&(d.toCall||0)>0);
   const raiseLike=d.action==='raise'||d.action==='allin';
@@ -1828,7 +1850,7 @@ function liveCashRangeProfile(hr,d,holeCards,pos){
   // [Codex fix 2026-06-06] 未参加フォールドはOpen候補ではなく、弱い手を降ろせたか/降りすぎかで判定する。
   if(!facing&&d.action==='fold'){lane='openFold';cap=live25OpenPct(pos,totalP);actionLabel='Open fold';baseline='ライブ$2/$5 open/fold判断';}
   else if(!facing&&d.action==='call'){lane='limp';cap=0.06;actionLabel='Open limp';baseline='ライブ$2/$5では基本レイズ/フォールド';}
-  else if(facing&&pos==='BB'&&raiseLike){lane='bb3bet';cap=0.13+(shape.wheelAxs?0.05:0)+(shape.pair?0.03:0);actionLabel='BB 3bet';baseline='BBの3bet/スクイーズ候補';}
+  else if(facing&&pos==='BB'&&raiseLike){lane='bb3bet';cap=0.13+(shape.wheelAxs?0.05:0)+(shape.pair?0.03:0)+(_pfMode==='gto'?0.04:0);actionLabel='BB 3bet';baseline=_pfMode==='gto'?'BBの3bet(GTOは広め)':'BBの3bet/スクイーズ候補';}
   // [Claude fix 2026-06-09] BBフォールドはbbDefend(cap=0.50)でなくvsRaiseFoldに寄せる。cap=BBの実際のコールレンジ。
   else if(facing&&pos==='BB'&&d.action==='fold'){
     lane='vsRaiseFold';
@@ -1843,8 +1865,20 @@ function liveCashRangeProfile(hr,d,holeCards,pos){
     cap=lane==='fiveBet'?0.055:(0.08+(shape.wheelAxs?0.045:0)+(shape.suitedBroadway?0.025:0)+(shape.pair&&shape.lo>=7?0.03:0));
     if(pos==='BTN'&&['CO','HJ','LJ'].includes(openerPos||''))cap+=0.035;
     if(pos==='SB'||pos==='BB')cap+=0.015;
+    let _3betCtx='';
+    if(lane==='threeBet'){
+      if(callersBetween>=1){
+        // スクイーズ: コールド・コーラーが残るとブラフが通りにくい→バリュー寄せ(両モード)。Liveは特に締める。
+        cap=Math.max(0.05,cap-(shape.wheelAxs?0.03:0)-(shape.suitedBroadway?0.015:0));
+        _3betCtx='スクイーズ(バリュー寄せ)';
+      }else if(_pfMode==='gto'){
+        // GTOはブラフ3betを広く(ポラー)。スーテッドブロッカーを足す。
+        cap+=0.035+(shape.suited?0.015:0);
+        _3betCtx='GTO 3BET(ポラー)';
+      }
+    }
     actionLabel=lane==='fiveBet'?'5BET':'3BET';
-    baseline=lane==='fiveBet'?'4BET後の継続レンジ':'ライブ$2/$5 3BET候補';
+    baseline=lane==='fiveBet'?'4BET後の継続レンジ':(_3betCtx||'ライブ$2/$5 3BET候補');
   }else if(facing&&d.action==='fold'){
     // [Claude fix 2026-06-08] 対レイズフォールドを'flat'と誤分類しないための専用レーン
     lane='vsRaiseFold';
@@ -1863,9 +1897,20 @@ function liveCashRangeProfile(hr,d,holeCards,pos){
     if(earlyOpen)cap-=shape.dominatedOffsuit?0.08:0.04;
     if(shape.suited)cap+=0.04;
     if(shape.pair)cap+=0.06;
+    let _flatCtx='';
+    if(_pfMode==='gto'){
+      // GTOは非IPフラットを大幅圧縮(3bet-or-fold)。IPもやや締める。
+      cap*=(pos==='SB'||pos==='BB')?0.55:0.72;
+      _flatCtx='GTO(フラット圧縮・3bet/fold寄り)';
+    }else if(callersBetween>=1){
+      // ライブ・マルチウェイ: 投機ハンドは含み益UP、ドミネート系オフスートは更に締める。
+      if(shape.suited||shape.pair||shape.suitedConnector)cap+=0.05;
+      if(shape.dominatedOffsuit)cap-=0.05;
+      _flatCtx='マルチウェイ(投機系広め/ドミネート系締め)';
+    }
     cap=Math.max(0.02,cap);
     actionLabel=pos==='SB'?'SB flat':'Flat';
-    baseline=earlyOpen?'早いポジションのオープンに対する低頻度フラット':'非BBフラット';
+    baseline=earlyOpen?'早いポジションのオープンに対する低頻度フラット':(_flatCtx||'非BBフラット');
   }
   const margin=cap-handFrac;
   let verdict='自然',severity='good';
@@ -1884,7 +1929,7 @@ function liveCashRangeProfile(hr,d,holeCards,pos){
   if(lane==='flat'&&shape.dominatedOffsuit)notes.push('オフスートブロードウェイはドミネートされやすい');
   if(lane==='sbFlat')notes.push('SBは全ストリートOOPで実現率が低い');
   if(lane==='fiveBet')notes.push('4BET後は元の3BETレンジより大幅に締める');
-  return{handType:ht,handPercent:pct(handFrac),position:pos,lane,actionLabel,baseline,capPercent:pct(cap),marginPercent:Math.round(margin*100),verdict,severity,openerPos,notes};
+  return{handType:ht,handPercent:pct(handFrac),position:pos,lane,actionLabel,baseline,capPercent:pct(cap),marginPercent:Math.round(margin*100),verdict,severity,openerPos,notes,mode:_pfMode,callersBetween};
 }
 function rangeProfileText(profile){
   if(!profile)return'';
@@ -3291,22 +3336,36 @@ const HandEval={
 
 // ---- EQUITY (Monte Carlo) ----
 function estimateEquity(hc,board,nOpp,iter){
-  iter=iter||300;let wins=0;
+  // [fix 2026-06-10] タイは0.5で計上。完成リバー×単独相手は全相手2枚を厳密列挙し決定論的に算出。
   const deck=new Deck();
   const known=new Set([...hc,...board].map(c=>c.toString()));
-  deck.cards=deck.cards.filter(c=>!known.has(c.toString()));
-  for(let i=0;i<iter;i++){
-    deck.shuffle();const d=[...deck.cards];
-    const b=[...board];while(b.length<5)b.push(d.pop());
-    const my=HandEval.evaluate([...hc,...b]).score;
-    let win=true;
-    for(let o=0;o<nOpp;o++){
-      if(!d[o*2]||!d[o*2+1])continue;
-      if(HandEval.evaluate([d[o*2],d[o*2+1],...b]).score>my){win=false;break;}
+  const rem=deck.cards.filter(c=>!known.has(c.toString()));
+  if(board.length>=5&&nOpp===1){
+    const my=HandEval.evaluate([...hc,...board]).score;
+    let score=0,total=0;
+    for(let i=0;i<rem.length;i++)for(let j=i+1;j<rem.length;j++){
+      const os=HandEval.evaluate([rem[i],rem[j],...board]).score;
+      score+=my>os?1:(my===os?0.5:0);total++;
     }
-    if(win)wins++;
+    return total?score/total:0;
   }
-  return wins/iter;
+  iter=iter||300;let score=0;
+  for(let i=0;i<iter;i++){
+    for(let k=rem.length-1;k>0;k--){const r=(Math.random()*(k+1))|0;const t=rem[k];rem[k]=rem[r];rem[r]=t;}
+    const d=rem;let p=0;
+    const b=[...board];while(b.length<5)b.push(d[p++]);
+    const my=HandEval.evaluate([...hc,...b]).score;
+    let lose=false,tie=false;
+    for(let o=0;o<nOpp;o++){
+      const c1=d[p++],c2=d[p++];
+      if(!c1||!c2)continue;
+      const os=HandEval.evaluate([c1,c2,...b]).score;
+      if(os>my){lose=true;break;}
+      if(os===my)tie=true;
+    }
+    score+=lose?0:(tie?0.5:1);
+  }
+  return score/iter;
 }
 
 // ---- HAND HELPERS ----
@@ -3315,13 +3374,13 @@ function estimateEquity(hc,board,nOpp,iter){
 const HAND_RANK_169=[
   'AA','KK','QQ','JJ','TT','AKs',
   'AKo','AQs','99','AQo','AJs','KQs','88','AJo','KQo','ATs',
-  'KJs','QJs','77','ATo','KJo','KTs','A9s','QJo','JTs','66',
+  'KJs','QJs','77','ATo','KJo','KTs','A9s','QTs','QJo','JTs','66',
   'A8s','KTo','QTo',
   'J9s','55','T9s','A7s','K9s','Q9s','98s','A6s','JTo','87s',
   'A5s','44','K8s','J8s','Q8s','A4s',
   '76s','T8s','A3s','65s','K7s','33','J7s','A2s','54s','Q7s',
-  '97s','T7s','K6s','86s','75s','22','J6s','QTs','K5s','Q6s',
-  '96s','64s','T6s','85s','J5s','K4s','53s','A9o','J4s','95s',
+  '97s','T7s','K6s','86s','75s','22','J6s','K5s','Q6s',
+  '96s','64s','T6s','85s','J5s','K4s','53s','A9o','J4s','95s','94s',
   'Q5s','K3s','74s','J3s','42s','Q4s',
   'K2s','63s','J2s','Q3s','84s','A8o','T5s','73s','Q2s','52s',
   'T4s','62s','32s','A7o','T3s','93s','T2s','83s','43s','A6o',
@@ -3331,7 +3390,7 @@ const HAND_RANK_169=[
   '64o','J5o','85o','K5o','53o','T6o','J4o','74o','Q6o','K4o',
   '95o','J3o','42o','Q5o','84o','K3o','63o','J2o','Q4o','K2o',
   '73o','Q3o','52o','T5o','62o','Q2o','T4o','32o','93o','T3o',
-  '83o','T2o','43o','92o','94s','94o','72o','82o'
+  '83o','T2o','43o','92o','94o','72o','82o'
 ];
 // O(1)ルックアップ用マップ (1始まり)
 const HAND_STRENGTH={};
@@ -3630,7 +3689,8 @@ function aiDecide(player,game,baseLevel){
       const mdf=pot/(pot+toCall);
       const eMDF=Math.min(0.85,mdf*prof.bbDefenseWidth);
       // handFrac<=defendPct のコンボで守る
-      const defendPct=(1-eMDF)*Math.sqrt(prof.openWidthMult);
+      // [fix 2026-06-10] MDF=守る頻度そのもの。1-eMDFは方向が逆だったため修正。
+      const defendPct=eMDF*Math.sqrt(prof.openWidthMult);
       const threeBetPct=0.06; // 上位6%コンボ=3bet候補
       if(handFrac<=defendPct){
         if(handFrac<=threeBetPct&&Math.random()<0.50&&!prof.callBias){
@@ -3711,7 +3771,7 @@ function aiDecide(player,game,baseLevel){
   const eq=estimateEquity(holeCards,comm,Math.max(1,nAct-1),250);
   str=str*0.38+eq*0.62+n()*0.04;
   const po=toCall>0?toCall/(pot+toCall):0;
-  let bFreq=prof.bluffFreq;
+  let bFreq=prof.bluffFreq*aiBluffModeMult(comm.length>=5);
   if(multi&&!prof.ignoreMultiway)bFreq*=0.25;
   const cantFold=prof.cantFoldMadeHand&&ev.cat>=1&&str>0.28;
   const role=handRole(holeCards,comm,ev);
@@ -3778,7 +3838,7 @@ function aiDecide(player,game,baseLevel){
         if(amt>0)return aiSizedAction(amt,chips,currentBet);
       }
       // ピュアブラフドンク: エア×ブロッカー狙い、非常に稀
-      if(ev.cat===0&&str<0.12&&Math.random()<prof.donkFreq*prof.bluffFreq*0.35){
+      if(ev.cat===0&&str<0.12&&Math.random()<prof.donkFreq*prof.bluffFreq*aiBluffModeMult(comm.length>=5)*0.35){
         const amt=Math.round(Math.min(pot*0.38*prof.betSizeMult,chips));
         if(amt>0)return aiSizedAction(amt,chips,currentBet);
       }
@@ -4416,6 +4476,9 @@ function handRole(holeCards,comm,evalResult){
   }
 
   if(cat===2){// ツーペア
+    // [fix 2026-06-10] cat===2ブロックでmadeDrawが未定義のままmadeDraw.noteを参照していた
+    // (ポケットペア×ペアボードでReferenceError→analyzeHandがクラッシュ)。ここで定義する。
+    const madeDraw=madeDrawInfo(holeCards,comm);
     const myRanks=[r1,r2];
     const isTopTwo=myRanks.every(r=>boardRanks.slice(0,2).includes(r))||
                    myRanks.some(r=>boardRanks[0]===r)&&myRanks.some(r=>boardRanks[1]===r);
@@ -4635,8 +4698,9 @@ function riverShowdownPressure(hr,d,role,nOpponents,betToPotRatio){
     factor*=0.45;
     tags.push('リバーでbet+callが入ったため超バリュー寄り');
   }
-  const note=tags.length?' 【$2/$5実戦レンジ補正】'+tags.join('。')+'。生EQより実効EQを低く評価します。':'';
-  return{factor:Math.max(0.18,Math.min(1,factor)),note,tags};
+  const _gmRSP=getRangeMode();
+  const note=tags.length?' 【'+(_gmRSP==='gto'?'GTOレンジ補正':'$2/$5実戦レンジ補正')+'】'+tags.join('。')+'。'+(_gmRSP==='gto'?'均衡相手のベットレンジ偏りのみを反映し、割引は控えめです。':'生EQより実効EQを低く評価します。'):'';
+  return{factor:Math.max(0.18,Math.min(1,relaxPressureForMode(factor))),note,tags};
 }
 
 function riverMadeHandRisk(holeCards,comm,evalResult,role){
@@ -4713,12 +4777,97 @@ function streetBettingPressure(hr,d,role,betToPotRatio,comm){
     tags.push('中サイズ以上のベットに対して弱いワンペアの継続頻度を下げる');
   }
   const note=tags.length?' 【3BET/OOP実現率補正】'+tags.join('。')+'。生EQではなく相手レンジに対する実効EQで評価します。':'';
-  return{factor:Math.max(0.16,Math.min(1,factor)),note,tags};
+  return{factor:Math.max(0.16,Math.min(1,relaxPressureForMode(factor))),note,tags};
 }
 
 function calcSPR(humanChips,pot){return pot>0?Math.round(humanChips/pot*10)/10:99;}
 
 // [Codex fix 2026-06-04] 実ハンド検査で頻出するワンペア過信を、ストリート圧力・SPR・ボード危険度で構造化する。
+// [feature 2026-06-10] ハンドレビューを「場面→手→相手の傾向→数字→結論(混合比)→助言」の自然な一段落に再構築する。
+// 全weight適用後に呼び、構造化フィールド(rawEqPct/effectiveEqPct/onePairProfile等)から本文を組み直す。
+// 範囲: リング(非トーナメント)のポストフロップ call/fold/bet。詳細監査は別途メタチップで表示される。
+function ftMixRatio(diff){
+  const a=Math.abs(diff||0);
+  if(a<=2)return'ほぼ互角(5:5)';
+  if(a<=6)return'6:4';
+  if(a<=12)return'7:3';
+  return'8:2';
+}
+function composeNaturalReview(ev,d,hr){
+  try{
+    if(!ev||!d||ev.isHuman===false)return;
+    if(hr&&hr.tournamentContext&&hr.tournamentContext.enabled)return;
+    if(d.street==='preflop')return;
+    const lane=d.action==='call'?'call':d.action==='fold'?'fold':(d.action==='raise'||d.action==='bet'||d.action==='allin')?'bet':null;
+    if(!lane)return; // check等は現状維持
+    const human=(hr.players||[]).find(function(p){return p&&p.isHuman;});
+    if(!human||!human.holeCards||human.holeCards.length<2)return;
+    const commLen={flop:3,turn:4,river:5}[d.street]||3;
+    const comm=(hr.community||[]).slice(0,commLen);
+    if(comm.length<3)return;
+    const evalRes=HandEval.evaluate([...human.holeCards,...comm]);
+    const role=handRole(human.holeCards,comm,evalRes);
+    const roleLabel=(((role.note||'').split('。')[0])||'').trim()||'ノーペア';
+    let posOOP=false; try{posOOP=!!postflopPositionState(hr,d).isOOP;}catch(e){}
+    const posWord=posOOP?'アウトオブポジション':'インポジション';
+    const streetJP={flop:'フロップ',turn:'ターン',river:'リバー'}[d.street]||d.street;
+    const rawEq=ev.rawEqPct, effEq=ev.effectiveEqPct;
+    const req=Math.round((d.potOdds||0)*100);
+    let betPot;
+    if(lane==='bet'){betPot=Math.round((d.amount||0)/Math.max(1,d.pot||1)*100);}
+    else{const base=Math.max(1,(d.pot||0)-(d.toCall||0));betPot=Math.round((d.toCall||0)/base*100);}
+    const sizeWord=betPot<=33?'小さめの':betPot<=66?'中程度の':betPot<=100?'大きめの':'オーバーサイズの';
+    const mode=getRangeMode();
+    const op=ev.onePairProfile;
+    const idx=(hr.decisions||[]).indexOf(d);
+    const before=idx>=0?hr.decisions.slice(0,idx):[];
+    const vb=function(st){return before.some(function(x){return !x.isHuman&&x.street===st&&/raise|allin|bet/.test(x.action);});};
+    const barrels=(vb('flop')?1:0)+(vb('turn')?1:0)+(vb('river')?1:0);
+    const diff=(effEq!=null&&req!=null)?(effEq-req):null;
+    const parts=[];
+    // 場面+手
+    if(lane==='bet') parts.push(streetJP+'。'+roleLabel+'で、'+posWord+'から'+sizeWord+'ベット(ポットの'+betPot+'%)を選ぶ場面です。');
+    else parts.push(streetJP+'。'+roleLabel+'で、相手の'+sizeWord+'ベット(ポットの'+betPot+'%)を'+posWord+'で受ける場面です。');
+    // 相手の傾向(複数バレル時)
+    if(barrels>=2&&lane!=='bet') parts.push('相手は'+(barrels>=3?'3ストリート':'複数ストリート')+'続けて打っており、レンジは'+(mode==='live'?'バリューに偏ります(ライブ$2/$5ではブラフが足りません)':'ややバリュー寄りです')+'。');
+    // 数字
+    if(rawEq!=null&&effEq!=null){
+      if(rawEq!==effEq) parts.push('生のエクイティは'+rawEq+'%ですが、相手の強いレンジを踏まえた実効エクイティは約'+effEq+'%。'+(lane!=='bet'?'コールに必要な勝率は'+req+'%です。':''));
+      else if(lane!=='bet') parts.push('エクイティは約'+effEq+'%、コールに必要な勝率は'+req+'%です。');
+    }
+    // 結論(混合比)
+    const liveOnePairFold=op&&op.verdict==='bad'&&lane==='call';
+    let concl='';
+    if(lane==='call'){
+      if(liveOnePairFold) concl='GTO上はほぼ互角(5:5前後)ですが、ライブ$2/$5ではアウトオブポジションで連続バレルを受ける相手のレンジはブラフが不足します。実質的に6:4〜7:3でフォールド寄りで、相手が明らかにブラフ過多のタイプの時だけコールに回しましょう。';
+      else if(op&&op.verdict==='border'){
+        let lean;
+        if(diff==null) lean='相手のブラフ頻度次第の判断になります。';
+        else if(diff>=8) lean='ただしエクイティ的には必要勝率を上回っており、おおよそ'+ftMixRatio(diff)+'でコール寄りです。';
+        else if(diff<=-8) lean='エクイティ的にも必要勝率に届かず、'+ftMixRatio(diff)+'でフォールド寄りです。';
+        else lean='損得はほぼ互角('+ftMixRatio(diff)+')で、相手のブラフ頻度次第の判断になります。';
+        concl='強いワンペアでも、ここまで打たれると明確なバリューではなく相手依存のブラフキャッチです。'+lean;
+      }
+      else if(diff==null) concl='相手のレンジとサイズ次第の判断です。';
+      else if(diff>=8) concl='実効エクイティが必要勝率を'+diff+'ポイント上回るので、コールで問題ありません。';
+      else if(Math.abs(diff)<=5||ev.isMix) concl='損得はほぼ互角で、ボーダーラインの判断です('+ftMixRatio(diff)+')。'+(mode==='live'?'ライブの相手なら':'相手のタイプ次第で')+(diff>=0?'コール':'フォールド')+'寄りです。';
+      else if(diff<0) concl='必要勝率に'+Math.abs(diff)+'ポイント届かず、'+(mode==='live'?'ライブの相手ならフォールドが勝ちます':'フォールド寄りです')+'。';
+      else concl=ftMixRatio(diff)+'でコール寄りです。';
+    }else if(lane==='fold'){
+      if(diff==null) concl='相手のレンジ次第ですが、フォールドは無難な判断です。';
+      else if(ev.quality==='good') concl=(diff<=-10?'実効エクイティが必要勝率に'+Math.abs(diff)+'ポイント届かず、明確なフォールドです。':'エクイティが必要勝率にやや届かず、フォールドが有力です。');
+      else if(ev.isMix||Math.abs(diff)<=5) concl='コールとフォールドの混合('+ftMixRatio(diff)+')。フォールドも許容内ですが、わずかにコールが勝ちます。';
+      else concl='実効エクイティ'+effEq+'%は必要勝率'+req+'%を上回っており、本来はコールが勝ちます。フォールドはEVを逃しています。';
+    }else{ // bet
+      if(ev.quality==='good') concl='バリュー/主導権の取れる良いベットです。';
+      else if(op&&(op.verdict==='bad'||op.verdict==='border')) concl='打つなら小〜中サイズに留め、危険なボードではチェックも自然です。ワンペアで大きいポットを作りすぎないようにしましょう。';
+      else concl='サイズと相手の継続レンジを意識した判断です。';
+    }
+    if(concl) parts.push(concl);
+    const text=parts.join('');
+    if(text&&text.length>=12) ev.comment=text;
+  }catch(e){/* 失敗時は既存コメントを維持 */}
+}
 function onePairPressureProfile(hr,d,role,tex,nOpponents){
   if(!d||d.street==='preflop'||!role)return null;
   const pairTier=role.pairTier;
@@ -4750,6 +4899,11 @@ function onePairPressureProfile(hr,d,role,tex,nOpponents){
   const pressureCount=(villainBetFlop?1:0)+(villainBetTurn?1:0);
   // 強いドロー(8+アウト)があると受けのEV改善。リバー以外でのみ有効。
   const hasStrongDraw=!!(role.draw&&role.draw.outs>=8&&d.street!=='river');
+  // [feature 2026-06-10] GTO/Liveモード。Liveは母集団のブラフ不足を織り込み、OOP×複数バレル×大サイズの強ワンペア受けをフォールド寄りに倒す。
+  const _mode=getRangeMode();
+  const _liveLean=_mode==='live';
+  const _posSt=postflopPositionState(hr,d);
+  const _isOOP=!!(_posSt&&_posSt.isOOP);
   let verdict='normal';
   let policy='ワンペアは相手レンジとサイズ次第で、薄いバリュー/ブラフキャッチ/ポット管理に分けます。';
   let risk='SPR約'+spr+' / '+(danger?'動的または完成寄りボード':'比較的静的なボード')+' / 圧力'+pressureCount+'段階';
@@ -4811,8 +4965,12 @@ function onePairPressureProfile(hr,d,role,tex,nOpponents){
       }else{
         // [Claude fix 2026-06-10] strongOnePair(TPTK等)はsizePct>=75やpressureCount>=2だけで'bad'にしない。
         // EV的に+EVでも「ワンペアだから」という定性ルールで上書きする内部矛盾を解消。
-        verdict=(weakPair||(pressureCount>=2&&!strongOnePair)||(sizePct>=75&&!strongOnePair))?'bad':'border';
-        policy='ワンペア受けを必要EQだけで正当化せず、相手の複数ストリート圧力と次ストリートの難しさを重く見ます。';
+        // [feature 2026-06-10] Liveモードのみ: OOP×3ストリート圧力×大サイズの強ワンペアは母集団のブラフ不足で降り(bad)。
+        const _liveRiverFold=_liveLean&&strongOnePair&&d.street==='river'&&pressureCount>=2&&sizePct>=55&&_isOOP;
+        verdict=(weakPair||(pressureCount>=2&&!strongOnePair)||(sizePct>=75&&!strongOnePair)||_liveRiverFold)?'bad':'border';
+        policy=_liveRiverFold
+          ?'GTO上はインディファレントですが、ライブ$2/$5ではOOPで3ストリートの大ベットを受ける相手レンジはブラフ不足。実効的にフォールドが勝ちます。'
+          :'ワンペア受けを必要EQだけで正当化せず、相手の複数ストリート圧力と次ストリートの難しさを重く見ます。';
       }
     }else if((strongOnePair||mediumTopPair)&&sizePct>=50&&(villainBetTurn||(d.street==='river'&&villainBetFlop))){
       // [Claude fix 2026-06-09] 2ndバレル以降またはリバーでのTPコールのみborder。
@@ -4826,7 +4984,7 @@ function onePairPressureProfile(hr,d,role,tex,nOpponents){
     policy='ターンでこちらの薄いバリューにコールされ、リバーで打たれた形はトップペアでも相手依存のブラフキャッチです。';
   }
   const isBoardPairOvercardRet=pairTier==='board_pair'&&!!(role&&role.isOvercard);
-  return{street:d.street,lane,spr,sizePct,weakPair,mediumTopPair,strongOnePair,danger,pressureCount,verdict,policy,risk,isBoardPairOvercard:isBoardPairOvercardRet};
+  return{street:d.street,lane,spr,sizePct,weakPair,mediumTopPair,strongOnePair,danger,pressureCount,verdict,policy,risk,isBoardPairOvercard:isBoardPairOvercardRet,isOOP:_isOOP,mode:_mode};
 }
 function onePairPressureProfileText(profile){
   if(!profile)return'';
@@ -4886,6 +5044,8 @@ function postflopContext(hr,d,role,nOpponents,rawEq){
   // [Codex fix 2026-05-26] メイドハンド+強ドローはターン/リバー改善があり、弱いペア単体より実現率を高く見る。
   if(role.draw&&role.draw.outs>=8&&d.street!=='river')realization*=1.10;
   realization=Math.max(0.35,Math.min(1.08,realization));
+  // [fix 2026-06-10] リバーは実現率1.0（ショーダウン確定）。
+  if(d.street==='river')realization=1.0;
 
   const commLen={flop:3,turn:4,river:5}[d.street]||3;
   const tex=boardTex(hr.community.slice(0,commLen));
@@ -5050,7 +5210,7 @@ function evalCheck(d,hr,human,nOpponents){
   if(!hc||hc.length<2)return{quality:'ok',deduction:0,comment:'チェック。'};
   const commLen={flop:3,turn:4,river:5}[d.street]||3;
   const comm=hr.community.slice(0,commLen);
-  const eq=estimateEquity(hc,comm,nOpponents,400)*oppRangeAdj(hr,d.street);
+  const eq=estimateEquity(hc,comm,nOpponents,2000)*oppRangeAdj(hr,d.street);
   const pot=d.pot||0;
   const tex=boardTex(comm);
   const evalRes=hc.length&&comm.length>=3?HandEval.evaluate([...hc,...comm]):null;
@@ -5212,7 +5372,7 @@ function evalCall(d,hr,human,nOpponents){
   const commLen={flop:3,turn:4,river:5}[d.street]||3;
   const comm=hr.community.slice(0,commLen);
   const adj=oppRangeAdj(hr,d.street);
-  const eq=estimateEquity(hc,comm,nOpponents,400)*adj;
+  const eq=estimateEquity(hc,comm,nOpponents,2000)*adj;
   const po=d.potOdds||0;
   const eqPct=Math.round(eq*100);
   const poPct=Math.round(po*100);
@@ -5244,6 +5404,8 @@ function evalCall(d,hr,human,nOpponents){
   else if(role.role==='strong'||role.role==='nutted')realizationCall*=1.05;
   if(role.draw&&role.draw.outs>=8&&d.street!=='river')realizationCall*=1.10;
   realizationCall=Math.max(0.35,Math.min(1.08,realizationCall));
+  // [fix 2026-06-10] リバーは残りカードが無く実現率の概念がない（EQ=ショーダウン勝率）。レンジ補正はpressure/streetPressureで別途実施。
+  if(d.street==='river')realizationCall=1.0;
   const effEq=eq*realizationCall*pressure.factor*streetPressure.factor*madeRisk.factor;
   const effEqPct=Math.round(effEq*100);
   const effNote=(realizationCall<0.95||pressure.factor<0.98||streetPressure.factor<0.98||madeRisk.factor<0.98)?' 実効EQ約'+effEqPct+'%（生EQ '+eqPct+'%、実現率補正後）として評価。':'';
@@ -5288,7 +5450,7 @@ function evalFold(d,hr,human,nOpponents){
   const commLen={flop:3,turn:4,river:5}[d.street]||3;
   const comm=hr.community.slice(0,commLen);
   const adj=oppRangeAdj(hr,d.street);
-  const eq=estimateEquity(hc,comm,nOpponents,400)*adj;
+  const eq=estimateEquity(hc,comm,nOpponents,2000)*adj;
   const po=d.potOdds||0;
   const eqPct=Math.round(eq*100);
   const poPct=Math.round(po*100);
@@ -5315,6 +5477,8 @@ function evalFold(d,hr,human,nOpponents){
   else if(role.role==='strong'||role.role==='nutted')foldRealizeAdj*=1.05;
   if(role.draw&&role.draw.outs>=8&&d.street!=='river')foldRealizeAdj*=1.10;
   foldRealizeAdj=Math.max(0.35,Math.min(1.08,foldRealizeAdj));
+  // [fix 2026-06-10] リバーは実現率補正を無効化（以降のレンジ系補正mwRiverOvercall等はそのまま適用）。
+  if(d.street==='river')foldRealizeAdj=1.0;
   const pressure=riverShowdownPressure(hr,d,role,nOpponents,betToPotRatio);
   const streetPressure=streetBettingPressure(hr,d,role,betToPotRatio,comm);
   // ---- マルチウェイリバー bet+コール構造: 実効EQ大幅補正 ----
@@ -5391,7 +5555,7 @@ function evalBet(d,hr,human,nOpponents){
   const commLen={flop:3,turn:4,river:5}[d.street]||3;
   const comm=hr.community.slice(0,commLen);
   const adj=oppRangeAdj(hr,d.street);
-  const eq=estimateEquity(hc,comm,nOpponents,400)*adj;
+  const eq=estimateEquity(hc,comm,nOpponents,2000)*adj;
   const pot=d.pot||0;
   const betAmt=d.amount||0;
   const betPct=pot>0?Math.round(betAmt/pot*100):0;
@@ -6107,7 +6271,11 @@ function analyzeHand(hr){
       notes.push(liveCashSpotProfileText(p));
       if(!ev.suggest)ev.suggest=p.suggest;
     }else if(p.lane==='riverOnePairCall'){
-      if(p.severity==='bad'){
+      if(p.severity==='bad'&&getRangeMode()==='gto'){
+        // [feature 2026-06-10] GTOは均衡前提。EVを尊重し、+EV(good)はok止まり、-EV(既にbad)はbad維持。一律badにしない。
+        next=Math.max(next,6);
+        if(ev.quality==='good')ev.quality='ok';
+      }else if(p.severity==='bad'){
         next=Math.max(next,18);
         ev.quality='bad';
         ev.comment=(ev.comment||'').replace(/^正解。?/,'').replace(/EV優位（[^。]+）で明確なコールです。/,'ライブ$2/$5補正後は、必要EQだけでは正当化しないブラフキャッチです。');
@@ -6579,8 +6747,16 @@ function analyzeHand(hr){
       // [Claude fix 2026-06-10] strongOnePair(TPTK等)のborderはqualityを'good'から'ok'に落とさない。
       // EV+の強ペアコールをborderと判定した場合は軽微な注記のみ(deduction最大3)。
       if(op.strongOnePair){
-        next=Math.max(next,3);
-        // quality: 'good'のままにする（EV+のTPTKコールは正解）
+        // [feature 2026-06-10] Liveモード: OOP×複数バレル×大サイズの強ワンペアborderはEV+でも「明確コール」ではないため good→ok に落とす。
+        // GTOモード/IP/軽い圧力では good を維持(EV的に正解)。
+        if(op.mode==='live'&&op.isOOP&&op.pressureCount>=2&&op.sizePct>=55){
+          next=Math.max(next,8);
+          if(ev.quality==='good')ev.quality='ok';
+          notes.push('ライブ$2/$5: OOPで複数ストリートの大ベットを受ける強ワンペアは、GTO上はインディファレントでも母集団のブラフ不足で薄め。コール頻度を下げる。');
+        }else{
+          next=Math.max(next,3);
+          // quality: 'good'のままにする（EV+のTPTKコールは正解）
+        }
       }else{
         next=Math.max(next,6);
         if(ev.quality==='good')ev.quality='ok';
@@ -6634,7 +6810,12 @@ function analyzeHand(hr){
     let next=before;
     const notes=[];
     if(rv.lane==='riverOnePairCatch'){
-      if(rv.severity==='bad'){
+      if(rv.severity==='bad'&&getRangeMode()==='gto'){
+        // [feature 2026-06-10] GTOはEV尊重。+EV(good)はok止まり、-EV(既にbad)はbad維持。
+        next=Math.max(next,rv.strongOnePair?4:8);
+        if(ev.quality==='good')ev.quality='ok';
+        if(!ev.suggest)ev.suggest=rv.suggest;
+      }else if(rv.severity==='bad'){
         next=Math.max(next,rv.sizePct>=75||rv.pressure>=2?24:20);
         ev.quality='bad';
         ev.comment=(ev.comment||'').replace(/^正解。?/,'').replace(/EV優位（[^。]+）で明確なコールです。/,'リバー金額監査後は、必要EQだけでは正当化しないブラフキャッチです。');
@@ -7377,6 +7558,7 @@ function analyzeHand(hr){
     applyLiveCashRiverDecisionWeight(ev);
     applyHeadsUpRiverWeight(ev);
     applyFinalTablePostflopWeight(ev);
+    composeNaturalReview(ev,d,hr);
     ev.finalTableLearningPoint=tournamentFinalTableLearningPoint(ev);
     const scoredAfter=scoredDeduction(ev);
     if(scoredAfter!==scoredBefore)score-=(scoredAfter-scoredBefore);
@@ -9394,7 +9576,7 @@ function runFishTankRegressionTests(){
       pot:14400
     });
     const ev=humanEval(analyzeHand(hr),function(e){return e.street==='river'&&e.action==='call';});
-    return !!(ev&&ev.onePairProfile&&ev.onePairProfile.verdict==='bad'&&ev.quality==='bad'&&/ワンペア監査/.test(ev.comment||''));
+    return !!(ev&&ev.onePairProfile&&ev.onePairProfile.verdict==='bad'&&ev.quality==='bad'&&/フォールド寄り|ブラフ(が)?不足|受けすぎ/.test(ev.comment||''));
   });
 
   add('ワンペア監査: 動的ボードのトップペア大サイズベットを小〜中サイズ候補にする',function(){
@@ -11685,6 +11867,8 @@ function applyTournamentPresetToSetup(){
   if(note)note.textContent=tournamentContextText(ctx)+'。'+p.note+(focus.goal?' 練習テーマ: '+focus.goal:'');
 }
 $('cfg-mode').addEventListener('change',applyTournamentPresetToSetup);
+// [feature 2026-06-10] レンジ判定モード(GTO/Live)の初期化と切替。localStorageに永続化。
+(function(){var el=$('cfg-range-mode');if(!el)return;try{var sv=localStorage.getItem('fish_tank_range_mode');if(sv==='gto'||sv==='live'){setRangeMode(sv);el.value=getRangeMode();}else{setRangeMode(el.value);}}catch(e){setRangeMode(el.value);}el.addEventListener('change',function(){setRangeMode(el.value);try{localStorage.setItem('fish_tank_range_mode',getRangeMode());}catch(e){}});})();
 $('cfg-tournament-preset').addEventListener('change',applyTournamentPresetToSetup);
 $('cfg-tournament-focus').addEventListener('change',applyTournamentPresetToSetup);
 applyTournamentPresetToSetup();
