@@ -4966,7 +4966,9 @@ function onePairPressureProfile(hr,d,role,tex,nOpponents){
         // [Claude fix 2026-06-10] strongOnePair(TPTK等)はsizePct>=75やpressureCount>=2だけで'bad'にしない。
         // EV的に+EVでも「ワンペアだから」という定性ルールで上書きする内部矛盾を解消。
         // [feature 2026-06-10] Liveモードのみ: OOP×3ストリート圧力×大サイズの強ワンペアは母集団のブラフ不足で降り(bad)。
-        const _liveRiverFold=_liveLean&&strongOnePair&&d.street==='river'&&pressureCount>=2&&sizePct>=55&&_isOOP;
+        // [Codex fix 2026-06-12] 強いトップペアでも、ライブ$2/$5のリバーで複数ストリート圧力＋大きめサイズは
+        // OOP推定に依存しすぎず「受けすぎ」候補にする。位置推定が曖昧でも完成寄り/大サイズなら母集団のブラフ不足を優先。
+        const _liveRiverFold=_liveLean&&strongOnePair&&d.street==='river'&&pressureCount>=2&&sizePct>=55&&(_isOOP||danger||sizePct>=70);
         verdict=(weakPair||(pressureCount>=2&&!strongOnePair)||(sizePct>=75&&!strongOnePair)||_liveRiverFold)?'bad':'border';
         policy=_liveRiverFold
           ?'GTO上はインディファレントですが、ライブ$2/$5ではOOPで3ストリートの大ベットを受ける相手レンジはブラフ不足。実効的にフォールドが勝ちます。'
@@ -6749,7 +6751,9 @@ function analyzeHand(hr){
       if(op.strongOnePair){
         // [feature 2026-06-10] Liveモード: OOP×複数バレル×大サイズの強ワンペアborderはEV+でも「明確コール」ではないため good→ok に落とす。
         // GTOモード/IP/軽い圧力では good を維持(EV的に正解)。
-        if(op.mode==='live'&&op.isOOP&&op.pressureCount>=2&&op.sizePct>=55){
+        // [Codex fix 2026-06-12] ターン2発目の大きめベットにトップペアで受ける場面は、
+        // EVが足りそうでも「明確コール」とは書かず、最低でも注意付き(ok)に落とす。
+        if((op.mode==='live'&&op.isOOP&&op.pressureCount>=2&&op.sizePct>=55)||(op.street==='turn'&&op.pressureCount>=2&&op.sizePct>=65)){
           next=Math.max(next,8);
           if(ev.quality==='good')ev.quality='ok';
           notes.push('ライブ$2/$5: OOPで複数ストリートの大ベットを受ける強ワンペアは、GTO上はインディファレントでも母集団のブラフ不足で薄め。コール頻度を下げる。');
