@@ -1,0 +1,318 @@
+#!/usr/bin/env node
+/*
+ * Fish Tank Poker - ヘッドレス・テストハーネス
+ *
+ * ブラウザ無しで fish_tank_poker.html のロジックを検証する。
+ *   1) 埋め込み <script> を取り出し、Node の vm + 偽DOM で読み込む
+ *   2) 内蔵の回帰スイート runFishTankRegressionTests() を実行
+ *   3) 理論検証(estimateEquity / handRole / boardTex / ハンドランク表)を実行
+ *
+ * 使い方:
+ *   node fish_tank_tests.js [path/to/fish_tank_poker.html]
+ *   FAST=1 node fish_tank_tests.js   # 回帰スイートのエクイティ試行を抑えて高速化
+ *   SKIP_REGRESSION=1 node ...        # 回帰スイートを飛ばし理論検証のみ
+ *
+ * 既定の対象ファイルは同ディレクトリの fish_tank_poker_fixed.html → 無ければ fish_tank_poker.html。
+ */
+const fs = require('fs'), vm = require('vm'), path = require('path');
+
+function pickHtml() {
+  if (process.argv[2]) return process.argv[2];
+  for (const f of ['fish_tank_poker_fixed.html', 'fish_tank_poker.html']) {
+    const p = path.join(__dirname, f);
+    if (fs.existsSync(p)) return p;
+  }
+  throw new Error('HTMLが見つかりません。引数でパスを指定してください。');
+}
+
+function loadSandbox(htmlPath) {
+  const html = fs.readFileSync(htmlPath, 'utf8');
+  const m = html.match(/<script\b[^>]*>([\s\S]*?)<\/script>/i);
+  if (!m) throw new Error('<script> が見つかりません');
+  // const/class はvmグローバルに乗らないため、末尾でブリッジ注入
+  const code = m[1] +
+    "\n;try{Object.assign(globalThis,{HandEval,Deck,Card,HAND_RANK_169,HAND_COMBO_FRAC,HAND_STRENGTH,RANK_VAL,RANKS,SUITS,GameEngine,AI_PROFILES,regressionPlayer});}catch(e){globalThis.__bridgeErr=e.message;}\n";
+  const anyNode = new Proxy(function () {}, {
+    get(t, p) {
+      if (p === 'style') return {};
+      if (p === 'classList') return { add() {}, remove() {}, toggle() {}, contains() { return false; } };
+      if (p === 'length') return 0; if (p === 'value') return '';
+      return anyNode;
+    }, apply() { return anyNode; }, set() { return true; }, construct() { return anyNode; }
+  });
+  const documentStub = new Proxy({}, {
+    get(t, p) {
+      if (['getElementById', 'querySelector', 'createElement'].includes(p)) return () => anyNode;
+      if (p === 'querySelectorAll') return () => [];
+      if (p === 'addEventListener' || p === 'removeEventListener') return () => {};
+      return anyNode;
+    }
+  });
+  const sb = {
+    console, Math, Date, JSON, Array, Object, String, Number, Boolean, Set, Map, RegExp, Symbol,
+    parseInt, parseFloat, isNaN, setTimeout: () => {}, clearTimeout: () => {}, setInterval: () => {},
+    clearInterval: () => {}, requestAnimationFrame: () => {},
+    URLSearchParams: class { constructor() {} has() { return false; } get() { return null; } },
+    location: { search: '', href: '' }, alert: () => {}, navigator: {},
+    localStorage: { getItem() { return null; }, setItem() {}, removeItem() {} }
+  };
+  sb.window = sb; sb.document = documentStub; sb.globalThis = sb; sb.self = sb;
+  vm.createContext(sb);
+  vm.runInContext(code, sb, { filename: path.basename(htmlPath) });
+  if (sb.__bridgeErr) console.warn('bridge warn:', sb.__bridgeErr);
+  return sb;
+}
+
+// 速度用: 回帰スイート向けに軽量エクイティへ差し替え(リバー単独は厳密列挙のまま=決定論)
+function patchFastEquity(s) {
+  const { Deck, HandEval } = s;
+  s.estimateEquity = function (hc, board, nOpp) {
+    const deck = new Deck();
+    const known = new Set([...hc, ...board].map(c => c.toString()));
+    const rem = deck.cards.filter(c => !known.has(c.toString()));
+    if (board.length >= 5 && nOpp === 1) {
+      const my = HandEval.evaluate([...hc, ...board]).score; let sc = 0, tot = 0;
+      for (let i = 0; i < rem.length; i++) for (let j = i + 1; j < rem.length; j++) {
+        const os = HandEval.evaluate([rem[i], rem[j], ...board]).score; sc += my > os ? 1 : (my === os ? 0.5 : 0); tot++;
+      }
+      return tot ? sc / tot : 0;
+    }
+    let sc = 0; const iter = 300;
+    for (let i = 0; i < iter; i++) {
+      for (let k = rem.length - 1; k > 0; k--) { const r = (Math.random() * (k + 1)) | 0; const t = rem[k]; rem[k] = rem[r]; rem[r] = t; }
+      let p = 0; const b = [...board]; while (b.length < 5) b.push(rem[p++]);
+      const my = HandEval.evaluate([...hc, ...b]).score; let lose = false, tie = false;
+      for (let o = 0; o < nOpp; o++) { const c1 = rem[p++], c2 = rem[p++]; if (!c1 || !c2) continue; const os = HandEval.evaluate([c1, c2, ...b]).score; if (os > my) { lose = true; break; } if (os === my) tie = true; }
+      sc += lose ? 0 : (tie ? 0.5 : 1);
+    }
+    return sc / iter;
+  };
+}
+
+function runTheoryChecks(s) {
+  const Cs = s.regressionCards;
+  const { estimateEquity, handRole, boardTex, HandEval, handType, HAND_RANK_169, HAND_COMBO_FRAC } = s;
+  let pass = 0, fail = 0; const fails = [];
+  const ok = (n, c, e) => { if (c) pass++; else { fail++; fails.push(n + (e ? '  [' + e + ']' : '')); } };
+  const approx = (n, v, lo, hi) => ok(n, v >= lo && v <= hi, 'got ' + (typeof v === 'number' ? v.toFixed(3) : v) + ' want ' + lo + '..' + hi);
+  const role = (h, b) => handRole(Cs(h), Cs(b), HandEval.evaluate([...Cs(h), ...Cs(b)]));
+
+  // --- ハンドランク表 169手 ---
+  ok('169手: 件数169・重複なし', HAND_RANK_169.length === 169 && new Set(HAND_RANK_169).size === 169);
+  const posMap = {}; HAND_RANK_169.forEach((h, i) => posMap[h] = i + 1);
+  let inv = HAND_RANK_169.filter(h => h.endsWith('s') && posMap[h.slice(0, -1) + 'o'] && posMap[h] > posMap[h.slice(0, -1) + 'o']);
+  ok('169手: スーテッド<オフスーツ逆転なし', inv.length === 0, inv.join(','));
+
+  // --- estimateEquity 既知値 ---
+  approx('AA vs1 ~0.85', estimateEquity(Cs(['As', 'Ah']), [], 1, 3000), 0.82, 0.88);
+  approx('AKs vs1 ~0.67', estimateEquity(Cs(['As', 'Ks']), [], 1, 3000), 0.63, 0.71);
+  approx('72o vs1 ~0.35', estimateEquity(Cs(['7d', '2c']), [], 1, 3000), 0.30, 0.40);
+  ok('AA>KK', estimateEquity(Cs(['As','Ah']),[],1,12000) > estimateEquity(Cs(['Ks','Kh']),[],1,12000));
+  ok('3opp<1opp', estimateEquity(Cs(['As', 'Ah']), [], 3, 2000) < estimateEquity(Cs(['As', 'Ah']), [], 1, 2000));
+  const r1 = estimateEquity(Cs(['As', 'Kd']), Cs(['Ah', 'Kh', '7c', '2d', '9s']), 1, 50);
+  const r2 = estimateEquity(Cs(['As', 'Kd']), Cs(['Ah', 'Kh', '7c', '2d', '9s']), 1, 9999);
+  ok('リバー厳密列挙=決定論', r1 === r2, r1 + ' vs ' + r2);
+  approx('リバーナッツ~1.0', estimateEquity(Cs(['Ah', 'Kh']), Cs(['Qh', 'Jh', 'Th', '2c', '3d']), 1, 9999), 0.999, 1.0);
+  approx('全タイ=0.5', estimateEquity(Cs(['2c', '3d']), Cs(['Ah', 'Kh', 'Qh', 'Jh', 'Th']), 1, 9999), 0.45, 0.55);
+
+  // --- handRole / boardTex ---
+  let R;
+  R = role(['As', 'Td'], ['Ts', '9c', '4d']); ok('TPTK top_pair', R.pairTier === 'top_pair', R.pairTier); ok('TPTK strong/value', ['strong', 'value'].includes(R.role), R.role);
+  R = role(['As', 'Ad'], ['Ks', '9c', '4d']); ok('AA overpair', R.pairTier === 'overpair', R.pairTier);
+  R = role(['7s', '7d'], ['Ks', '9c', '4d']); ok('77 under_pair/medium', R.pairTier === 'under_pair' && R.role === 'medium', R.pairTier + '/' + R.role);
+  R = role(['9s', '2d'], ['Ks', '9c', '4d']); ok('2nd pair', R.pairTier === 'second_pair', R.pairTier);
+  R = role(['9s', '9h'], ['Ks', '9c', '4d']); ok('set strong', ['strong', 'nutted', 'value'].includes(R.role), R.role);
+  R = role(['As', '2s'], ['Ks', '9s', '4d']); ok('FD draw', R.role === 'draw' && R.draw && R.draw.flush, R.role);
+  R = role(['8s', '7d'], ['9c', '6h', '2d']); ok('OESD draw', R.role === 'draw' && R.draw && R.draw.oesd, R.role);
+  R = role(['As', 'Qd'], ['Ks', '9c', '4d', '2h', '3s']); ok('river air', R.role === 'air', R.role);
+  ok('boardTex monotone flushy>=3', boardTex(Cs(['As', 'Ks', '9s'])).flushy >= 3);
+  ok('boardTex paired', boardTex(Cs(['Ks', 'Kd', '4c'])).paired === true);
+  // --- クラッシュ回帰ガード: ポケットペア×ペアボード(handRoleのmadeDraw未定義バグ) ---
+  for (const [h, b, lbl] of [[['As', 'Ah'], ['8s', '8c', '5d'], 'AA on 8-8-5'], [['5s', '5h'], ['8s', '8c', '3d'], '55 on 8-8-3']]) {
+    let crashed = false; try { role(h, b); } catch (e) { crashed = true; }
+    ok('handRole crash無し: ' + lbl, !crashed);
+  }
+
+  console.log(`\n[理論検証] ${pass} pass / ${fail} fail`);
+  fails.forEach(f => console.log('  FAIL:', f));
+  return fail === 0;
+}
+
+function runRegression(s) {
+  if (typeof s.runFishTankRegressionTests !== 'function') { console.log('[回帰] runner未検出 → スキップ'); return true; }
+  const t0 = Date.now();
+  const res = s.runFishTankRegressionTests();
+  const arr = res.results || res.tests || [];
+  const fails = arr.filter(t => t.pass !== true).map(t => t.name + (t.error ? ' [ERR:' + t.error + ']' : ''));
+  console.log(`\n[回帰] ${res.passed}/${res.total} PASS  (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
+  fails.forEach(n => console.log('  FAIL:', n));
+  return fails.length === 0;
+}
+
+function runModeChecks(s) {
+  if (typeof s.setRangeMode !== 'function') { console.log('[モード検証] setRangeMode未検出 → スキップ'); return true; }
+  const { regressionHand, regressionDecision, analyzeHand, setRangeMode } = s;
+  const he = (an, f) => (an.evals || []).filter(e => e.isHuman).find(f);
+  const D = regressionDecision;
+  const turnHand = () => regressionHand({ heroHole: ['As', 'Td'], villainHole: ['Kh', 'Kc'], board: ['Ts', '9s', '4d', '8c'], pot: 5800, decisions: [
+    D({ street: 'flop', action: 'check', amount: 0, pot: 1000, toCall: 0, facingRaise: false, position: 'CO', playerName: 'あなた', isHuman: true, playerIdx: 0, playerChipsBefore: 12000 }),
+    D({ street: 'flop', action: 'raise', amount: 700, pot: 1000, toCall: 0, facingRaise: false, position: 'BTN', playerName: 'v', isHuman: false, playerIdx: 1, playerChipsBefore: 12000 }),
+    D({ street: 'flop', action: 'call', amount: 700, pot: 1700, toCall: 700, potOdds: 700 / 2400, facingRaise: true, position: 'CO', playerName: 'あなた', isHuman: true, playerIdx: 0, playerChipsBefore: 12000 }),
+    D({ street: 'turn', action: 'check', amount: 0, pot: 2400, toCall: 0, facingRaise: false, position: 'CO', playerName: 'あなた', isHuman: true, playerIdx: 0, playerChipsBefore: 11300 }),
+    D({ street: 'turn', action: 'raise', amount: 1700, pot: 2400, toCall: 0, facingRaise: false, position: 'BTN', playerName: 'v', isHuman: false, playerIdx: 1, playerChipsBefore: 11300 }),
+    D({ street: 'turn', action: 'call', amount: 1700, pot: 4100, toCall: 1700, potOdds: 1700 / 5800, facingRaise: true, position: 'CO', playerName: 'あなた', isHuman: true, playerIdx: 0, playerChipsBefore: 11300 })
+  ] });
+  const riverHand = () => { const t = turnHand(); return regressionHand({ heroHole: ['As', 'Td'], villainHole: ['Kh', 'Kc'], board: ['Ts', '9s', '4d', '8c', '2h'], pot: 14400, decisions: [...t.decisions,
+    D({ street: 'river', action: 'check', amount: 0, pot: 5800, toCall: 0, facingRaise: false, position: 'CO', playerName: 'あなた', isHuman: true, playerIdx: 0, playerChipsBefore: 9600 }),
+    D({ street: 'river', action: 'raise', amount: 4300, pot: 5800, toCall: 0, facingRaise: false, position: 'BTN', playerName: 'v', isHuman: false, playerIdx: 1, playerChipsBefore: 9600 }),
+    D({ street: 'river', action: 'call', amount: 4300, pot: 10100, toCall: 4300, potOdds: 4300 / 14400, facingRaise: true, position: 'CO', playerName: 'あなた', isHuman: true, playerIdx: 0, playerChipsBefore: 9600 })
+  ] }); };
+  let pass = 0, fail = 0; const fails = [];
+  const ok = (n, c, e) => { if (c) pass++; else { fail++; fails.push(n + (e ? '  [' + e + ']' : '')); } };
+  // TPTK(AsTd) on T9s4 8 (2) を OOP で3バレル受け。母集団TPTKオーバーバリューの典型局面。
+  setRangeMode('live');
+  let T = he(analyzeHand(turnHand()), e => e.street === 'turn' && e.action === 'call');
+  let R = he(analyzeHand(riverHand()), e => e.street === 'river' && e.action === 'call');
+  ok('LIVE turn: quality≠good', T.quality !== 'good', T.quality);
+  ok('LIVE turn: verdict border/bad', ['border', 'bad'].includes(T.onePairProfile && T.onePairProfile.verdict), T.onePairProfile && T.onePairProfile.verdict);
+  ok('LIVE river: quality bad', R.quality === 'bad', R.quality);
+  ok('LIVE river: verdict bad(フォールド)', R.onePairProfile && R.onePairProfile.verdict === 'bad', R.onePairProfile && R.onePairProfile.verdict);
+  const liveRiverEff = R.effectiveEqPct;
+  setRangeMode('gto');
+  T = he(analyzeHand(turnHand()), e => e.street === 'turn' && e.action === 'call');
+  R = he(analyzeHand(riverHand()), e => e.street === 'river' && e.action === 'call');
+  ok('GTO turn: quality good維持(EV正直)', T.quality === 'good', T.quality);
+  ok('GTO river: verdict border(badにしない)', R.onePairProfile && R.onePairProfile.verdict !== 'bad', R.onePairProfile && R.onePairProfile.verdict);
+  // GTOはプレッシャー割引を弱めるので、同一局面の実効EQはLiveより高いはず
+  ok('GTO river: 実効EQ > Live(割引が弱い)', R.effectiveEqPct > liveRiverEff, 'gto=' + R.effectiveEqPct + ' live=' + liveRiverEff);
+  // 整合性: GTOで実効EQが必要勝率を上回る強ワンペアコールは quality を bad にしない(本文「コール寄り」と一致)
+  ok('GTO river: quality≠bad(本文コール寄りと整合)', R.quality !== 'bad', 'quality=' + R.quality + ' effEQ=' + R.effectiveEqPct);
+  // [回帰ガード] アンダーペア(自分のポケットペア)を「ボードのペアにキッカー」と誤説明しない
+  if (typeof s.coachReviewText === 'function') {
+    const D2 = regressionDecision;
+    const up = regressionHand({ heroHole: ['4c', '4d'], villainHole: ['Qd', '6c'], board: ['5h', '2c', 'Qh', 'Ac', 'Ks'], pot: 41, decisions: [
+      D2({ street: 'flop', action: 'check', amount: 0, pot: 28, toCall: 0, facingRaise: false, position: 'MP', playerName: 'あ', isHuman: true, playerIdx: 0, playerChipsBefore: 987 }),
+      D2({ street: 'flop', action: 'check', amount: 0, pot: 28, toCall: 0, facingRaise: false, position: 'BB', playerName: 'm', isHuman: false, playerIdx: 1, playerChipsBefore: 992 })
+    ] });
+    const e = (analyzeHand(up).evals || []).filter(x => x.isHuman)[0];
+    const txt = s.coachReviewText(e) + (e.comment || '');
+    ok('アンダーペアを「ボードのペアにキッカー」と誤説明しない', !/ボードのペアにキッカー|ボードペアはキッカー/.test(txt), txt.slice(0, 40));
+    ok('44 on dry board は under_pair 判定', e.onePairProfile && e.onePairProfile.pairTier === 'under_pair', e.onePairProfile && e.onePairProfile.pairTier);
+    // [回帰ガード] 脆弱トリップス(J9 on KJJ8s, 3スペード)のターンチェックバックを重く罰しない
+    const D3 = regressionDecision;
+    const trh = regressionHand({ heroHole: ['Jh', '9c'], villainHole: ['Kd', '3h'], board: ['Ks', 'Jc', 'Js', '8s', '4s'], pot: 46, decisions: [
+      D3({ street: 'turn', action: 'check', amount: 0, pot: 46, toCall: 0, facingRaise: false, position: 'BTN', playerName: 'あ', isHuman: true, playerIdx: 0, playerChipsBefore: 978 }),
+      D3({ street: 'turn', action: 'check', amount: 0, pot: 46, toCall: 0, facingRaise: false, position: 'BB', playerName: 'k', isHuman: false, playerIdx: 1, playerChipsBefore: 983 })
+    ] });
+    const te = (analyzeHand(trh).evals || []).filter(x => x.isHuman)[0];
+    ok('脆弱トリップスのスケアターンchをbadにしない', te.quality !== 'bad' && (te.deduction || 0) <= 12, 'q=' + te.quality + ' ded=' + te.deduction);
+    // [回帰ガード] 範囲内の標準BTNオープンを主テーマ(preflop-entry)に乗っ取らせない
+    if (typeof s.regressionPlayer === 'function') {
+      const RP = s.regressionPlayer, D5 = regressionDecision;
+      const ps = [RP('あなた', true, ['Jh', '9c'], { chips: 1000 }), RP('b', false, ['2c', '7d'], { chips: 1000, active: false }), RP('n', false, ['3c', '8d'], { chips: 1000, active: false }), RP('y', false, ['4c', '9d'], { chips: 1000, active: false }), RP('u', false, ['5c', 'Td'], { chips: 1000, active: false }), RP('k', false, ['Kd', '3h'], { chips: 1000 })];
+      const h6 = regressionHand({ players: ps, board: ['Ks', 'Jc', 'Js', '8s', '4s'], pot: 67, dealerIndex: 0, decisions: [
+        D5({ street: 'preflop', action: 'raise', amount: 13, pot: 7, toCall: 0, facingRaise: false, position: 'BTN', playerName: 'あなた', isHuman: true, playerIdx: 0, playerChipsBefore: 1000 }),
+        D5({ street: 'preflop', action: 'call', amount: 8, pot: 20, toCall: 8, facingRaise: true, position: 'BB', playerName: 'k', isHuman: false, playerIdx: 5, playerChipsBefore: 1000 }),
+        D5({ street: 'flop', action: 'check', amount: 0, pot: 28, toCall: 0, facingRaise: false, position: 'BB', playerName: 'k', isHuman: false, playerIdx: 5, playerChipsBefore: 992 }),
+        D5({ street: 'flop', action: 'raise', amount: 9, pot: 28, toCall: 0, facingRaise: false, position: 'BTN', playerName: 'あなた', isHuman: true, playerIdx: 0, playerChipsBefore: 987 }),
+        D5({ street: 'flop', action: 'call', amount: 9, pot: 37, toCall: 9, facingRaise: true, position: 'BB', playerName: 'k', isHuman: false, playerIdx: 5, playerChipsBefore: 983 }),
+        D5({ street: 'turn', action: 'check', amount: 0, pot: 46, toCall: 0, facingRaise: false, position: 'BB', playerName: 'k', isHuman: false, playerIdx: 5, playerChipsBefore: 983 }),
+        D5({ street: 'turn', action: 'check', amount: 0, pot: 46, toCall: 0, facingRaise: false, position: 'BTN', playerName: 'あなた', isHuman: true, playerIdx: 0, playerChipsBefore: 978 }),
+        D5({ street: 'river', action: 'raise', amount: 21, pot: 46, toCall: 0, facingRaise: false, position: 'BB', playerName: 'k', isHuman: false, playerIdx: 5, playerChipsBefore: 983 }),
+        D5({ street: 'river', action: 'fold', amount: 0, pot: 67, toCall: 21, facingRaise: true, position: 'BTN', playerName: 'あなた', isHuman: true, playerIdx: 0, playerChipsBefore: 978 })
+      ] });
+      const pl6 = analyzeHand(h6).primaryLesson;
+      ok('標準BTNオープンを主テーマにしない', pl6 && pl6.category !== 'preflop-entry', pl6 && pl6.category);
+    }
+  }
+  setRangeMode('live'); // 既定へ戻す
+  console.log(`\n[モード検証] ${pass} pass / ${fail} fail`);
+  fails.forEach(x => console.log('  FAIL:', x));
+  return fail === 0;
+}
+
+function runPreflopModeChecks(s) {
+  if (typeof s.liveCashRangeProfile !== 'function') { console.log('[プリフロップモード検証] スキップ'); return true; }
+  const { liveCashRangeProfile, regressionCards: Cs, setRangeMode } = s;
+  const players = Array.from({ length: 6 }, (_, i) => ({ active: true, isHuman: i === 0 }));
+  function prof(hc, pos, act, caller) {
+    const dec = [{ street: 'preflop', action: 'raise', position: 'CO', isHuman: false, playerIdx: 5 }];
+    if (caller) dec.push({ street: 'preflop', action: 'call', position: 'HJ', isHuman: false, playerIdx: 4 });
+    const d = { street: 'preflop', action: act, facingRaise: true, toCall: 15, position: pos, isHuman: true, playerIdx: 0, pfActionBetLevel: 2 };
+    dec.push(d);
+    return liveCashRangeProfile({ players, decisions: dec, community: [] }, d, Cs(hc), pos);
+  }
+  const cap = (mode, hc, pos, act, caller) => { setRangeMode(mode); const p = prof(hc, pos, act, caller); return p ? p.capPercent : null; };
+  let pass = 0, fail = 0; const fails = [];
+  const ok = (n, c, e) => { if (c) pass++; else { fail++; fails.push(n + (e ? '  [' + e + ']' : '')); } };
+  // GTOは3betを広く(ポラー)
+  ok('GTO 3bet幅 > Live (A5s BTN)', cap('gto', ['As', '5s'], 'BTN', 'raise') > cap('live', ['As', '5s'], 'BTN', 'raise'));
+  // GTOは非IPフラットを圧縮(3bet-or-fold)
+  ok('GTO flat幅 < Live (KJo SB)', cap('gto', ['Kh', 'Jd'], 'SB', 'call') < cap('live', ['Kh', 'Jd'], 'SB', 'call'));
+  // スクイーズ(間にコール)はバリュー寄せで締まる
+  ok('スクイーズ < 単独3bet (A5s BTN/live)', cap('live', ['As', '5s'], 'BTN', 'raise', true) < cap('live', ['As', '5s'], 'BTN', 'raise', false));
+  // ライブ・マルチウェイは投機系フラットを広げる
+  ok('MWフラット > 単独 (76s BTN/live)', cap('live', ['7s', '6s'], 'BTN', 'call', true) > cap('live', ['7s', '6s'], 'BTN', 'call', false));
+  // サイズ提案: Liveは大きめ、GTOは小さめ
+  if (typeof s.preflopSizePlan === 'function') {
+    const sp = (mode, d, i3, iso, pos) => { setRangeMode(mode); return s.preflopSizePlan({ bigBlind: 5 }, d, 0, i3, iso, pos).target; };
+    ok('オープン: Live > GTO (CO)', sp('live', { toCall: 0 }, false, false, 'CO') > sp('gto', { toCall: 0 }, false, false, 'CO'));
+    ok('3bet: Live > GTO (BTN)', sp('live', { toCall: 15 }, true, false, 'BTN') > sp('gto', { toCall: 15 }, true, false, 'BTN'));
+  }
+  setRangeMode('live');
+  console.log(`\n[プリフロップモード検証] ${pass} pass / ${fail} fail`);
+  fails.forEach(x => console.log('  FAIL:', x));
+  return fail === 0;
+}
+
+function runAiPreflopModeChecks(s) {
+  if (typeof s.aiDecide !== 'function' || typeof s.createAuditRingGame !== 'function' || !s.AI_PROFILES || !s.Card) {
+    console.log('[AIプリフロップ検証] スキップ'); return true;
+  }
+  const { aiDecide, createAuditRingGame, AI_PROFILES, Card, setRangeMode } = s;
+  function rates(mode, hc, N) {
+    setRangeMode(mode);
+    const g = createAuditRingGame();
+    const v = g.players[1], opener = g.players[2];
+    g.dealerIndex = v.seatIndex; g.bigBlind = 5; g.currentBet = 15; g.pot = 22;
+    g.currentHandDecisions = [{ street: 'preflop', action: 'raise', playerIdx: opener.id != null ? opener.id : 2 }];
+    v.profile = AI_PROFILES.take; v.holeCards = hc.map(c => new Card(c[0], c[1]));
+    v.currentBet = 0; v.chips = 1000;
+    let bet = 0, call = 0;
+    for (let i = 0; i < N; i++) { const a = aiDecide(v, g, 'hard'); if (a.action === 'raise' || a.action === 'allin') bet++; else if (a.action === 'call') call++; }
+    return { bet: bet / N, call: call / N };
+  }
+  let pass = 0, fail = 0; const fails = [];
+  const ok = (n, c, e) => { if (c) pass++; else { fail++; fails.push(n + (e ? '  [' + e + ']' : '')); } };
+  const N = 1500;
+  const L = rates('live', ['As', '5s'], N), G = rates('gto', ['As', '5s'], N);
+  // Liveはブラフ3betを減らす
+  ok('Live 3bet頻度 < GTO (A5s)', L.bet < G.bet - 0.05, 'live=' + L.bet.toFixed(2) + ' gto=' + G.bet.toFixed(2));
+  // Liveはその分コールに回す(より受け身)
+  ok('Live コール頻度 > GTO (A5s)', L.call > G.call + 0.05, 'live=' + L.call.toFixed(2) + ' gto=' + G.call.toFixed(2));
+  setRangeMode('live');
+  console.log(`\n[AIプリフロップ検証] ${pass} pass / ${fail} fail`);
+  fails.forEach(x => console.log('  FAIL:', x));
+  return fail === 0;
+}
+
+(function main() {
+  const htmlPath = pickHtml();
+  console.log('target:', htmlPath);
+  const s = loadSandbox(htmlPath);
+  let allOk = true;
+  const realEquity = s.estimateEquity; // run theory checks at full fidelity
+  if (!process.env.SKIP_REGRESSION) {
+    if (process.env.FAST) patchFastEquity(s);
+    allOk = runRegression(s) && allOk;
+    s.estimateEquity = realEquity; // restore after FAST patch
+  }
+  allOk = runTheoryChecks(s) && allOk;
+  // 構造系チェック(モード/プリフロップ/AI/主テーマ)は多数のanalyzeHandを回すため、精度不要な範囲で軽量エクイティを使う
+  if (process.env.FAST) patchFastEquity(s);
+  allOk = runModeChecks(s) && allOk;
+  allOk = runPreflopModeChecks(s) && allOk;
+  allOk = runAiPreflopModeChecks(s) && allOk;
+  console.log('\n===', allOk ? 'ALL GREEN' : 'CHECK FAILS ABOVE', '===');
+  process.exit(allOk ? 0 : 1);
+})();
