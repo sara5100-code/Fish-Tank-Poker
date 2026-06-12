@@ -2001,9 +2001,21 @@ function liveCashSpotProfile(hr,d,holeCards,role,tex,nOpponents,lineContext){
       lane='bbDefend';label='BBディフェンス';axis='BBディフェンス';
       verdict=rp?rp.verdict:'自然';
       severity=rp?rp.severity:'good';
-      policy='BBはポットオッズが良く、非BBのコールドコールより広く守れます。';
-      risk='ただしOOPなので、弱いトップペアやキッカー負けしやすい手はポストフロップで払いすぎないことが条件です。';
-      suggest='推奨: 小さめBTN/COオープンには広めに防衛。EP相手や弱オフスーツは締める';
+      if(rp&&rp.severity==='bad'){
+        const opener=rp.openerPos||'相手';
+        policy='BBは広く守れますが、'+opener+'オープン相手ではレンジを締めます。今回の'+(rp.handType||'手')+'は上位'+rp.handPercent+'%程度で、BB防衛目安の上位'+rp.capPercent+'%から外れています。';
+        risk='ポットオッズだけでコールすると、OOPでエクイティを実現しにくく、当たっても弱いトップペアやキッカー負けで払いすぎやすくなります。';
+        suggest='推奨: フォールド。BTN/COの小さめオープン相手なら一部防衛しますが、UTGなど強いレンジ相手はかなり絞る';
+      }else if(rp&&rp.severity==='border'){
+        const opener=rp.openerPos||'相手';
+        policy='BBなのでポットオッズは良いですが、'+opener+'のレンジと自分のハンドの実現率で判断が分かれる境界です。今回の'+(rp.handType||'手')+'は上位'+rp.handPercent+'%程度で、防衛目安の上位'+rp.capPercent+'%付近です。';
+        risk='OOPなので、フロップ以降は弱いワンペアで大きく払いすぎないことが条件になります。';
+        suggest='状況次第: 相手が広いならコール、強い/大きいオープンならフォールド寄り';
+      }else{
+        policy='BBはポットオッズが良く、非BBのコールドコールより広く守れます。今回の手は防衛レンジ内に収まりやすいです。';
+        risk='ただしOOPなので、弱いトップペアやキッカー負けしやすい手はポストフロップで払いすぎないことが条件です。';
+        suggest='推奨: 小さめBTN/COオープンには広めに防衛。EP相手や弱オフスーツは締める';
+      }
     }else if(lineContext==='SBコールドコール'){
       lane='sbColdCall';label='SBコールドコール';axis='リング参加レンジ';
       verdict=rp?rp.verdict:'境界';
@@ -4986,7 +4998,7 @@ function onePairPressureProfile(hr,d,role,tex,nOpponents){
     policy='ターンでこちらの薄いバリューにコールされ、リバーで打たれた形はトップペアでも相手依存のブラフキャッチです。';
   }
   const isBoardPairOvercardRet=pairTier==='board_pair'&&!!(role&&role.isOvercard);
-  return{street:d.street,lane,spr,sizePct,weakPair,mediumTopPair,strongOnePair,danger,pressureCount,verdict,policy,risk,isBoardPairOvercard:isBoardPairOvercardRet,isOOP:_isOOP,mode:_mode};
+  return{street:d.street,lane,spr,sizePct,pairTier,weakPair,mediumTopPair,strongOnePair,danger,pressureCount,verdict,policy,risk,isBoardPairOvercard:isBoardPairOvercardRet,isOOP:_isOOP,mode:_mode};
 }
 function onePairPressureProfileText(profile){
   if(!profile)return'';
@@ -9597,6 +9609,46 @@ function runFishTankRegressionTests(){
     return !!(ev&&ev.onePairProfile&&ev.onePairProfile.verdict!=='normal'&&/小〜中サイズ|チェック/.test((ev.comment||'')+' '+(ev.suggest||'')));
   });
 
+  add('コーチ文: 3ポケ下ペアをボードペア未絡み扱いしない',function(){
+    const hr=regressionHand({
+      heroHole:['3s','3d'],
+      villainHole:['Ah','Kc'],
+      board:['Qh','8d','5c','2s'],
+      decisions:[
+        regressionDecision({street:'turn',action:'check',amount:0,pot:100,toCall:0,facingRaise:false,position:'BB',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:500})
+      ],
+      pot:100
+    });
+    const ev=humanEval(analyzeHand(hr),function(e){return e.street==='turn'&&e.action==='check';});
+    const txt=coachReviewText(ev);
+    return !!(ev&&ev.onePairProfile&&ev.onePairProfile.pairTier==='under_pair'&&/ポケットペア|下のペア/.test(txt)&&!/ボードのペアにキッカー/.test(txt));
+  });
+
+  add('コーチ文: BBレンジ外コールは詳細を開かず理由が分かる',function(){
+    const players=[
+      regressionPlayer('あなた',true,['7c','2d'],{chips:500}),
+      regressionPlayer('utg',false,['Ah','Ad'],{chips:500})
+    ];
+    const hr=regressionHand({
+      players:players,
+      heroHole:['7c','2d'],
+      villainHole:['Ah','Ad'],
+      board:[],
+      decisions:[
+        regressionDecision({street:'preflop',action:'raise',amount:15,pot:7,toCall:5,facingRaise:false,position:'UTG',playerName:'utg',isHuman:false,playerIdx:1,playerChipsBefore:500,pfRaiseCountBefore:0,pfFacingBetLevel:0,pfActionBetLevel:2}),
+        regressionDecision({street:'preflop',action:'call',amount:10,pot:22,toCall:10,potOdds:10/32,facingRaise:true,position:'BB',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:495,pfRaiseCountBefore:1,pfFacingBetLevel:2,pfActionBetLevel:2})
+      ],
+      pot:32
+    });
+    const ev=humanEval(analyzeHand(hr),function(e){return e.street==='preflop'&&e.action==='call';});
+    const txt=coachReviewText(ev);
+    return !!(ev&&ev.liveCashSpotProfile&&ev.liveCashSpotProfile.lane==='bbDefend'&&/UTGオープン相手|防衛目安|上位\d+%/.test(txt)&&/フロップ前/.test(txt)&&!/プリフロップ/.test(txt));
+  });
+
+  add('レビューUI: 詳細データを折りたたみ表示しない',function(){
+    return compactReviewDetailsHTML(null,'<span>詳細</span>')==='';
+  });
+
   function threeBetUnderpairHand(){
     const players=[
       regressionPlayer('あなた',true,['7h','7d'],{chips:500}),
@@ -10341,7 +10393,7 @@ function coachReviewText(ev){
           :'コールレンジ内の可能性があります。見直しが必要です。';
       }
     }else{
-      scene='リングゲームの'+p.label+'です。';
+      scene='リングゲームの'+(ev.street==='preflop'?'フロップ前、':'')+p.label+'です。';
     }
     reason=p.policy+' '+naturalRiskText(p.risk);
   }else if(ev.onePairProfile){
@@ -10352,7 +10404,13 @@ function coachReviewText(ev){
     if(p.isBoardPairOvercard){
       scene='ペアドボードでホールカードが絡まないオーバーカード。ワンペア管理ではなくレンジ優位を活かすCB局面です。';
     }else if(p.weakPair){
-      scene='ボードのペアにキッカーが乗るだけで、ホールカードは実質未絡みの場面です。';
+      if(p.pairTier==='board_pair'){
+        scene='ボードのペアにキッカーが乗るだけで、ホールカードは実質未絡みの場面です。';
+      }else if(p.pairTier==='under_pair'){
+        scene='ポケットペアはありますが、ボードの上位カードに負けている下のペアです。セットになっていないので、強い圧力には慎重に扱います。';
+      }else{
+        scene='弱めのワンペアです。ショーダウン価値はありますが、大きなポットを作るよりポット管理が中心です。';
+      }
     }else if(p.strongOnePair){
       // [Claude fix 2026-06-10] isBoardCompletedTP(KK66型)等のTPTK場面は専用テキスト
       scene='トップペア相当のハンドで、相手のサイズとラインにどこまで耐えるかが鍵です。';
@@ -10372,11 +10430,17 @@ function coachReviewText(ev){
   }
   rec=naturalRecommendationText(rec);
   const close=recommendationClose(action,ev.quality,rec,!!ev.suggest);
-  return (verdict+' '+scene+(reason?' '+reason:'')+' '+close).replace(/\s+/g,' ').replace(/。。+/g,'。').trim();
+  return (verdict+' '+scene+(reason?' '+reason:'')+' '+close)
+    .replace(/プリフロップ/g,'フロップ前')
+    .replace(/\s+/g,' ')
+    .replace(/。。+/g,'。')
+    .trim();
 }
 function compactReviewDetailsHTML(ev,metaHTML){
   if(!metaHTML)return'';
-  return '<details class="review-details" style="margin-top:7px"><summary style="cursor:pointer;color:var(--dim);font-size:10px;font-weight:700">詳細データ</summary><div style="margin-top:5px">'+metaHTML+'</div></details>';
+  // [Codex fix 2026-06-12] 評価軸は裏側で使い、ユーザーには口語コメントへ統合する。
+  // 詳細データを開かないと理由が分からない状態を避けるため、レビュー画面では非表示にする。
+  return '';
 }
 function showAnalysis(hr,fromHistory){
   _analysisFromHistory=!!fromHistory;
