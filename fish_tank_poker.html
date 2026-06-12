@@ -1937,6 +1937,15 @@ function rangeProfileText(profile){
   const note=profile.notes&&profile.notes.length?' / '+profile.notes.join(' / '):'';
   return profile.handType+' 上位'+profile.handPercent+'%: '+profile.actionLabel+'目安 上位'+profile.capPercent+'% -> '+profile.verdict+'（'+profile.baseline+'）'+note;
 }
+// [Codex fix 2026-06-12] AI/相手の実ハンドを前提監査テキストに出さない。
+// 非公開カード由来のハンド名・順位%は、コピー用レビューや監査ログではレンジ前提だけに丸める。
+function rangeProfileTextForVisibility(profile,hideHand){
+  if(!profile)return'';
+  if(profile.caps)return tournamentRangeProfileText(profile);
+  if(!hideHand)return rangeProfileText(profile);
+  const note=profile.notes&&profile.notes.length?' / '+profile.notes.join(' / '):'';
+  return '非公開ハンド: '+profile.actionLabel+'目安 上位'+profile.capPercent+'% -> '+profile.verdict+'（'+profile.baseline+'）'+note;
+}
 // [Codex fix 2026-06-05] Ring cash needs its own scene labels, separate from tournament phases.
 function liveCashSpotProfile(hr,d,holeCards,role,tex,nOpponents,lineContext){
   if(!hr||!d||!holeCards||holeCards.length<2)return null;
@@ -2235,7 +2244,15 @@ function liveCashInitiativeProfile(hr,d,role,tex,nOpponents){
     const natural=isOOP||multiway||dynamic&&!strongMade&&!strongDraw||!strongMade&&!dryHigh;
     verdict=natural?'PFR側でも自然なチェック':'CB取り逃し候補';
     severity=natural?'good':'border';
-    policy='PFRだから毎回CBではありません。OOP、マルチウェイ、動的ボードではチェックでレンジを守る価値があります。';
+    if(isIP&&!multiway){
+      policy='PFRでも毎回CBではありません。IP/HUでは小さなCBも使えますが、弱めのワンペアや中程度のSDVはチェックバックで実現率を上げる選択も自然です。';
+    }else if(isOOP&&!multiway){
+      policy='PFRでも毎回CBではありません。OOPではチェックを混ぜて、相手のベットサイズを見てから続行判断を分ける価値があります。';
+    }else if(multiway){
+      policy='PFRでも毎回CBではありません。マルチウェイでは誰かが強い手やドローを持つ頻度が上がるため、チェックでレンジを守る価値があります。';
+    }else{
+      policy='PFRでも毎回CBではありません。動的ボードや中程度の手では、チェックでターン以降の判断を楽にする価値があります。';
+    }
     risk=natural?'チェックは弱さではなく、後続ストリートの難しさを下げる選択です。':'ドライなレンジ有利ボードでチェックしすぎると、相手のエクイティを無料で実現させます。';
     suggest=natural?'推奨: チェックを許容。相手のベットサイズで続行判断':'推奨: 小さめCBを混ぜる。25〜33%potから始める';
   }else if(!humanWasPfr&&isIP&&action==='check'){
@@ -2498,12 +2515,20 @@ function liveCashRiverDecisionProfile(hr,d,role,tex,nOpponents){
     suggest=bad?'推奨: チェックで諦める。打つなら明確なブロッカーと相手傾向が必要':'候補: 40〜60%potを低頻度。相手が降りるレンジを持つ時だけ';
   }else if(betLike&&strongMade){
     lane='riverValueTarget';
-    const over=nonNutValue&&sizePct>=100;
+    const lowerTwoPair=role.madeClass==='two_pair'&&role.valueTier==='lower_two_pair';
+    const over=nonNutValue&&sizePct>=100||lowerTwoPair&&sizePct>=75;
     severity=over?'border':'good';
-    verdict=over?'強い完成役でもオーバーベット注意':'強い完成役の取り切り';
-    policy='強い完成役はリバーで取り切ります。ただし全体ナッツでない時は、相手のレイズや上位完成役も少し見ます。';
-    risk=sizePct+'%pot / '+(nonNutValue?'非ナッツの強い完成役':'ナッツ級')+' / 相手圧力'+pressure+'回';
-    suggest=over?'推奨: 60〜90%pot中心。全体ナッツでない時はオールイン要求を慎重に':'推奨: 60〜100%pot中心。コールしてくれる下のバリューを想定してサイズを選ぶ';
+    if(lowerTwoPair){
+      verdict=over?'下のツーペアの大きめバリュー注意':'下のツーペアの実戦的バリュー';
+      policy='下のツーペアはバリューを取れる手ですが、ナッツ級ではありません。相手がトップペアを降りないタイプなら打てますが、上位ツーペアや完成役に当たる時は大きく払いすぎないことが大事です。';
+      risk=sizePct+'%pot / 下のツーペア / 相手圧力'+pressure+'回';
+      suggest=over?'推奨: 50〜66%pot中心。75%pot以上は相手がJx/9xを広くコールする時だけ':'推奨: 50〜66%pot中心。相手がコールしすぎるなら少し大きめも可';
+    }else{
+      verdict=over?'強い完成役でもオーバーベット注意':'強い完成役の取り切り';
+      policy='強い完成役はリバーで取り切ります。ただし全体ナッツでない時は、相手のレイズや上位完成役も少し見ます。';
+      risk=sizePct+'%pot / '+(nonNutValue?'非ナッツの強い完成役':'ナッツ級')+' / 相手圧力'+pressure+'回';
+      suggest=over?'推奨: 60〜90%pot中心。全体ナッツでない時はオールイン要求を慎重に':'推奨: 60〜100%pot中心。コールしてくれる下のバリューを想定してサイズを選ぶ';
+    }
   }else if(action==='check'&&onePair&&!strongMade){
     lane='riverPotControlCheck';
     severity='good';
@@ -2911,7 +2936,7 @@ function preflopPremiseAudit(hr){
     const profile=tctx?tournamentRangeProfile(tctx,d,p.holeCards,stackBB,pos):liveCashRangeProfile(hr,d,p.holeCards,pos);
     if(!profile)return;
     const target=p.isHuman&&generatedPremise?'出題前提':(p.isHuman?'プレイヤー操作':'AI前提');
-    const item={street:d.street,player:p.isHuman?'あなた':p.name,position:pos,action:d.action,amount:d.amount,target,profile,text:target+' '+(p.isHuman?'あなた':p.name)+'['+pos+'] '+rangeProfileText(profile)};
+    const item={street:d.street,player:p.isHuman?'あなた':p.name,position:pos,action:d.action,amount:d.amount,target,profile,text:target+' '+(p.isHuman?'あなた':p.name)+'['+pos+'] '+rangeProfileTextForVisibility(profile,!p.isHuman)};
     if(profile.severity==='bad'){
       if(!p.isHuman||generatedPremise)issues.push(item);
     }else if(profile.severity==='border'){
@@ -3101,6 +3126,8 @@ function actualHandTextLeakCount(hr,an){
   if(!vis.hiddenCodes.length||!an)return 0;
   const hay=[
     an.gradeLabel||'',
+    an.primaryLesson?primaryLessonText(an.primaryLesson):'',
+    an.premiseAudit?[].concat(an.premiseAudit.issues||[],an.premiseAudit.warnings||[]).map(function(x){return x&&x.text||'';}).join(' '):'',
     (an.evals||[]).map(function(e){
       return [e.comment||'',e.suggest||'',e.strategyMix||'',e.axisWeightNote||'',e.phaseWeightNote||''].join(' ');
     }).join(' ')
@@ -4512,11 +4539,11 @@ function handRole(holeCards,comm,evalResult){
       if(r1>boardPairRk){
         // AA on 8-8-5 型: ポケットペアがボードペア上位 → エースアップ等の強いツーペア
         note='ポケット'+pcktName+pcktName+' + ボードペア('+bpName+')のツーペア。強いバリューハンド。積極的にベット推奨。';
-        return{role:'strong',note:note+madeDraw.note,isNut:false,isVuln:tex.flushDraw||tex.straightDraw};
+        return{role:'strong',note:note+madeDraw.note,isNut:false,isVuln:tex.flushDraw||tex.straightDraw,madeClass:'two_pair',valueTier:'pocket_over_board_pair'};
       }else{
         // 55 on 8-8-3 型: ボードペアが上位 → 中程度のバリュー
         note='ポケット'+pcktName+pcktName+' + ボード上位ペア('+bpName+')のツーペア。中程度のバリュー。サイズを抑えてポット管理。';
-        return{role:'value',note:note+madeDraw.note,isNut:false,isVuln:true};
+        return{role:'value',note:note+madeDraw.note,isNut:false,isVuln:true,madeClass:'two_pair',valueTier:'pocket_under_board_pair'};
       }
     }
     if(isBoardCompletedTP){
@@ -4528,7 +4555,7 @@ function handRole(holeCards,comm,evalResult){
     }
     // [Claude fix 2026-06-10] isBoardCompletedTPはトップペア相当 → pairTier='top_pair'を明示。
     // これにより下流のstrongOnePairフラグが正しくtrueになり、turn/riverの誤'bad'判定を防ぐ。
-    return{role:isBoardCompletedTP?'value':(isTopTwo?'strong':'value'),note,isNut:false,isVuln:vuln,pairTier:isBoardCompletedTP?'top_pair':undefined};
+    return{role:isBoardCompletedTP?'value':(isTopTwo?'strong':'value'),note,isNut:false,isVuln:vuln,pairTier:isBoardCompletedTP?'top_pair':undefined,madeClass:'two_pair',valueTier:isBoardCompletedTP?'board_completed_top_pair':(isTopTwo?'top_two_pair':'lower_two_pair')};
   }
 
   if(cat===3){// トリップス or セット
@@ -7331,6 +7358,7 @@ function analyzeHand(hr){
         // スーテッドエースの3BETブラフ (A5s-A2s)
         const is3betBluffOK=is3bet&&hcat_r==='suited_ace'&&['BTN','CO','HJ','SB','BB'].includes(pos)&&hRank>=40&&hRank<=60;
         const isBtnLatePair3bet=is3bet&&pos==='BTN'&&['CO','HJ','LJ'].includes(openerPos||'')&&c1.rank===c2.rank&&hRank>=13&&hRank<=35;
+        const isLowSuitedStealOpen=!is3bet&&!isISO&&d.action==='raise'&&suited&&Math.max(RANK_VAL[c1.rank],RANK_VAL[c2.rank])<=7&&Math.abs(RANK_VAL[c1.rank]-RANK_VAL[c2.rank])<=3&&['CO','BTN','SB'].includes(pos);
         if(is5bet){
           // [Codex fix 2026-05-28] After hero 3bets and faces a 4bet, another raise is a 5bet, not a fresh 3bet.
           if(hRank<=2){
@@ -7358,6 +7386,9 @@ function analyzeHand(hr){
         }else if(is3betBluffOK){
           ev.quality='ok';ev.comment='スーテッドエースの3BETブラフ（'+hd+'、'+rankStr+'）。A5s-A2s等はGTO的に標準的なブラフ3BET候補です。特にブラインド対スチールではAブロッカー効果があり、コールより3BET/フォールドの混合に向きます。'+sizeNote;
           ev.strategyMix=['SB','BB'].includes(pos)?'Fold 55% / 3bet 40% / Call 5%':'Fold 45% / 3bet 45% / Call 10%';
+        }else if(isLowSuitedStealOpen&&marginPct>=0){
+          ev.quality='good';ev.comment='正解寄り。'+hd+'（'+rankStr+'）の'+pn+' '+actionLabel+'は、後ろがタイトなら参加できるスチール下限寄りのハンドです。コアレンジではなく、ブラインドが広く守る卓ではフォールドも混ぜます。'+sizeNote+isoNote;
+          ev.strategyMix=pos==='BTN'?'Fold 35-50% / Raise 50-65% / Call 0%':'Fold 45-65% / Raise 35-55% / Call 0%';
         }else if(marginPct>=0.09&&!(isISO&&isOOP_r&&isDomBway_r)){
           ev.quality='good';ev.comment='正解。'+hd+'（'+rankStr+'）の'+pn+' '+actionLabel+'はコアレンジです。'+sizeNote+isoNote;
         }else if(marginPct>=0.03&&!(isISO&&isOOP_r&&isDomBway_r)){
@@ -7752,7 +7783,18 @@ function analyzeHand(hr){
   if(onlyFoldedPF)gl='プリフロップフォールド。ポジション・ハンドランクに基づく適切な判断です。';
   const premiseAudit=preflopPremiseAudit(hr);
   const result={grade,gradeLabel:gl,score,evals,human,hr,pfScore,poScore,sawFlop,tournamentScores,liveCashScores,primaryLesson,premiseAudit};
-  if(!_actualHandAuditRunning)result.actualHandAudit=actualHandLeakAudit(hr,result);
+  if(!_actualHandAuditRunning){
+    result.actualHandAudit=actualHandLeakAudit(hr,result);
+    // [Codex fix 2026-06-12] 実ハンド混入監査がFAILなら、レビュー自体の信頼度をスコアにも反映する。
+    if(result.actualHandAudit&&result.actualHandAudit.status==='FAIL'){
+      result.score=Math.min(result.score,85);
+      if(result.score>=75)result.grade='B';
+      else if(result.score>=50)result.grade='C';
+      else if(result.score>=35)result.grade='D';
+      else result.grade='F';
+      result.gradeLabel='実ハンド混入監査に失敗しています。相手の実ハンド由来の情報が混ざった可能性があるため、このレビューは要修正です。';
+    }
+  }
   return result;
 }
 
