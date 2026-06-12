@@ -4563,7 +4563,7 @@ function handRole(holeCards,comm,evalResult){
           :isGoodK?' '+tkJp+'キッカーはまずまずですが、ポケットペアに負けます。'
           :' '+tkJp+'キッカーは弱く、コールすら慎重に。')
         +' ポットコントロール・check-call中心を推奨。積極的なバリューベットは危険です。';
-      return{role:bRole,note:bNote,isNut:false,isVuln:true};
+      return{role:bRole,note:bNote,isNut:false,isVuln:true,madeClass:'board_trips'};
     }
     // ---- 通常のトリップス: ボードペア + ホールカード1枚 ----
     const tripRank=Object.entries(Object.fromEntries(comm.map(c=>[c.rank,(comm.filter(b=>b.rank===c.rank).length)]))).find(([_,v])=>v>=2)?.[0];
@@ -4574,8 +4574,9 @@ function handRole(holeCards,comm,evalResult){
     const kickVuln=kick<(boardTripKick||10);
     const kickName=['','','','','','','','','8','9','T','J','Q','K','A'][boardTripKick||10]||'';
     const myKickStr=myTripKick?(RANK_JP[myTripKick.rank]||myTripKick.rank):'';
+    const hasTripAce=tripVal>=14||holeCards.some(function(c){return c.rank==='A'&&tripRank==='A';});
     const note='トリップス'+(kickVuln?'('+myKickStr+'キッカー)。同じトリップスでA〜'+kickName+'キッカーを持つ相手に負けます。check-callベースで慎重に。':' 相手もトリップスのキッカー次第。ポットコントロールしながらバリューを取りましょう。');
-    return{role:kickVuln?'value':'medium',note,isNut:false,isVuln:true};
+    return{role:hasTripAce?'strong':(kickVuln?'value':'strong'),note,isNut:false,isVuln:true,madeClass:'trips'};
   }
 
   if(cat===4){
@@ -4627,7 +4628,7 @@ function handRole(holeCards,comm,evalResult){
     const fhNote=isNutFH?'フルハウス（ナッツ）。超強力。積極的にバリューを取りましょう。':'フルハウス。強力ですが上位フルハウスに注意。積極的にバリューを取りましょう。';
     return{role:fhRole,note:fhNote,isNut:isNutFH,isVuln:false};
   }
-  if(cat>=7)return{role:'nutted',note:cat===7?'フォーカード。ナッツ。バリューを最大化しましょう。':'ストレートフラッシュ/ロイヤル。最高ハンド。',isNut:true,isVuln:false};
+  if(cat>=7)return{role:'nutted',note:cat===7?'フォーカード。ナッツ。バリューを最大化しましょう。':'ストレートフラッシュ/ロイヤル。最高ハンド。',isNut:true,isVuln:false,madeClass:cat===7?'quads':'straight_flush'};
   return{role:'unknown',note:'',isNut:false,isVuln:false};
 }
 
@@ -7426,7 +7427,9 @@ function analyzeHand(hr){
       const opComm=hr.community.slice(0,opCommLen);
       const opEval=human.holeCards&&human.holeCards.length>=2&&opComm.length>=3?HandEval.evaluate([...human.holeCards,...opComm]):null;
       const opRole=opEval?handRole(human.holeCards,opComm,opEval):null;
-      ev.onePairProfile=onePairPressureProfile(hr,d,opRole,opComm.length>=3?boardTex(opComm):null,streetOpps);
+      // [Codex fix 2026-06-12] トリップス/クアッズ等の強い完成役をワンペア監査へ流さない。
+      // Aトリップスを「弱いワンペア」と説明するような誤分類をここで遮断する。
+      ev.onePairProfile=opEval&&opEval.cat===1?onePairPressureProfile(hr,d,opRole,opComm.length>=3?boardTex(opComm):null,streetOpps):null;
     }
     if(!(hr.tournamentContext&&hr.tournamentContext.enabled)){
       const lcCommLen={flop:3,turn:4,river:5}[d.street]||0;
@@ -9649,6 +9652,52 @@ function runFishTankRegressionTests(){
     return compactReviewDetailsHTML(null,'<span>詳細</span>')==='';
   });
 
+  add('コーチ文: 混合ラインは比率を表示する',function(){
+    const txt=coachReviewText({street:'flop',action:'check',quality:'ok',isMix:true,freqPct:57,comment:'チェック。',suggest:''});
+    return /チェック 57% \/ ベット 43%/.test(txt);
+  });
+
+  add('コーチ文: 圧力0段階を不自然に表示しない',function(){
+    const txt=naturalRiskText('SPR約5 / 比較的静的なボード / 圧力0段階');
+    return /まだ入っていません/.test(txt)&&!/0段階あります/.test(txt);
+  });
+
+  add('トリップス監査: Aトリップスを弱いワンペア扱いしない',function(){
+    const hr=regressionHand({
+      heroHole:['As','Kd'],
+      villainHole:['Qh','Qc'],
+      board:['Ah','Ac','7s'],
+      decisions:[
+        regressionDecision({street:'flop',action:'check',amount:0,pot:100,toCall:0,facingRaise:false,position:'BB',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:500}),
+        regressionDecision({street:'flop',action:'raise',amount:35,pot:100,toCall:0,facingRaise:false,position:'BTN',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:500}),
+        regressionDecision({street:'flop',action:'call',amount:35,pot:135,toCall:35,potOdds:35/170,facingRaise:true,position:'BB',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:500})
+      ],
+      pot:170
+    });
+    const an=analyzeHand(hr);
+    const ev=humanEval(an,function(e){return e.street==='flop'&&e.action==='call';});
+    const role=handRole(hr.players[0].holeCards,hr.community.slice(0,3),HandEval.evaluate([...hr.players[0].holeCards,...hr.community.slice(0,3)]));
+    const txt=coachReviewText(ev);
+    return !!(role&&role.madeClass==='trips'&&role.role==='strong'&&ev&&!ev.onePairProfile&&!/弱いワンペア|ボードのペアにキッカー/.test(txt));
+  });
+
+  add('クアッズ監査: フォーカードをワンペア監査に流さない',function(){
+    const hr=regressionHand({
+      heroHole:['As','Kd'],
+      villainHole:['Qh','Qc'],
+      board:['Ah','Ac','Ad'],
+      decisions:[
+        regressionDecision({street:'flop',action:'check',amount:0,pot:100,toCall:0,facingRaise:false,position:'BB',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:500}),
+        regressionDecision({street:'flop',action:'raise',amount:35,pot:100,toCall:0,facingRaise:false,position:'BTN',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:500}),
+        regressionDecision({street:'flop',action:'call',amount:35,pot:135,toCall:35,potOdds:35/170,facingRaise:true,position:'BB',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:500})
+      ],
+      pot:170
+    });
+    const ev=humanEval(analyzeHand(hr),function(e){return e.street==='flop'&&e.action==='call';});
+    const role=handRole(hr.players[0].holeCards,hr.community.slice(0,3),HandEval.evaluate([...hr.players[0].holeCards,...hr.community.slice(0,3)]));
+    return !!(role&&role.madeClass==='quads'&&ev&&!ev.onePairProfile);
+  });
+
   function threeBetUnderpairHand(){
     const players=[
       regressionPlayer('あなた',true,['7h','7d'],{chips:500}),
@@ -10272,13 +10321,40 @@ function naturalRiskText(risk,actor){
     return (actor||'サイズ')+'は'+m[1]+'%potで、ボードは'+board+'寄り。'+pressure;
   }
   m=txt.match(/SPR約([^\/]+)\s*\/\s*([^\/]+)\s*\/\s*圧力(\d+)段階/);
-  if(m)return'SPRは約'+m[1].trim()+'、ボードは'+m[2].trim()+'。相手の圧力は'+m[3]+'段階あります。';
+  if(m){
+    const n=+m[3];
+    return 'SPRは約'+m[1].trim()+'、ボードは'+m[2].trim()+'。'
+      +(n>0?'ここまで相手の圧力は'+n+'段階入っています。':'ここまで相手の強い圧力はまだ入っていません。');
+  }
   return txt.replace(/\s+\/\s+/g,'、');
 }
 function naturalRecommendationText(rec){
   let r=plainReviewText(rec).replace(/^推奨:\s*/,'').replace(/^候補:\s*/,'').replace(/^相手依存:\s*/,'相手次第では');
   r=r.replace(/^推奨頻度:\s*/,'頻度感は');
   return r;
+}
+function inferredStrategyMixText(ev){
+  if(!ev)return'';
+  if(ev.strategyMix)return ev.strategyMix;
+  const src=(ev.comment||'')+' '+(ev.suggest||'');
+  let m=src.match(/bet率約(\d+)%\s*\/\s*check率約(\d+)%/i);
+  if(m)return'ベット '+m[1]+'% / チェック '+m[2]+'%';
+  m=src.match(/推定bet率約(\d+)%/i);
+  if(m)return'ベット '+m[1]+'% / チェック '+(100-(+m[1]))+'%';
+  m=src.match(/推定check率約(\d+)%/i);
+  if(m)return'チェック '+m[1]+'% / ベット '+(100-(+m[1]))+'%';
+  if(ev.freqPct!=null){
+    const a={fold:'フォールド',check:'チェック',call:'コール',raise:ev.street==='preflop'?'レイズ':'ベット',allin:'オールイン'}[ev.action]||ev.action;
+    let b='別ライン';
+    if(ev.action==='check')b='ベット';
+    else if(ev.action==='raise'||ev.action==='bet')b='チェック';
+    else if(ev.action==='call')b='フォールド';
+    else if(ev.action==='fold')b='コール';
+    return a+' '+ev.freqPct+'% / '+b+' '+Math.max(0,100-ev.freqPct)+'%';
+  }
+  if(ev.action==='call'||ev.action==='fold')return'コール 50% / フォールド 50%';
+  if(ev.action==='check'||ev.action==='raise'||ev.action==='bet')return'チェック 50% / ベット 50%';
+  return'';
 }
 // [Claude fix 2026-06-09] プリフロップフォールドのコメントから手とポジションを自然な文で取り出す
 // 例: "正解。K7o（...）のCOレイズへのフォールド。" → "K7oのCOレイズへのフォールド"
@@ -10422,7 +10498,11 @@ function coachReviewText(ev){
     scene=firstUsefulSentence(ev.comment)||'この場面の判断です。';
     reason='';
   }
-  if(!rec&&ev.strategyMix)rec='推奨頻度: '+ev.strategyMix;
+  const inferredMix=inferredStrategyMixText(ev);
+  if(!rec&&inferredMix&&(ev.isMix||ev.quality==='ok'))rec='推奨頻度: '+inferredMix;
+  else if(rec&&inferredMix&&(ev.isMix||ev.quality==='ok')&&!/(\d+%|頻度|Fold|Call|Raise|3bet|ベット|チェック|コール|フォールド).*\d+%/.test(rec)){
+    rec+='。推奨頻度: '+inferredMix;
+  }
   if(!rec){
     if(ev.quality==='bad')rec='別のアクションを推奨します';
     else if(ev.quality==='good')rec='このラインを継続してください';
