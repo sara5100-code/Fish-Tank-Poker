@@ -10375,6 +10375,42 @@ function naturalRecommendationText(rec){
   r=r.replace(/^推奨頻度:\s*/,'頻度感は');
   return r;
 }
+// [Codex fix 2026-06-14] 短文化後もフロップ/リバーの「なぜ」は残す。
+// 補正タグを増やさず、初心者が判断軸を一つ持ち帰れる短い補足だけを足す。
+function postflopCoachExtraText(ev){
+  if(!ev||ev.street==='preflop')return'';
+  const profileText=[
+    ev.liveCashInitiativeProfile&&ev.liveCashInitiativeProfile.policy,
+    ev.liveCashRiverDecisionProfile&&ev.liveCashRiverDecisionProfile.policy,
+    ev.onePairProfile&&ev.onePairProfile.policy,
+    ev.liveCashSprProfile&&ev.liveCashSprProfile.policy,
+    ev.liveCashMultiwayProfile&&ev.liveCashMultiwayProfile.policy,
+    ev.liveCashReraisedPotProfile&&ev.liveCashReraisedPotProfile.policy
+  ].filter(Boolean).join(' ');
+  const src=(profileText+' '+(ev.comment||'')+' '+(ev.suggest||'')).replace(/\s+/g,' ');
+  const hasReason=/レンジ|主導権|OOP|IP|SPR|サイズ|相手|バリュー|ブラフ|ショーダウン|マルチウェイ|ポジション/.test(src);
+  if(ev.street==='flop'&&ev.action==='check'){
+    if(hasReason)return'フロップでは、手役の強さだけでなく、主導権・ポジション・後ろのストリートで困るカードを見てチェックかベットを分けます。';
+    return'フロップのチェックは弱さだけではありません。ここで無理にポットを作るより、相手の反応とターンカードを見てから判断する選択です。';
+  }
+  if(ev.street==='flop'&&(ev.action==='raise'||ev.action==='bet'||ev.action==='allin')){
+    return'フロップで打つ時は、今すぐ取れるバリューだけでなく、ターン以降に嫌なカードがどれだけあるかもサイズ選びに入れます。';
+  }
+  if(ev.street==='river'&&ev.action==='check'){
+    if(/ナッツ|強い完成役|フルハウス|フラッシュ|ストレート/.test(src))return'リバーの強い手でも、相手が打つレンジを持つ時はチェックで誘う形が混ざります。ただし取り逃しになる相手には自分からサイズを選びます。';
+    return'リバーのチェックは、薄いバリューを取りに行くよりショーダウン価値を守る選択です。相手が打ってきた時だけ、サイズとラインから受けるかを決めます。';
+  }
+  if(ev.street==='river'&&ev.action==='call'){
+    return'リバーのコールは、勝っていそうかではなく、相手のベットに必要なブラフ量が本当に残っているかで決めます。';
+  }
+  if(ev.street==='river'&&ev.action==='fold'){
+    return'リバーで降りる判断は、弱気ではなく、相手のラインがバリューに寄りすぎている時に利益を守る技術です。';
+  }
+  if(ev.street==='river'&&(ev.action==='raise'||ev.action==='bet'||ev.action==='allin')){
+    return'リバーで打つ時は、どの下のハンドにコールしてほしいのかを先に決めます。そこから小さめ・中サイズ・大きめを選ぶのが実戦的です。';
+  }
+  return'';
+}
 function inferredStrategyMixText(ev){
   if(!ev)return'';
   if(ev.strategyMix)return ev.strategyMix;
@@ -10552,7 +10588,8 @@ function coachReviewText(ev){
   }
   rec=naturalRecommendationText(rec);
   const close=recommendationClose(action,ev.quality,rec,!!ev.suggest);
-  return (verdict+' '+scene+(reason?' '+reason:'')+' '+close)
+  const postflopExtra=postflopCoachExtraText(ev);
+  return (verdict+' '+scene+(reason?' '+reason:'')+(postflopExtra?' '+postflopExtra:'')+' '+close)
     .replace(/プリフロップ/g,'フロップ前')
     .replace(/\s+/g,' ')
     .replace(/。。+/g,'。')
