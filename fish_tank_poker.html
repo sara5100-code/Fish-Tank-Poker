@@ -4388,7 +4388,7 @@ const STREET_W={preflop:1.4,flop:1.0,turn:1.2,river:1.5};
 
 // ボードテクスチャ分析
 function boardTex(comm){
-  if(!comm||comm.length===0)return{paired:false,tripped:false,flushy:0,monotone:false,straightDraw:false,flushDraw:false,dynamic:false,highboard:false,lowboard:false};
+  if(!comm||comm.length===0)return{paired:false,tripped:false,flushy:0,monotone:false,twoTone:false,straightDraw:false,flushDraw:false,dynamic:false,highboard:false,lowboard:false};
   const rv=comm.map(c=>RANK_VAL[c.rank]||0);
   const rc={};comm.forEach(c=>rc[c.rank]=(rc[c.rank]||0)+1);
   const sc={};comm.forEach(c=>sc[c.suit]=(sc[c.suit]||0)+1);
@@ -4403,6 +4403,9 @@ function boardTex(comm){
   }
   if(uniq.includes(14)&&uniq.includes(2))straightDraw=true;
   const flushDraw=maxSuit>=3;
+  // [Codex fix 2026-06-14] 2トーンフロップはまだ完成ボードではないが、トップペア側には悪いターンが多い。
+  // 「完全に静的」とは扱わず、バリュー/プロテクション候補を説明しやすくする。
+  const twoTone=maxSuit>=2&&comm.length===3;
   const dynamic=flushDraw||straightDraw;
   const avgRank=rv.reduce((a,b)=>a+b,0)/rv.length;
   // [Claude fix 2026-06-09] 低カードのみの連番(2-3, 3-4, 4-5等)は実質的なストレート脅威が低い。
@@ -4410,7 +4413,7 @@ function boardTex(comm){
   // 2-3や3-4はhighConnect=falseになり、dangerフラグを立てない。
   let highConnect=false;
   for(let i=0;i<=uniq.length-2;i++){if(uniq[i+1]-uniq[i]<=2&&uniq[i+1]>=7)highConnect=true;}
-  return{paired,tripped,flushy:maxSuit,monotone:maxSuit>=comm.length&&comm.length>=3,straightDraw,flushDraw,dynamic,highboard:avgRank>=10,lowboard:avgRank<=6,highConnect};
+  return{paired,tripped,flushy:maxSuit,monotone:maxSuit>=comm.length&&comm.length>=3,twoTone,straightDraw,flushDraw,dynamic,highboard:avgRank>=10,lowboard:avgRank<=6,highConnect};
 }
 
 // プレイヤー固有のドロー検出
@@ -4502,14 +4505,18 @@ function handRole(holeCards,comm,evalResult){
     const pairIdx=uniqBoard.indexOf(pairVal);
     const pairTier=isOver?'overpair':isTop?'top_pair':pairIdx===1?'second_pair':pairIdx>=2&&pairIdx===uniqBoard.length-1?'bottom_pair':pairIdx>=2?'low_pair':'under_pair';
     const kick=isTop?(hi===pairVal?lo:hi):0;
-    const vuln=tex.flushDraw||tex.straightDraw;
+    const vuln=tex.flushDraw||tex.straightDraw||tex.twoTone;
     let note='';
     if(isOver)note='オーバーペア。強いバリューハンド。積極的にベット推奨。';
     else if(isTop&&kick>=12)note='トップペア強キッカー（'+(RANK_JP[holeCards.find(c=>RANK_VAL[c.rank]!==pairVal)?.rank]||'')+'）。バリューベット優先。';
     else if(isTop&&kick>=10)note='トップペア中キッカー。バリューベット可。中サイズ推奨。';
     else if(isTop)note='トップペア弱キッカー。中サイズのバリューを取りながらポットコントロールを意識。レンジ内では中位ハンド。';
     else note='中・低ペア。レンジ内では弱め。主にcheck-call戦略。';
-    if(vuln&&isTop)note+=(tex.flushDraw?' フラッシュドロー注意。':'')+( tex.straightDraw?' ストレートドロー注意。':'');
+    if(comm.length>=5&&isTop&&tex.flushy>=4){
+      note='トップペアですが、4枚同色ボードではバリューはかなり薄くなります。チェックでショーダウン価値を守るのが基本です。';
+    }else if(vuln&&isTop){
+      note+=(tex.twoTone&&!tex.flushDraw?' 同色ターン注意。':'')+(tex.flushDraw?' フラッシュドロー注意。':'')+( tex.straightDraw?' ストレートドロー注意。':'');
+    }
     const role=isOver?'strong':(isTop&&kick>=12?'strong':isTop&&kick>=10?'value':'medium');
     return{role,note:note+madeDraw.note,isNut:false,isVuln:vuln,sdv:true,dynamic:madeDraw.dynamic,draw:madeDraw.draw,pairTier,kicker:kick,pairRank:pairVal};
   }
@@ -4933,7 +4940,7 @@ function onePairPressureProfile(hr,d,role,tex,nOpponents){
   const strongOnePair=['top_pair','overpair'].includes(pairTier)&&(role.role==='strong'||role.role==='value');
   // [Claude fix 2026-06-09] danger: 低カードのみの連番(2-3等)はhighConnect=falseなので除外。
   // Q23 rainbow(straightDraw=true だが highConnect=false) → danger=false(ドライボード) ✓
-  const danger=!!(tex&&(tex.flushy>=3||tex.flushDraw||(tex.straightDraw&&tex.highConnect)||tex.paired));
+  const danger=!!(tex&&(tex.flushy>=3||tex.flushDraw||tex.twoTone||(tex.straightDraw&&tex.highConnect)||tex.paired));
   // [Claude fix 2026-06-09] pressureCountはヴィランの過去のベット数のみ。
   // 現在の自分のコールアクション(lane==='call')を加算していたのは前方参照バグ。
   const pressureCount=(villainBetFlop?1:0)+(villainBetTurn?1:0);
@@ -10356,7 +10363,7 @@ function firstUsefulSentence(s){
 function boardTextureNaturalText(label){
   const t=String(label||'').replace(/\s+/g,'').trim();
   if(t==='完成寄りボード'||t==='動的または完成寄りボード'){
-    return 'フラッシュ・ストレート・ペアなどが完成しやすいボードです。ワンペアだけで大きく取りに行くより、相手の完成役を少し警戒します';
+    return 'フラッシュ・ストレート・ペアなどが完成したり、次のカードで一気に状況が変わりやすいボードです。ワンペアだけで大きく取りに行くより、相手の完成役や強いドローを少し警戒します';
   }
   if(t==='比較的静的なボード'){
     return '大きなドロー完成が少ない静かなボードです。薄いバリューや小さめのベットが通りやすい一方、相手の強い継続には注意します';
@@ -10382,6 +10389,7 @@ function naturalRiskText(risk,actor){
 }
 function naturalRecommendationText(rec){
   let r=plainReviewText(rec).replace(/^推奨:\s*/,'').replace(/^候補:\s*/,'').replace(/^相手依存:\s*/,'相手次第では');
+  r=r.replace(/^推奨ベット:\s*/,'').replace(/^ベット案:\s*/,'');
   r=r.replace(/^推奨頻度:\s*/,'頻度感は');
   return r;
 }
@@ -10390,18 +10398,18 @@ function mixedLineExplanationText(ev){
   const rec=naturalRecommendationText(ev.suggest||'');
   const mix=inferredStrategyMixText(ev);
   if(ev.action==='check'){
-    if(rec)return'ここでいう複数ラインは、チェックでポットを抑えるラインと、'+rec+'で小さく取りに行くラインです。';
-    if(mix)return'ここでいう複数ラインは、チェックで実現率を取りに行くラインと、ベットで先にフォールドエクイティを取るラインです。頻度感は'+mix+'です。';
-    return'ここでいう複数ラインは、チェックで次のカードを見るラインと、小さくベットして主導権を取りに行くラインです。';
+    if(rec)return'この局面では、チェックでポットを抑えてショーダウン価値を残す考え方と、'+rec+'で弱いペアやドローから先に取る考え方があります。';
+    if(mix)return'この局面では、チェックで実現率を取りに行く考え方と、ベットで先にフォールドエクイティを取る考え方があります。頻度感は'+mix+'です。';
+    return'この局面では、チェックで次のカードを見る考え方と、小さくベットして主導権を取りに行く考え方があります。';
   }
   if(ev.action==='call'||ev.action==='fold'){
-    if(mix)return'ここでいう複数ラインは、コールしてショーダウン価値を残すラインと、フォールドして大きな損失を避けるラインです。頻度感は'+mix+'です。';
-    return'ここでいう複数ラインは、コールで受けるラインと、フォールドで損失を抑えるラインです。相手のブラフ頻度とサイズで寄せます。';
+    if(mix)return'この局面では、コールしてショーダウン価値を残す考え方と、フォールドして大きな損失を避ける考え方があります。頻度感は'+mix+'です。';
+    return'この局面では、コールで受ける考え方と、フォールドで損失を抑える考え方があります。相手のブラフ頻度とサイズで寄せます。';
   }
   if(ev.action==='raise'||ev.action==='bet'||ev.action==='allin'){
-    if(rec)return'ここでいう複数ラインは、今回のように打ってバリュー/プロテクションを取るラインと、チェックでポットを抑えるラインです。'+rec+'。';
-    if(mix)return'ここでいう複数ラインは、ベットで取りに行くラインと、チェックでショーダウン価値を守るラインです。頻度感は'+mix+'です。';
-    return'ここでいう複数ラインは、打って相手の弱いレンジから取るラインと、チェックでポットを管理するラインです。';
+    if(rec)return'この局面では、今回のように打ってバリュー/プロテクションを取る考え方と、チェックでポットを抑える考え方があります。サイズ感は'+rec+'です。';
+    if(mix)return'この局面では、ベットで取りに行く考え方と、チェックでショーダウン価値を守る考え方があります。頻度感は'+mix+'です。';
+    return'この局面では、打って相手の弱いレンジから取る考え方と、チェックでポットを管理する考え方があります。';
   }
   return'';
 }
