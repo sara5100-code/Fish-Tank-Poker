@@ -10396,6 +10396,30 @@ function naturalRecommendationText(rec){
   r=r.replace(/^推奨頻度:\s*/,'頻度感は');
   return r;
 }
+// [Codex fix 2026-06-15] 内部ラベルをそのまま読ませず、コーチが場面を説明する言葉へ変換する。
+function naturalSpotLabel(label){
+  const t=String(label||'').trim();
+  const map={
+    Flat:'レイズに対してコールで参加する場面',
+    Open:'自分から最初に参加する場面',
+    'Open fold':'自分から参加するか降りるかの場面',
+    Limp:'リンプで参加する場面',
+    Iso:'リンプに対してレイズする場面',
+    'BB defend':'BBでレイズを受ける場面',
+    'BB 3bet':'BBから押し返す場面',
+    '3BET':'3ベットで主導権を取りに行く場面',
+    '4BET対応':'3ベット後にさらに強いレイズを受けた場面',
+    '5BET':'4ベット後にさらに押し返す場面',
+    '対レイズフォールド':'レイズを受けて続けるか降りるかの場面'
+  };
+  return map[t]||t;
+}
+function naturalCoachVerdict(ev){
+  if(!ev)return'';
+  if(ev.quality==='bad')return'ここは見直したい判断です。';
+  if(ev.quality==='good')return'この判断で大丈夫です。';
+  return'ここは複数の選択肢があります。';
+}
 function mixedLineExplanationText(ev){
   if(!ev||ev.quality!=='ok')return'';
   const rec=naturalRecommendationText(ev.suggest||'');
@@ -10506,16 +10530,16 @@ function recommendationClose(action,quality,rec,hasSuggest){
     let phrase=first;
     if(/寄り$/.test(phrase))phrase+='が推奨されます';
     else if(!/(です|ます|する|しない|絞る|混ぜる|選ぶ)$/.test(phrase))phrase+='を検討してください';
-    return action+'は見直したいです。'+phrase+'。'+(rest?rest+'。':'');
+    return action+'は少し危ない選択です。'+phrase+'。'+(rest?rest+'。':'');
   }
-  if(quality==='good')return action+'は適切な選択です。'+(hasSuggest?rec+'':'');
-  return action+'は許容範囲ですが、'+rec+'を意識してください。';
+  if(quality==='good')return action+'はこのままで問題ありません。'+(hasSuggest?rec+'':'');
+  return action+'は許容できます。次に同じ場面が来たら、'+rec+'も意識してください。';
 }
 function coachReviewText(ev){
   if(!ev)return'';
   const action={fold:'フォールド',check:'チェック',call:'コール',raise:(ev.street==='preflop'?'レイズ':'ベット'),allin:'オールイン'}[ev.action]||ev.action;
   // [Claude fix 2026-06-09] let に変更: liveCashSpotProfileなど場面別により具体的な verdict を後で上書き
-  let verdict=ev.quality==='bad'?'改善が必要なアクションです。':ev.quality==='good'?'この場面では正しい判断です。':'複数のラインが成立する場面です。';
+  let verdict=naturalCoachVerdict(ev);
   let scene='';
   let reason='';
   let rec=ev.suggest||'';
@@ -10588,7 +10612,9 @@ function coachReviewText(ev){
           :'コールレンジ内の可能性があります。見直しが必要です。';
       }
     }else{
-      scene='リングゲームの'+(ev.street==='preflop'?'フロップ前、':'')+p.label+'です。';
+      scene=ev.street==='preflop'
+        ?'リングゲームのフロップ前で、'+naturalSpotLabel(p.label)+'です。'
+        :'リングゲームで、'+naturalSpotLabel(p.label)+'がテーマになる場面です。';
     }
     reason=p.policy+' '+naturalRiskText(p.risk);
   }else if(ev.onePairProfile){
