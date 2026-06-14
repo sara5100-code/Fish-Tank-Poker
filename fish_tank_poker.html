@@ -4222,6 +4222,9 @@ class GameEngine{
     this.currentBet=0;this.minRaise=this.bb;
     const streets=['preflop','flop','turn','river','showdown'];
     this.street=streets[streets.indexOf(this.street)+1]||'showdown';
+    // [Codex fix 2026-06-14] ストリートが変わったら直前アクション表示を消す。
+    // 前ストリートのフォールド/チェックが次の判断材料のように見える混乱を防ぐ。
+    this._lastActions={};
     if(this.street==='flop')this.community=[this.deck.deal(),this.deck.deal(),this.deck.deal()];
     // [Claude feature 2026-05-23] シナリオモード: ターン/リバーに予約カードを使用（F/G用）
     else if(this.street==='turn')this.community.push(this._scenario&&this._scenario.turnCard?this._scenario.turnCard:this.deck.deal());
