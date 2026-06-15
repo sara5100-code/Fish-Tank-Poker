@@ -1642,6 +1642,117 @@ function simpleHandShape(c1,c2){
     suitedConnector:suited&&gap<=2&&hi>=7
   };
 }
+// [Codex fix 2026-06-16] プリフロップは単純な上位%だけでなく、実際のチャートに近い集合レンジを持つ。
+// ここは学習用の近似GTO/ライブ基準。将来は外部JSON/CSVのソルバー表に差し替えられるよう独立させる。
+const PREFLOP_RANGE_CHARTS={
+  open:{
+    EP:{pure:'77+,AJs+,KQs,AQo+,A5s,A4s',mix:'66,ATs,KJs,QJs,JTs,T9s,AJo,KQo'},
+    MP:{pure:'66+,ATs+,KJs+,QJs,JTs,AQo+,KQo,A5s-A4s',mix:'55,A9s,KTs,QTs,J9s,T9s,98s,AJo,KJo,QJo'},
+    HJ:{pure:'55+,A9s+,KTs+,QTs+,JTs,T9s,98s,AJo+,KQo,A5s-A2s',mix:'44,A8s,K9s,Q9s,J9s,T8s,87s,76s,KJo,QJo,JTo,ATo'},
+    CO:{pure:'44+,A7s+,K9s+,Q9s+,J9s+,T9s,98s,87s,76s,A9o+,KTo+,QTo+,JTo,A5s-A2s',mix:'33,22,A6s,K8s,Q8s,J8s,T8s,97s,86s,75s,65s,54s,A8o,K9o,Q9o,T9o'},
+    BTN:{pure:'22+,A2s+,K2s+,Q5s+,J7s+,T7s+,97s+,86s+,75s+,65s,54s,A2o+,K8o+,Q9o+,J9o+,T9o,98o',mix:'Q2s-Q4s,J2s-J6s,T6s,96s,85s,74s,64s,53s,K5o-K7o,Q8o,J8o,T8o,87o,76o'},
+    SB:{pure:'22+,A2s+,K5s+,Q8s+,J8s+,T8s+,98s,87s,76s,65s,A2o+,K9o+,QTo+,JTo',mix:'K2s-K4s,Q5s-Q7s,J7s,T7s,97s,86s,75s,54s,K7o-K8o,Q9o,J9o,T9o'}
+  },
+  flatVsOpen:{
+    IP:{pure:'22-JJ,AQs-ATs,KQs-KTs,QJs-QTs,JTs,T9s,98s,AQo,KQo',mix:'A9s-A5s,K9s,Q9s,J9s,T8s,87s,76s,AJo,KJo,QJo,JTo'},
+    OOP:{pure:'22-TT,AQs-AJs,KQs,QJs,JTs,T9s',mix:'ATs,A5s-A2s,KJs-KTs,QTs,98s,87s,AQo,KQo'},
+    SB:{pure:'22-99,AQs-AJs,KQs,QJs,JTs',mix:'TT,ATs,A5s-A2s,KJs,QTs,T9s,98s'},
+    BB_EP:{pure:'22-QQ,AQs-ATs,KQs-KTs,QJs-QTs,JTs,T9s,98s,87s,AQo,KQo',mix:'A9s-A2s,K9s,Q9s,J9s,T8s,76s,AJo,KJo,QJo'},
+    BB_LATE:{pure:'22+,A2s+,K7s+,Q8s+,J8s+,T8s+,97s+,86s+,75s+,65s,54s,A7o+,K9o+,QTo+,JTo,T9o',mix:'K2s-K6s,Q5s-Q7s,J5s-J7s,T6s-T7s,96s,85s,74s,64s,53s,A2o-A6o,K7o-K8o,Q9o,J9o,T8o,98o,87o'}
+  },
+  threeBet:{
+    value:{pure:'QQ+,AKs,AKo',mix:'JJ,TT,AQs,AQo'},
+    polar:{pure:'QQ+,AKs,AKo,A5s-A4s',mix:'JJ,TT,AQs,AQo,A3s-A2s,KQs,KJs,QJs,JTs,T9s'},
+    blindVsSteal:{pure:'TT+,AQs+,AKo,A5s-A2s,KQs',mix:'99-77,AJs-ATs,KJs-KTs,QJs,JTs,T9s,AQo,KQo'}
+  }
+};
+function preflopRangeTokens(str){
+  return String(str||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
+}
+function preflopRangeTokenMatch(token,ht){
+  if(!token||!ht)return false;
+  const R='23456789TJQKA';
+  function val(r){return R.indexOf(r);}
+  const exact=token.replace(/\s+/g,'');
+  if(exact===ht)return true;
+  if(exact.indexOf('-')>0){
+    const p=exact.split('-');
+    if(p.length===2){
+      const a=p[0],b=p[1];
+      if(a.length===2&&b.length===2&&a[0]===a[1]&&b[0]===b[1]&&ht.length===2&&ht[0]===ht[1]){
+        const lo=Math.min(val(a[0]),val(b[0])),hi=Math.max(val(a[0]),val(b[0])),hv=val(ht[0]);
+        return hv>=lo&&hv<=hi;
+      }
+      if(a.length===3&&b.length===3&&ht.length===3&&a[0]===b[0]&&a[2]===b[2]&&ht[0]===a[0]&&ht[2]===a[2]){
+        const lo=Math.min(val(a[1]),val(b[1])),hi=Math.max(val(a[1]),val(b[1])),hv=val(ht[1]);
+        return hv>=lo&&hv<=hi;
+      }
+    }
+  }
+  let m=exact.match(/^([2-9TJQKA])\1\+$/);
+  if(m&&ht.length===2&&ht[0]===ht[1])return val(ht[0])>=val(m[1]);
+  m=exact.match(/^([2-9TJQKA])([2-9TJQKA])([so])\+$/);
+  if(m&&ht.length===3&&ht[0]===m[1]&&ht[2]===m[3]){
+    return val(ht[1])>=val(m[2])&&val(ht[1])<val(ht[0]);
+  }
+  return false;
+}
+function preflopRangeMatch(range,ht){
+  return preflopRangeTokens(range).some(function(t){return preflopRangeTokenMatch(t,ht);});
+}
+function preflopPositionBucket(pos,totalP){
+  if(['SB','BB'].includes(pos))return pos;
+  if(totalP>=8){
+    if(['UTG','UTG+1'].includes(pos))return'EP';
+    if(['MP','LJ'].includes(pos))return'MP';
+    if(pos==='HJ')return'HJ';
+    if(pos==='CO')return'CO';
+    if(pos==='BTN')return'BTN';
+  }
+  if(pos==='UTG')return'EP';
+  if(pos==='MP'||pos==='LJ'||pos==='UTG+1')return'MP';
+  if(pos==='HJ')return'HJ';
+  if(pos==='CO')return'CO';
+  if(pos==='BTN')return'BTN';
+  return'MP';
+}
+function preflopChartLookup(kind,ht,pos,totalP,opts){
+  opts=opts||{};
+  let chart=null,label='';
+  if(kind==='open'){
+    const bucket=preflopPositionBucket(pos,totalP);
+    chart=PREFLOP_RANGE_CHARTS.open[bucket]||PREFLOP_RANGE_CHARTS.open.MP;
+    label=bucket+' open';
+  }else if(kind==='flat'){
+    if(pos==='BB'){
+      const ep=['UTG','UTG+1','MP'].includes(opts.openerPos||'');
+      chart=PREFLOP_RANGE_CHARTS.flatVsOpen[ep?'BB_EP':'BB_LATE'];
+      label=ep?'BB defend vs early':'BB defend vs late';
+    }else if(pos==='SB'){
+      chart=PREFLOP_RANGE_CHARTS.flatVsOpen.SB;label='SB flat';
+    }else{
+      const ip=['CO','BTN'].includes(pos);
+      chart=PREFLOP_RANGE_CHARTS.flatVsOpen[ip?'IP':'OOP'];
+      label=ip?'IP flat':'OOP flat';
+    }
+  }else if(kind==='threeBet'){
+    const steal=['CO','BTN','SB'].includes(opts.openerPos||'');
+    const blind=['SB','BB'].includes(pos);
+    chart=PREFLOP_RANGE_CHARTS.threeBet[(blind&&steal)?'blindVsSteal':(opts.polar?'polar':'value')];
+    label=(blind&&steal)?'blind vs steal 3bet':opts.polar?'polar 3bet':'value 3bet';
+  }
+  if(!chart)return{bucket:'',label:'',status:'out',mix:'Fold 100%',pure:false,mixCandidate:false};
+  const pure=preflopRangeMatch(chart.pure,ht);
+  const mixCandidate=!pure&&preflopRangeMatch(chart.mix,ht);
+  let status=pure?'pure':mixCandidate?'mix':'out';
+  let actionJP=kind==='open'?'Open':kind==='threeBet'?'3bet':(pos==='BB'?'Call/defend':'Call');
+  let mix=status==='pure'
+    ?(actionJP+' 75-100% / 別ライン 0-25%')
+    :status==='mix'
+      ?(actionJP+' 20-60% / Foldまたは別ライン 40-80%')
+      :(kind==='flat'?'Fold 75-100% / Call 0-25%':kind==='threeBet'?'Fold/Call 75-100% / 3bet 0-25%':'Fold 75-100% / Open 0-25%');
+  return{bucket:label,label,status,mix,pure,mixCandidate,pureRange:chart.pure,mixRange:chart.mix};
+}
 // [Codex fix 2026-06-04] 序盤は「深いから何でも参加」ではなく、ドミネートリスクと実現率で参加レンジを健全化する。
 function tournamentEarlyProfile(ctx,d,holeCards,stackBB,pos,totalPlayers,preCtx){
   if(!ctx||!ctx.enabled||ctx.phase!=='序盤'||!d||d.street!=='preflop'||!holeCards||holeCards.length<2)return null;
@@ -1852,10 +1963,11 @@ function liveCashRangeProfile(hr,d,holeCards,pos){
   const facing=!!(d.facingRaise&&(d.toCall||0)>0);
   const raiseLike=d.action==='raise'||d.action==='allin';
   let lane='open',cap=live25OpenPct(pos,totalP),actionLabel='Open',baseline='$2/$5 live open';
+  let chartKind='open';
   // [Codex fix 2026-06-06] 未参加フォールドはOpen候補ではなく、弱い手を降ろせたか/降りすぎかで判定する。
-  if(!facing&&d.action==='fold'){lane='openFold';cap=live25OpenPct(pos,totalP);actionLabel='Open fold';baseline='ライブ$2/$5 open/fold判断';}
-  else if(!facing&&d.action==='call'){lane='limp';cap=0.06;actionLabel='Open limp';baseline='ライブ$2/$5では基本レイズ/フォールド';}
-  else if(facing&&pos==='BB'&&raiseLike){lane='bb3bet';cap=0.13+(shape.wheelAxs?0.05:0)+(shape.pair?0.03:0)+(_pfMode==='gto'?0.04:0);actionLabel='BB 3bet';baseline=_pfMode==='gto'?'BBの3bet(GTOは広め)':'BBの3bet/スクイーズ候補';}
+  if(!facing&&d.action==='fold'){lane='openFold';cap=live25OpenPct(pos,totalP);actionLabel='Open fold';baseline='ライブ$2/$5 open/fold判断';chartKind='open';}
+  else if(!facing&&d.action==='call'){lane='limp';cap=0.06;actionLabel='Open limp';baseline='ライブ$2/$5では基本レイズ/フォールド';chartKind='open';}
+  else if(facing&&pos==='BB'&&raiseLike){lane='bb3bet';cap=0.13+(shape.wheelAxs?0.05:0)+(shape.pair?0.03:0)+(_pfMode==='gto'?0.04:0);actionLabel='BB 3bet';baseline=_pfMode==='gto'?'BBの3bet(GTOは広め)':'BBの3bet/スクイーズ候補';chartKind='threeBet';}
   // [Claude fix 2026-06-09] BBフォールドはbbDefend(cap=0.50)でなくvsRaiseFoldに寄せる。cap=BBの実際のコールレンジ。
   else if(facing&&pos==='BB'&&d.action==='fold'){
     lane='vsRaiseFold';
@@ -1863,8 +1975,9 @@ function liveCashRangeProfile(hr,d,holeCards,pos){
     if(['UTG','UTG+1'].includes(openerPos||''))cap-=0.10;
     cap=Math.max(0.15,Math.min(0.70,cap));
     actionLabel='BB対レイズフォールド';baseline='BBディフェンス判断';
+    chartKind='flat';
   }
-  else if(facing&&pos==='BB'){lane='bbDefend';cap=0.50+(shape.suited?0.10:0)+(shape.pair?0.08:0)+(shape.suitedConnector?0.05:0);actionLabel='BB defend';baseline='BBディフェンス';}
+  else if(facing&&pos==='BB'){lane='bbDefend';cap=0.50+(shape.suited?0.10:0)+(shape.pair?0.08:0)+(shape.suitedConnector?0.05:0);actionLabel='BB defend';baseline='BBディフェンス';chartKind='flat';}
   else if(facing&&raiseLike){
     lane=(d.pfActionBetLevel||0)>=5?'fiveBet':'threeBet';
     cap=lane==='fiveBet'?0.055:(0.08+(shape.wheelAxs?0.045:0)+(shape.suitedBroadway?0.025:0)+(shape.pair&&shape.lo>=7?0.03:0));
@@ -1884,6 +1997,7 @@ function liveCashRangeProfile(hr,d,holeCards,pos){
     }
     actionLabel=lane==='fiveBet'?'5BET':'3BET';
     baseline=lane==='fiveBet'?'4BET後の継続レンジ':(_3betCtx||'ライブ$2/$5 3BET候補');
+    chartKind='threeBet';
   }else if(facing&&d.action==='fold'){
     // [Claude fix 2026-06-08] 対レイズフォールドを'flat'と誤分類しないための専用レーン
     lane='vsRaiseFold';
@@ -1895,6 +2009,7 @@ function liveCashRangeProfile(hr,d,holeCards,pos){
     cap=Math.max(0.02,cap);
     actionLabel='対レイズフォールド';
     baseline=earlyOpen_vrf?'早いポジションのオープンへのフォールド':'レイズへのフォールド';
+    chartKind='flat';
   }else if(facing){
     lane=pos==='SB'?'sbFlat':'flat';
     const earlyOpen=['UTG','UTG+1'].includes(openerPos||'');
@@ -1916,25 +2031,51 @@ function liveCashRangeProfile(hr,d,holeCards,pos){
     cap=Math.max(0.02,cap);
     actionLabel=pos==='SB'?'SB flat':'Flat';
     baseline=earlyOpen?'早いポジションのオープンに対する低頻度フラット':(_flatCtx||'非BBフラット');
+    chartKind='flat';
+  }
+  const chart=preflopChartLookup(chartKind,ht,pos,totalP,{openerPos,polar:lane==='threeBet'&&!callersBetween});
+  if(chart&&chart.status==='pure'){
+    const chartBoost=(_pfMode==='gto'&&chartKind==='threeBet')?0.085:(_pfMode==='gto'&&chartKind==='flat'?-0.015:0.04);
+    if(chartKind==='flat'&&_pfMode==='gto')cap=Math.min(cap,Math.max(0.02,handFrac+chartBoost));
+    else cap=Math.max(cap,Math.min(0.80,handFrac+chartBoost));
+  }else if(chart&&chart.status==='mix'){
+    const chartBoost=(_pfMode==='gto'&&chartKind==='threeBet')?0.055:(_pfMode==='gto'&&chartKind==='flat'?-0.025:0.015);
+    if(chartKind==='flat'&&_pfMode==='gto')cap=Math.min(cap,Math.max(0.02,handFrac+chartBoost));
+    else cap=Math.max(cap,Math.min(0.75,handFrac+chartBoost));
+  }else if(chart&&chart.status==='out'){
+    const outTrim=(_pfMode==='gto'&&chartKind==='flat')?0.085:0.06;
+    cap=Math.min(cap,Math.max(0.01,handFrac-outTrim));
+  }
+  if(lane==='limp'){
+    // リンプは「チャート内の強い手だから許容」ではなく、強い手ほどレイズしない損失が大きい。
+    cap=0.06;
   }
   const margin=cap-handFrac;
   let verdict='自然',severity='good';
   if(lane==='openFold'){
-    if(handFrac<=Math.max(0,cap-0.09)){verdict='降りすぎ';severity='bad';}
+    if(chart.status==='pure'){verdict='降りすぎ';severity='bad';}
+    else if(chart.status==='mix'){verdict='境界フォールド';severity='border';}
+    else if(handFrac<=Math.max(0,cap-0.09)){verdict='降りすぎ';severity='bad';}
     else if(handFrac<=cap+0.05){verdict='境界フォールド';severity='border';}
     else{verdict='自然なフォールド';severity='good';}
   }else if(lane==='vsRaiseFold'){
     // [Claude fix 2026-06-08] コールレンジ外なら自然なフォールド、範囲内なら降りすぎ
-    if(handFrac>cap+0.05){verdict='自然なフォールド';severity='good';}
+    if(chart.status==='pure'){verdict='降りすぎ';severity='bad';}
+    else if(chart.status==='mix'){verdict='境界フォールド';severity='border';}
+    else if(handFrac>cap+0.05){verdict='自然なフォールド';severity='good';}
     else if(handFrac>cap-0.05){verdict='境界フォールド';severity='border';}
     else{verdict='降りすぎ';severity='bad';}
-  }else if(margin<0&&handFrac<=cap+0.05){verdict='境界';severity='border';}
-  else if(margin<0){verdict='不自然';severity='bad';}
+  }else if(lane==='limp'){verdict=chart.status==='out'?'リンプ癖':'強い手のリンプ';severity='bad';}
+  else if(chart.status==='pure'){verdict='チャート内';severity='good';}
+  else if(chart.status==='mix'){verdict='混合候補';severity='border';}
+  else if(margin<0&&handFrac<=cap+0.05){verdict='境界';severity='border';}
+  else if(margin<0){verdict='レンジ外';severity='bad';}
   const notes=[];
   if(lane==='flat'&&shape.dominatedOffsuit)notes.push('オフスートブロードウェイはドミネートされやすい');
   if(lane==='sbFlat')notes.push('SBは全ストリートOOPで実現率が低い');
   if(lane==='fiveBet')notes.push('4BET後は元の3BETレンジより大幅に締める');
-  return{handType:ht,handPercent:pct(handFrac),position:pos,lane,actionLabel,baseline,capPercent:pct(cap),marginPercent:Math.round(margin*100),verdict,severity,openerPos,notes,mode:_pfMode,callersBetween};
+  if(chart&&chart.label)notes.push('参照レンジ: '+chart.label+' / '+chart.status);
+  return{handType:ht,handPercent:pct(handFrac),position:pos,lane,actionLabel,baseline,capPercent:pct(cap),marginPercent:Math.round(margin*100),verdict,severity,openerPos,notes,mode:_pfMode,callersBetween,chart};
 }
 function rangeProfileText(profile){
   if(!profile)return'';
@@ -2942,6 +3083,16 @@ function preflopPremiseAudit(hr){
     if(!profile)return;
     const target=p.isHuman&&generatedPremise?'出題前提':(p.isHuman?'プレイヤー操作':'AI前提');
     const item={street:d.street,player:p.isHuman?'あなた':p.name,position:pos,action:d.action,amount:d.amount,target,profile,text:target+' '+(p.isHuman?'あなた':p.name)+'['+pos+'] '+rangeProfileTextForVisibility(profile,!p.isHuman)};
+    if(generatedPremise&&p.isHuman&&d.action==='call'&&d.facingRaise&&pos!=='BB'){
+      const before=hr.decisions.slice(0,hr.decisions.indexOf(d));
+      const firstAgg=before.find(function(x){return x.street==='preflop'&&(x.action==='raise'||x.action==='allin');});
+      const shape=simpleHandShape(p.holeCards[0],p.holeCards[1]);
+      const earlyOpen=firstAgg&&['UTG','UTG+1','MP'].includes(firstAgg.position||'');
+      if(earlyOpen&&shape.dominatedOffsuit){
+        issues.unshift(Object.assign({},item,{text:item.text+' / 出題前提としては、早いポジションのオープンに非BBでドミネートされやすいオフスーツをコールしており不自然です。'}));
+        return;
+      }
+    }
     if(profile.severity==='bad'){
       if(!p.isHuman||generatedPremise)issues.push(item);
     }else if(profile.severity==='border'){
@@ -3488,9 +3639,10 @@ function live25OpenPct(pos,numPlayers){
 function preflopSizePlan(hr,d,limpCount,is3bet,isISO,pos){
   const bb=hr.bigBlind||5;
   const ip=['BTN','CO'].includes(pos);
+  const mode=getRangeMode();
   const tctx=hr&&hr.tournamentContext;
   if(is3bet){
-    const mult=ip?3.0:3.6;
+    const mult=mode==='gto'?(ip?2.6:3.1):(ip?3.0:3.6);
     const target=Math.round((d.toCall||bb)*mult);
     return{target,label:'推奨: '+target+'T 前後の3BET（'+(ip?'IPは約3倍':'OOPは約3.5〜4倍')+'）'};
   }
@@ -3501,7 +3653,7 @@ function preflopSizePlan(hr,d,limpCount,is3bet,isISO,pos){
   }
   const bbMult=tctx&&tctx.enabled
     ?(tctx.stackBB<=20?2.0:(tctx.stackBB<=30?2.2:2.3))
-    :((pos==='SB'||pos==='UTG'||pos==='UTG+1')?3.0:2.5);
+    :(mode==='gto'?2.3:((pos==='SB'||pos==='UTG'||pos==='UTG+1')?3.0:2.5));
   const target=Math.round(bb*bbMult);
   return{target,label:'推奨: '+target+'T 前後のオープン（'+bbMult+'BB）。'+(tctx&&tctx.enabled?'BBアンティ環境ではポットが大きく、浅いほど小さめオープンで十分です。':'$2/$5ライブではルーズコールが多い卓なら3BB寄り')};
 }
@@ -3770,9 +3922,11 @@ function aiDecide(player,game,baseLevel){
     const isBigBroadway=ri.hi>=13&&ri.lo>=10;
     const isPremium=handFrac<=0.065;
     const isPlayableSuited=ri.suited&&handFrac<=0.28;
+    const aiPfMode=getRangeMode();
     const posHardCap={UTG:0.14,'UTG+1':0.16,MP:0.20,LJ:0.22,HJ:0.25,CO:0.30,BTN:0.34,SB:0.12}[pos]||0.22;
-    const coldCap=Math.min(posHardCap,aiColdCallCap(pos,ri.suited,callersSinceRaise>0)*prof.openWidthMult);
-    const threeBetPctAi=Math.min(0.095,Math.max(0.045,adjOpenPct*0.30));
+    const coldCapBase=Math.min(posHardCap,aiColdCallCap(pos,ri.suited,callersSinceRaise>0)*prof.openWidthMult);
+    const coldCap=aiPfMode==='gto'?coldCapBase*0.86:coldCapBase*1.04;
+    const threeBetPctAi=Math.min(aiPfMode==='gto'?0.135:0.095,Math.max(0.045,adjOpenPct*(aiPfMode==='gto'?0.42:0.30)));
     const squeezeTarget=Math.round(Math.min(game.currentBet*(callersSinceRaise?4.1:3.2)+callersSinceRaise*bb*1.4,chips+currentBet));
     const threeBetTarget=Math.round(Math.min(game.currentBet*(callersSinceRaise?4.0:3.1)*prof.betSizeMult,chips+currentBet));
 
@@ -3791,7 +3945,8 @@ function aiDecide(player,game,baseLevel){
       }
       return{action:'fold'};
     }
-    if((handFrac<=threeBetPctAi||isWheelAxs)&&(Math.random()<(isWheelAxs?0.34:0.58))&&!prof.callBias){
+    const wheelAxs3betFreq=aiPfMode==='gto'?0.48:0.28;
+    if((handFrac<=threeBetPctAi||isWheelAxs)&&(Math.random()<(isWheelAxs?wheelAxs3betFreq:0.58))&&!prof.callBias){
       return aiSizedAction(threeBetTarget,chips,currentBet);
     }
     if(handFrac<=coldCap+noiseAdj){
@@ -6804,7 +6959,7 @@ function analyzeHand(hr){
         // GTOモード/IP/軽い圧力では good を維持(EV的に正解)。
         // [Codex fix 2026-06-12] ターン2発目の大きめベットにトップペアで受ける場面は、
         // EVが足りそうでも「明確コール」とは書かず、最低でも注意付き(ok)に落とす。
-        if((op.mode==='live'&&op.isOOP&&op.pressureCount>=2&&op.sizePct>=55)||(op.street==='turn'&&op.pressureCount>=2&&op.sizePct>=65)){
+        if(op.mode==='live'&&((op.isOOP&&op.pressureCount>=2&&op.sizePct>=55)||(op.street==='turn'&&op.pressureCount>=2&&op.sizePct>=65))){
           next=Math.max(next,8);
           if(ev.quality==='good')ev.quality='ok';
           notes.push('ライブ$2/$5: OOPで複数ストリートの大ベットを受ける強ワンペアは、GTO上はインディファレントでも母集団のブラフ不足で薄め。コール頻度を下げる。');
@@ -7035,8 +7190,16 @@ function analyzeHand(hr){
       // $2/$5ライブキャッシュ基準のポジション別カットオフ (コンボ数ベース)
       const posRangePct=live25OpenPct(pos,hr.players.length||6);
       const callPct=Math.min(0.70,posRangePct*1.5);
-      const isInOpenRange=handFrac<=posRangePct;
-      const isInCallRange=handFrac<=callPct;
+      const openChart=preflopChartLookup('open',ht,pos,hr.players.length||6,{});
+      const preBefore=prefDecs.slice(0,prefDecs.indexOf(d));
+      const firstPreAgg=preBefore.find(function(x){return x.street==='preflop'&&(x.action==='raise'||x.action==='allin');});
+      const openerPosForChart=firstPreAgg?firstPreAgg.position:'';
+      const flatChart=preflopChartLookup('flat',ht,pos,hr.players.length||6,{openerPos:openerPosForChart});
+      const threeBetChart=preflopChartLookup('threeBet',ht,pos,hr.players.length||6,{openerPos:openerPosForChart,polar:true});
+      const isInOpenRange=openChart.status==='pure'||openChart.status==='mix'||handFrac<=posRangePct;
+      const isPureOpen=openChart.status==='pure';
+      const isMixOpen=openChart.status==='mix';
+      const isInCallRange=flatChart.status==='pure'||flatChart.status==='mix'||handFrac<=callPct;
       // [Claude fix 2026-06-08] パーセンタイルはコンボ加重(handFrac)ではなくランクベースで表示
       // 例: 130位/169 → 上位77%相当（77%のハンドタイプは同等以上の強さ）
       const rankStr='全169手中'+hRank+'位(上位'+Math.round(hRank/169*100)+'%相当)';
@@ -7105,8 +7268,10 @@ function analyzeHand(hr){
           else if(isInOpenRange){ev.quality='ok';ev.deduction=3;score-=3;ev.comment=hd+'（'+rankStr+'）のリンプポットフォールド。レイズかフォールドかは状況次第です。';}
           else{ev.quality='good';ev.comment='正解。'+hd+'（'+rankStr+'）のリンプポットフォールド。弱いハンドへの正当な判断です。';}
         }else{
-          if(isInOpenRange&&handFrac<=posRangePct-0.09){ev.quality='bad';ev.deduction=25;score-=25;ev.comment='【大きなミス】'+hd+'（'+rankStr+'）は'+pn+'のコアオープンレンジです。フォールドは大きなEV損失です。';ev.suggest=recOpen;}
-          else if(isInOpenRange){ev.quality='bad';ev.deduction=15;score-=15;ev.comment='【ミス】'+hd+'（'+rankStr+'）は'+pn+'のオープンレンジ内です（上位'+Math.round(posRangePct*100)+'%）。';ev.suggest=recOpen;}
+          if(isPureOpen){ev.quality='bad';ev.deduction=25;score-=25;ev.comment='【大きなミス】'+hd+'（'+rankStr+'）は'+pn+'のコアオープンレンジです。参照レンジでは '+openChart.mix+'。フォールドは大きなEV損失です。';ev.suggest=recOpen;ev.strategyMix=openChart.mix;}
+          else if(isMixOpen){ev.quality='ok';ev.deduction=4;score-=4;ev.comment=hd+'（'+rankStr+'）の'+pn+'フォールドは混合候補です。参照レンジでは '+openChart.mix+'。卓がタイトならオープン、後ろが強いならフォールドで調整します。';ev.suggest=recOpen;ev.strategyMix=openChart.mix;}
+          else if(isInOpenRange&&handFrac<=posRangePct-0.09){ev.quality='bad';ev.deduction=22;score-=22;ev.comment='【大きなミス】'+hd+'（'+rankStr+'）は'+pn+'のオープン候補です。フォールドはEV損失です。';ev.suggest=recOpen;}
+          else if(isInOpenRange){ev.quality='bad';ev.deduction=12;score-=12;ev.comment='【ミス】'+hd+'（'+rankStr+'）は'+pn+'のオープン候補です（目安: 上位'+Math.round(posRangePct*100)+'%）。';ev.suggest=recOpen;}
           else if(handFrac<=posRangePct+0.05){ev.quality='ok';ev.comment=hd+'（'+rankStr+'）の'+pn+'フォールドはボーダーライン（境界: 上位'+Math.round(posRangePct*100)+'%）。オープン推奨ですが状況次第。';}
           else if(handFrac>=posRangePct+0.12){ev.quality='good';ev.comment='正解。'+hd+'（'+rankStr+'）は'+pn+'のオープンレンジ外（上位'+Math.round(posRangePct*100)+'%まで）です。';}
           else{ev.quality='ok';ev.comment=hd+'（'+rankStr+'）の'+pn+'フォールドはボーダーライン（境界: 上位'+Math.round(posRangePct*100)+'%付近）。';}
@@ -7156,8 +7321,11 @@ function analyzeHand(hr){
             ev.quality='ok';ev.deduction=8;score-=8;
             ev.comment='【3BET推奨】'+hd+'（'+rankStr+'）でBBからコール。コール自体は許容されますが、このクラスは高頻度で3BETが推奨されます。プレミアムハンドはBBからの3BETでイニシアチブを取り、ポストフロップでの主導権を確保するのが基本戦略です。'+mwBBNote;
             ev.suggest='推奨: 3BET（'+Math.round(d.toCall*3)+'チップ前後）';
-          }else if(hRank<=bbGoodThresh){ev.quality='good';ev.comment='正解。'+hd+'（'+rankStr+'）のBBディフェンスコールは妥当。3BETも選択肢。'+mwBBNote;}
-          else if(hRank<=bbEffThresh){ev.quality='good';ev.comment='正解。'+hd+'（'+rankStr+'）のBBディフェンス。'+mwBBNote+(isSuited?' スーテッドハンドは十分ディフェンス価値あり。':'');}
+            ev.strategyMix=threeBetChart.mix||flatChart.mix;
+          }else if(flatChart.status==='pure'){ev.quality='good';ev.comment='正解。'+hd+'（'+rankStr+'）のBBディフェンスコールは参照レンジ内です。'+flatChart.mix+'。'+mwBBNote;ev.strategyMix=flatChart.mix;}
+          else if(flatChart.status==='mix'){ev.quality='ok';ev.deduction=2;score-=2;ev.comment=hd+'（'+rankStr+'）のBBディフェンスは混合候補です。参照レンジでは '+flatChart.mix+'。相手が後ろ寄りで小さめならコール、EPや大きめならフォールド寄りです。'+mwBBNote;ev.strategyMix=flatChart.mix;}
+          else if(hRank<=bbGoodThresh){ev.quality='good';ev.comment='正解。'+hd+'（'+rankStr+'）のBBディフェンスコールは妥当。3BETも選択肢。'+mwBBNote;ev.strategyMix=flatChart.mix;}
+          else if(hRank<=bbEffThresh){ev.quality='good';ev.comment='正解。'+hd+'（'+rankStr+'）のBBディフェンス。'+mwBBNote+(isSuited?' スーテッドハンドは十分ディフェンス価値あり。':'');ev.strategyMix=flatChart.mix;}
           else{
             // 連結度ボーナス: J9o(gap=2)などはBBで許容範囲が広い
             const _bbGap=Math.abs(RANK_VAL[c1.rank]-RANK_VAL[c2.rank]);
@@ -7166,12 +7334,13 @@ function analyzeHand(hr){
             if(hRank>=_mistakeThresh){
               const _isBroadway=Math.min(RANK_VAL[c1.rank],RANK_VAL[c2.rank])>=10;
               ev.deduction=_isBroadway?8:12;score-=ev.deduction;ev.quality='bad';
-              ev.comment='【ミス】'+hd+'（'+rankStr+'）はBBでも弱め。連結度はあるが全体的に非推奨。'+mwBBNote;
+              ev.comment='【ミス】'+hd+'（'+rankStr+'）はBBでも参照レンジ外です。'+flatChart.mix+'。ポットオッズだけで守るとOOPで実現率が落ちます。'+mwBBNote;
               ev.suggest='推奨: フォールド';
+              ev.strategyMix=flatChart.mix;
             }else if(hRank>=80){
-              ev.quality='ok';ev.comment=hd+'（'+rankStr+'）のBBコール。連結度・プレイアビリティ考慮でボーダーライン。マルチウェイほど価値上昇。'+mwBBNote;
+              ev.quality='ok';ev.comment=hd+'（'+rankStr+'）のBBコール。連結度・プレイアビリティ考慮でボーダーライン。参照レンジでは '+flatChart.mix+'。マルチウェイほど価値上昇。'+mwBBNote;ev.strategyMix=flatChart.mix;
             }else{
-              ev.quality='ok';ev.comment=hd+'（'+rankStr+'）のBBコール。ボーダーラインのディフェンスです。'+mwBBNote;
+              ev.quality='ok';ev.comment=hd+'（'+rankStr+'）のBBコール。ボーダーラインのディフェンスです。参照レンジでは '+flatChart.mix+'。'+mwBBNote;ev.strategyMix=flatChart.mix;
             }
           }
         }else if(!d.facingRaise){
@@ -7179,11 +7348,13 @@ function analyzeHand(hr){
             ev.quality='bad';ev.deduction=25;score-=25;
             ev.comment='【重大ミス】'+hd+'（'+rankStr+'）でのリンプ。ほぼ常にオープンレイズすべきプレミアムハンドです。リンプは相手に無料フロップを与え、ポットが小さくなってバリューを大幅に失います。プレミアムハンドほど積極的にポットを育てることが重要です。';
             ev.suggest=preflopSizePlan(hr,d,limpCount,false,false,pos).label;
+            ev.strategyMix=openChart.mix;
           }else if(hRank<=10&&isInOpenRange){
             ev.quality='bad';ev.deduction=18;score-=18;
             ev.comment='【大きなミス】'+hd+'（'+rankStr+'）でのリンプ。高頻度でオープンレイズが推奨される強いハンドです。このクラスのハンドはリンプするとバリューを大きく損ないます。';
             ev.suggest=preflopSizePlan(hr,d,limpCount,false,false,pos).label;
-          }else if(isInOpenRange){ev.quality='bad';ev.deduction=10;score-=10;ev.comment='【消極的】'+hd+'（'+rankStr+'）はリンプでなく'+pn+'からオープンレイズすべきです。';ev.suggest=preflopSizePlan(hr,d,limpCount,false,false,pos).label;}
+            ev.strategyMix=openChart.mix;
+          }else if(isInOpenRange){ev.quality='bad';ev.deduction=isMixOpen?7:10;score-=ev.deduction;ev.comment='【消極的】'+hd+'（'+rankStr+'）はリンプでなく'+pn+'からオープンレイズかフォールドに整理します。参照レンジでは '+openChart.mix+'。';ev.suggest=preflopSizePlan(hr,d,limpCount,false,false,pos).label;ev.strategyMix=openChart.mix;}
           else{
             const isSBComplete=pos==='SB';
             if(isSBComplete){
@@ -7250,13 +7421,15 @@ function analyzeHand(hr){
           }else if(isDomBway&&isOOP){
             const ded=10;
             ev.quality='bad';ev.deduction=ded;score-=ded;
-            ev.comment='【注意】'+hd+'（'+rankStr+'）はOOPでの3bet/レイズコール。オフスーツブロードウェイはドミネートされやすく逆インプライドオッズが大きい。HU IPなら許容できるが、OOPでは基本フォールド推奨。';
+            ev.comment='【注意】'+hd+'（'+rankStr+'）はOOPでの3bet/レイズコール。参照レンジでは '+flatChart.mix+'。オフスーツブロードウェイはドミネートされやすく逆インプライドオッズが大きい。HU IPなら許容できるが、OOPでは基本フォールド推奨。';
             ev.suggest='推奨: フォールド';
+            ev.strategyMix=flatChart.mix;
           }else if(isDomBway&&isMultiway3bet){
             const ded=12;
             ev.quality='bad';ev.deduction=ded;score-=ded;
-            ev.comment='【注意】'+hd+'（'+rankStr+'）のマルチウェイコール。オフスーツブロードウェイはマルチウェイで逆インプライドオッズが激増。ナッツを作りにくく、作れてもドミネートされる可能性が高い。';
+            ev.comment='【注意】'+hd+'（'+rankStr+'）のマルチウェイコール。参照レンジでは '+flatChart.mix+'。オフスーツブロードウェイはマルチウェイで逆インプライドオッズが激増。ナッツを作りにくく、作れてもドミネートされる可能性が高い。';
             ev.suggest='推奨: フォールド';
+            ev.strategyMix=flatChart.mix;
           }else if(isMultiway3bet&&isOOP&&handFrac>posRangePct-0.05){
             const ded=8;
             ev.quality='ok';ev.deduction=ded;score-=ded;
@@ -7270,6 +7443,7 @@ function analyzeHand(hr){
             ev.quality='ok';ev.deduction=6;score-=6;
             ev.comment='【3BET検討】'+hd+'（'+rankStr+'）のコール。強いハンドなのでコールだけでなく3BETで主導権を取る選択が有力です。初心者は強い手で受け身になりすぎないこと。';
             ev.suggest='推奨: 3BET頻度を高める';
+            ev.strategyMix=threeBetChart.mix;
           }else{
             const coldCallPct=(function(){
               if(pos==='BTN')return 0.30;
@@ -7283,17 +7457,19 @@ function analyzeHand(hr){
             const playableCallPct=coldCallPct+suitedBonus;
             const dominatedOffsuit=(hcat==='dominated_broadway'||(!suited2&&Math.max(RANK_VAL[c1.rank],RANK_VAL[c2.rank])===14&&Math.min(RANK_VAL[c1.rank],RANK_VAL[c2.rank])<=9));
             if(handFrac<=Math.max(0.12,playableCallPct-0.06)&&!dominatedOffsuit){
-              ev.quality='good';ev.comment='正解。'+hd+'（'+rankStr+'）の'+pn+'コールは妥当なディフェンスです。';
+              ev.quality='good';ev.comment='正解。'+hd+'（'+rankStr+'）の'+pn+'コールは妥当なディフェンスです。参照レンジでは '+flatChart.mix+'。';ev.strategyMix=flatChart.mix;
             }else if(handFrac<=playableCallPct&&!dominatedOffsuit){
-              ev.quality='ok';ev.deduction=3;score-=3;ev.comment=hd+'（'+rankStr+'）の'+pn+'コールはボーダーライン。$2/$5初心者向けにはコールより3BET/フォールドを優先してレンジを整理しましょう。';
+              ev.quality='ok';ev.deduction=3;score-=3;ev.comment=hd+'（'+rankStr+'）の'+pn+'コールはボーダーライン。参照レンジでは '+flatChart.mix+'。$2/$5初心者向けにはコールより3BET/フォールドを優先してレンジを整理しましょう。';
               ev.suggest='推奨: 3BETまたはフォールドも検討';
+              ev.strategyMix=flatChart.mix;
             }else{
               const weakOffsuit=!suited2&&handFrac>=0.38;
               const trashSuited=suited2&&handFrac>=0.40;
               const ded=weakOffsuit?14:trashSuited?12:8;
               ev.quality='bad';ev.deduction=ded;score-=ded;
-              ev.comment='【初心者リーク】'+hd+'（'+rankStr+'）の'+pn+'コールドコール。非BBのコールはポジション・後続プレイヤー・ドミネートリスクの影響が大きく、見た目のハンド順位より実戦EVが落ちます。特にオフスーツ/キッカー負けしやすいハンドは長期的に損になりやすいです。';
+              ev.comment='【初心者リーク】'+hd+'（'+rankStr+'）の'+pn+'コールドコール。参照レンジでは '+flatChart.mix+'。非BBのコールはポジション・後続プレイヤー・ドミネートリスクの影響が大きく、見た目のハンド順位より実戦EVが落ちます。特にオフスーツ/キッカー負けしやすいハンドは長期的に損になりやすいです。';
               ev.suggest='推奨: フォールド'+(suited2&&handFrac<=0.45?'、一部3BETブラフ':''); 
+              ev.strategyMix=flatChart.mix;
             }
           }
         }
