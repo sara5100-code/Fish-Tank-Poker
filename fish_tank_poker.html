@@ -241,9 +241,14 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,'Hiragino 
   .setup-card{padding:20px 16px;width:100%;max-width:100%;}
   .setup-card h1{font-size:18px;}
   #game-screen.active{display:flex;flex-direction:column;height:auto!important;min-height:100dvh;overflow-y:auto;}
-  #hud{padding:6px 10px;height:44px;}
+  #hud{padding:6px 8px;height:44px;gap:6px;}
+  #hud .hud-title{font-size:12px;line-height:1.15;max-width:118px;white-space:normal;}
+  #hud-info{font-size:11px;line-height:1.2;min-width:58px;text-align:center;}
+  .hud-btns{gap:4px;flex-shrink:0;}
+  .hud-btn{padding:5px 8px;font-size:11px;border-radius:7px;}
+  .hud-btn.dev-btn{display:none;}
   #main-area{overflow:visible;flex:none;}
-  #table-wrap{flex:none;padding:6px 6px 0;}
+  #table-wrap{flex:none;padding:18px 6px 0;}
   #table-container{aspect-ratio:1.25/1;max-width:100%;}
   #human-area{padding:6px 10px 10px;width:100%;}
   #human-cards .card.big{width:44px;height:64px;font-size:16px;}
@@ -352,9 +357,9 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,'Hiragino 
     <div class="hud-btns">
       <button class="hud-btn" data-tab="history">履歴</button>
       <button class="hud-btn" data-tab="trends">傾向</button>
-      <button class="hud-btn" id="btn-reanalyze">再評価</button>
-      <button class="hud-btn" id="btn-regression">検査</button>
-      <button class="hud-btn" id="btn-audit-batch">監査</button>
+      <button class="hud-btn dev-btn" id="btn-reanalyze">再評価</button>
+      <button class="hud-btn dev-btn" id="btn-regression">検査</button>
+      <button class="hud-btn dev-btn" id="btn-audit-batch">監査</button>
       <button class="hud-btn" id="btn-quit">終了</button>
     </div>
   </div>
@@ -5233,25 +5238,21 @@ function formatBetSuggestion(label,plan,d){
 }
 
 function postflopQuickBetOptions(pot,minBet,totalStack){
-  // [Codex fix 2026-05-30] 小ポットでは33/50/75%が全部min betに丸まるため、重複削除後も実用サイズを残す。
+  // [Codex fix 2026-06-15] 初心者が毎回同じ基準でサイズ選択を練習できるよう、表示セットを固定する。
+  // 33/50/75/100/125%から選び、最小ベット未満は内部的にminへ丸める。
   const cap=Math.max(0,Math.round(totalStack||0));
   const min=Math.max(1,Math.round(minBet||1));
   const basePot=Math.max(1,Math.round(pot||1));
-  const seen=new Set();
   const out=[];
   function add(label,amt,title){
     const a=Math.round(Math.min(Math.max(amt,min),cap));
-    if(a<=0||seen.has(a))return;
-    seen.add(a);
+    if(a<=0)return;
     out.push({label:label,amt:a,title:title||''});
   }
-  add('Min',min,'最小ベット');
-  [33,50,75,100,125,150,200,300].forEach(function(pct){
+  [33,50,75,100,125].forEach(function(pct){
     const raw=Math.round(basePot*pct/100);
-    if(raw<min)return;
-    add(pct+'%',raw);
+    add(pct+'%',raw,raw<min?'最小ベット未満のため実際は最小ベットになります':'');
   });
-  if(cap>0&&!seen.has(cap)&&cap<=basePot*5)add('All-in',cap,'オールイン');
   return out;
 }
 
@@ -9788,7 +9789,7 @@ function runFishTankRegressionTests(){
   add('小ポットでもポストフロップのクイックベット選択肢を十分に出す',function(){
     const opts=postflopQuickBetOptions(7,5,285);
     const labels=opts.map(function(o){return o.label;});
-    return opts.length>=5&&labels.includes('Min')&&labels.includes('100%')&&labels.includes('200%');
+    return opts.length>=5&&['33%','50%','75%','100%','125%'].every(function(x){return labels.includes(x);});
   });
 
   add('新ハンド開始時に前ハンドのアクション表示を消す',function(){
@@ -10180,7 +10181,15 @@ function renderTable(){
   const con=$('seats-container');con.innerHTML='';
   game.players.forEach((pl,pi)=>{
     if(!pl.active)return;
-    const sp=ALL_SEAT_POS[sel[pi]];
+    const baseSp=ALL_SEAT_POS[sel[pi]];
+    const sp={x:baseSp.x,y:baseSp.y};
+    // [Codex fix 2026-06-15] スマホ幅では上側/端の席を少し内側へ寄せ、HUDや画面端との重なりを防ぐ。
+    if(window.innerWidth<=600){
+      if(sp.y<=10)sp.y+=6;
+      else if(sp.y<=25)sp.y+=3;
+      if(sp.x<=10)sp.x+=3;
+      else if(sp.x>=90)sp.x-=3;
+    }
     const isDlr=pi===game.dealerIndex,isSB=pi===game.sbIdx,isBB=pi===game.bbIdx;
     const isAct=pi===game.actionIdx&&game.street!=='showdown';
     const isWin=game._lastWinners&&game._lastWinners.includes(pi);
@@ -10300,8 +10309,8 @@ function renderActions(){
       if(tctx&&pre&&stackBB<=14&&['openjam14','bubble_call'].includes(tctx.focusId)){
         addQ('Jam',h.chips+h.currentBet,'Tモード: 14BB前後はopen jam候補が増えます');
       }
-      // プリフロップ: オープン or ISO（リンパーへのレイズ）→ 2BB/2.5BB/3BB（即実行）
-      const openBtns=tctx&&pre?[[2,'2BB'],[2.1,'2.1BB'],[2.3,'2.3BB']]:[[2,'2BB'],[2.5,'2.5BB'],[3,'3BB']];
+      // プリフロップ: オープン or ISO（リンパーへのレイズ）→ 常に 2BB/2.5BB/3BB から選ぶ。
+      const openBtns=[[2,'2BB'],[2.5,'2.5BB'],[3,'3BB']];
       openBtns.forEach(function(arr){
         const mult=arr[0],label=arr[1];
         const amt=Math.round(Math.min(game.bb*mult,h.chips+h.currentBet));
