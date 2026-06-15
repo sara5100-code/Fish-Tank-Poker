@@ -7620,6 +7620,7 @@ function analyzeHand(hr){
     applyHeadsUpRiverWeight(ev);
     applyFinalTablePostflopWeight(ev);
     composeNaturalReview(ev,d,hr);
+    attachGtoTheorySnapshot(ev);
     ev.finalTableLearningPoint=tournamentFinalTableLearningPoint(ev);
     const scoredAfter=scoredDeduction(ev);
     if(scoredAfter!==scoredBefore)score-=(scoredAfter-scoredBefore);
@@ -10508,6 +10509,123 @@ function inferredStrategyMixText(ev){
   if(ev.action==='check'||ev.action==='raise'||ev.action==='bet')return'チェック 50% / ベット 50%';
   return'';
 }
+// [Codex fix 2026-06-16] GTO理論の3番/4番を細かく持つための公開情報スナップショット。
+// 相手の実ハンドは使わず、公開ボード・公開アクション・既存レンジ推定から、ボード分類とレンジ更新を文章化する。
+function gtoActionJP(action,street){
+  return {fold:'フォールド',check:'チェック',call:'コール',bet:'ベット',raise:street==='preflop'?'レイズ':'ベット/レイズ',allin:'オールイン'}[action]||action||'判断';
+}
+function gtoBoardClassText(ev){
+  if(!ev||ev.street==='preflop')return '';
+  const src=[ev.comment,ev.evalAxis,ev.liveCashRiverDecisionProfile&&ev.liveCashRiverDecisionProfile.risk,ev.onePairProfile&&ev.onePairProfile.risk].filter(Boolean).join(' ');
+  const tags=[];
+  if(/モノトーン|4枚同色|フラッシュ完成|フラッシュ/.test(src))tags.push('同色圧が高い');
+  else if(/2トーン|同色ターン|フラッシュドロー/.test(src))tags.push('フラッシュドローあり');
+  if(/ストレート完成|ストレート/.test(src))tags.push('ストレート接続');
+  if(/ペアド|ボードペア|ペアボード|フルハウス|クアッズ/.test(src))tags.push('ペアボード');
+  if(/マルチウェイ|way/.test(src)||(ev.streetOpps!=null&&ev.streetOpps>=2))tags.push('マルチウェイ');
+  if(/完成寄り|動的/.test(src))tags.push('完成寄り/動的');
+  if(/比較的静的|ドライ|静かな/.test(src))tags.push('静的');
+  if(!tags.length){
+    if(ev.street==='flop')tags.push('標準フロップ');
+    else if(ev.street==='turn')tags.push('ターンでレンジが絞られる場面');
+    else tags.push('リバーのショーダウン判断');
+  }
+  const uniq=tags.filter(function(t,i){return tags.indexOf(t)===i;}).slice(0,4);
+  const explain={
+    '同色圧が高い':'フラッシュ完成や強いフラッシュドローを相手レンジに残します',
+    'フラッシュドローあり':'同色ターン/リバーでワンペアの価値が下がります',
+    'ストレート接続':'Jx・8x・連結カードなどが強くなりやすい形です',
+    'ペアボード':'トリップス/フルハウスがあり、単なるフラッシュやストレートの価値を少し下げます',
+    'マルチウェイ':'ブラフ頻度を落とし、バリュー寄りに評価します',
+    '完成寄り/動的':'次のアクションで強い完成役が多く残ります',
+    '静的':'薄いバリューや小さめのベットが通りやすい形です',
+    '標準フロップ':'手役・主導権・ポジションで頻度を分けます',
+    'ターンでレンジが絞られる場面':'ターンの継続で弱いレンジが少し落ちます',
+    'リバーのショーダウン判断':'ベット/コールは相手レンジのバリュー密度を重く見ます'
+  };
+  return uniq.map(function(t){return t+'：'+(explain[t]||'公開情報からの分類です');}).join(' / ');
+}
+function gtoRangeUpdateText(ev){
+  if(!ev)return '';
+  const parts=[];
+  const street=ev.street||'';
+  const action=ev.action||'';
+  const range=ev.rangeAdv?('レンジ優位は'+ev.rangeAdv):'レンジ優位は不明';
+  const nut=ev.nutAdv?('ナッツ優位は'+ev.nutAdv):'ナッツ優位は不明';
+  const eq=ev.effectiveEqPct!=null?('実効EQ '+ev.effectiveEqPct+'%'):(ev.rawEqPct!=null?('Raw EQ '+ev.rawEqPct+'%'):'EQ未推定');
+  parts.push(range+'、'+nut+'、'+eq);
+  if(ev.liveCashInitiativeProfile){
+    parts.push('主導権：'+(ev.liveCashInitiativeProfile.policy||ev.liveCashInitiativeProfile.label||'公開アクションから更新'));
+  }
+  if(ev.liveCashReraisedPotProfile){
+    parts.push('3BET/4BET後：'+(ev.liveCashReraisedPotProfile.policy||ev.liveCashReraisedPotProfile.label||'レンジを強めに更新'));
+  }
+  if(ev.liveCashMultiwayProfile){
+    parts.push('複数人：'+(ev.liveCashMultiwayProfile.policy||ev.liveCashMultiwayProfile.label||'継続レンジを強めに更新'));
+  }
+  if(ev.liveCashRiverDecisionProfile){
+    parts.push('リバー：'+(ev.liveCashRiverDecisionProfile.policy||ev.liveCashRiverDecisionProfile.label||'ベットサイズでレンジを更新'));
+  }
+  if(street!=='preflop'){
+    if(action==='check')parts.push('チェック後は相手の強いベットレンジをまだ残し、こちらのレンジはややキャップされます');
+    else if(action==='bet'||action==='raise'||action==='allin')parts.push('こちらが打つと、相手の続行レンジはペア以上・強いドロー寄りに締まります');
+    else if(action==='call')parts.push('コールすると、こちらは中程度の完成役/ドローを多く残すレンジになります');
+    else if(action==='fold')parts.push('フォールドは低実現率の部分を捨てるレンジ更新です');
+  }
+  return parts.filter(Boolean).slice(0,4).join('。');
+}
+function gtoLiveAdjustmentText(ev){
+  if(!ev)return '';
+  if(ev.tournamentPhase||ev.tournamentContext){
+    if(ev.bubbleProfile)return '実戦補正では、バブル付近はチップEVより生存率とカバー関係を重く見ます';
+    if(ev.finalTableProfile||ev.finalTableRangeProfile)return '実戦補正では、FTはスタック役割と衝突相手を重く見ます';
+    if(ev.headsUpProfile)return '実戦補正では、HUはレンジが広くなるため過度に待ちすぎません';
+    return '実戦補正では、BBアンティと有効BBに合わせてサイズと押し引きを調整します';
+  }
+  if(ev.street==='river'&&(ev.action==='call'||ev.action==='fold'))return '実戦補正では、$2/$5のリバー大きめベットはブラフ不足に寄せて見ます';
+  if(ev.liveCashMultiwayProfile||ev.streetOpps>=2)return '実戦補正では、マルチウェイはブラフ頻度を落としてバリュー寄りに見ます';
+  if(ev.liveCashInitiativeProfile)return '実戦補正では、OOPからのドンクや薄いスタブを控えめに見ます';
+  if(ev.liveCashSprProfile)return '実戦補正では、深いSPRのワンペアはポット管理を重く見ます';
+  if(ev.street==='preflop')return '実戦補正では、レーキ・OOP・ドミネートリスクで非BBコールをやや締めます';
+  return '実戦補正では、相手のコール過多/ブラフ不足を少し加味します';
+}
+function gtoTheorySnapshot(ev){
+  if(!ev)return null;
+  const mix=inferredStrategyMixText(ev);
+  const board=gtoBoardClassText(ev);
+  const rangeUpdate=gtoRangeUpdateText(ev);
+  const liveAdjustment=gtoLiveAdjustmentText(ev);
+  const action=gtoActionJP(ev.action,ev.street);
+  const recommendation=ev.suggest?naturalRecommendationText(ev.suggest):(ev.quality==='bad'?'別ラインを優先':ev.quality==='good'?action+'継続':'相手傾向で混合');
+  const confidence=(ev.rangeAdv&&ev.nutAdv&&ev.effectiveEqPct!=null)?'中〜高':(ev.street==='preflop'?'中':'中');
+  return{
+    baselineType:'approx-gto-public-info',
+    mix:mix||'単一路線寄り',
+    boardClass:board,
+    rangeUpdate:rangeUpdate,
+    liveAdjustment:liveAdjustment,
+    recommendation:recommendation,
+    confidence:confidence
+  };
+}
+function attachGtoTheorySnapshot(ev){
+  if(!ev)return ev;
+  ev.gtoTheory=gtoTheorySnapshot(ev);
+  return ev;
+}
+function gtoTheoryReviewText(ev){
+  const g=ev&&ev.gtoTheory;
+  if(!g)return'';
+  const chunks=[];
+  const rangeBits=String(g.rangeUpdate||'').split('。').map(function(x){return x.trim();}).filter(Boolean);
+  const rangeShort=rangeBits.length>1?rangeBits[0]+'。'+rangeBits[rangeBits.length-1]:(rangeBits[0]||'');
+  if(g.mix)chunks.push('GTO基準は'+g.mix);
+  if(g.boardClass&&ev.street!=='preflop')chunks.push('ボードは'+g.boardClass);
+  if(rangeShort)chunks.push('レンジ更新は'+rangeShort);
+  if(g.liveAdjustment)chunks.push(g.liveAdjustment);
+  if(g.recommendation)chunks.push('今回の推奨は'+g.recommendation);
+  return chunks.slice(0,4).join('。')+'。';
+}
 // [Claude fix 2026-06-09] プリフロップフォールドのコメントから手とポジションを自然な文で取り出す
 // 例: "正解。K7o（...）のCOレイズへのフォールド。" → "K7oのCOレイズへのフォールド"
 //     "正解。K7o（...）はUTGのオープンレンジ外..." → "K7oでのUTGからのフォールド"
@@ -10666,7 +10784,8 @@ function coachReviewText(ev){
   const close=recommendationClose(action,ev.quality,rec,!!ev.suggest);
   const mixedLineExtra=mixedLineExplanationText(ev);
   const postflopExtra=postflopCoachExtraText(ev);
-  return (verdict+' '+scene+(reason?' '+reason:'')+(mixedLineExtra?' '+mixedLineExtra:'')+(postflopExtra?' '+postflopExtra:'')+' '+close)
+  const theoryExtra=gtoTheoryReviewText(ev);
+  return (verdict+' '+scene+(reason?' '+reason:'')+(theoryExtra?' '+theoryExtra:'')+(mixedLineExtra?' '+mixedLineExtra:'')+(postflopExtra?' '+postflopExtra:'')+' '+close)
     .replace(/プリフロップ/g,'フロップ前')
     .replace(/\s+/g,' ')
     .replace(/。。+/g,'。')
@@ -11078,6 +11197,11 @@ function buildHandHistoryText(includeContext){
       if(ev.toCall>0)meta.push('必要コール='+ev.toCall);
       if(ev.potOdds>0)meta.push('必要EQ='+Math.round(ev.potOdds*100)+'%');
       if(ev.strategyMix)meta.push('推奨頻度='+ev.strategyMix);
+      if(ev.gtoTheory){
+        if(ev.gtoTheory.boardClass)meta.push('GTOボード分類='+ev.gtoTheory.boardClass);
+        if(ev.gtoTheory.rangeUpdate)meta.push('GTOレンジ更新='+ev.gtoTheory.rangeUpdate);
+        if(ev.gtoTheory.liveAdjustment)meta.push('実戦補正='+ev.gtoTheory.liveAdjustment);
+      }
       if(ev.rawEqPct!=null)meta.push('RawEQ='+ev.rawEqPct+'%');
       if(ev.effectiveEqPct!=null)meta.push('実効EQ='+ev.effectiveEqPct+'%');
       if(ev.realizationPct!=null)meta.push('実現率='+ev.realizationPct+'%');
@@ -11288,6 +11412,7 @@ function evaluationSnapshot(hr,an){
         quality:e.quality,
         deduction:e.deduction||0,
         coachComment:coachReviewText(e),
+        gtoTheory:e.gtoTheory||null,
         suggest:e.suggest||'',
         strategyMix:e.strategyMix||'',
         rawEqPct:e.rawEqPct,
