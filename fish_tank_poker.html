@@ -10744,6 +10744,23 @@ function runFishTankRegressionTests(){
     return !!(ev&&ev.rangeActionUpdateProfile&&ev.gtoTheory&&ev.gtoTheory.rangeActionUpdate&&se&&se.rangeActionUpdateProfile&&se.gtoTheory&&se.gtoTheory.rangeActionUpdate);
   });
 
+  add('コーチ文: レンジ更新を口語で説明する',function(){
+    const ev={
+      street:'river',
+      action:'call',
+      quality:'ok',
+      boardTextureProfile:{dynamic:true,flushThreat:true},
+      rangeActionUpdateProfile:{lane:'call',sizePct:70,rangeState:'pressure_dense',pressure:3,severity:'border'}
+    };
+    const txt=naturalRangeActionUpdateText(ev);
+    return /複数ストリート/.test(txt)&&/ブラフ不足/.test(txt)&&/70%pot/.test(txt)&&/境界/.test(txt);
+  });
+
+  add('コーチ文: 完成寄りボードの意味を説明する',function(){
+    const txt=naturalBoardTextureDefinitionText({boardTextureProfile:{dynamic:true,straightThreat:true}});
+    return /完成寄り\/動的ボード/.test(txt)&&/フラッシュ・ストレート・フルハウス/.test(txt)&&/ワンペア/.test(txt);
+  });
+
   const results=tests.map(function(t){
     try{return{name:t.name,pass:!!t.fn()};}
     catch(e){return{name:t.name,pass:false,error:e&&e.message?e.message:String(e)};}
@@ -11310,6 +11327,49 @@ function naturalRecommendationText(rec){
   return r;
 }
 // [Codex fix 2026-06-15] 内部ラベルをそのまま読ませず、コーチが場面を説明する言葉へ変換する。
+// [Codex fix 2026-06-17] 内部のレンジ更新メタを、プレイヤーが読んで納得しやすい口語説明へ翻訳する。
+function naturalRangeActionUpdateText(ev){
+  const p=ev&&ev.rangeActionUpdateProfile;
+  if(!p)return'';
+  const lane={check:'チェック',call:'コール',bet:'ベット/レイズ',fold:'フォールド'}[p.lane]||p.lane;
+  const board=ev.boardTextureProfile||{};
+  const completed=!!(board.dynamic||board.flushThreat||board.straightThreat||board.paired||board.transition&&board.transition!=='none');
+  const boardNote=completed
+    ?'このボードは完成役や強いドローが残りやすいので、ワンペアだけで大きく膨らませる時は慎重に見ます。'
+    :'ボード自体は比較的落ち着いているので、相手のアクション量でレンジを更新します。';
+  const size=p.sizePct?('サイズは約'+p.sizePct+'%potです。'):'';
+  let reason='';
+  if(p.rangeState==='capped'){
+    reason='相手が先にチェックしているため、強いハンドをすべて持っているというより、強いベット候補の一部は少し減っています。だからこちらが打つなら、小〜中サイズでプレッシャーをかける選択が作りやすいです。';
+  }else if(p.rangeState==='mixed_capped_pressure'){
+    reason='相手はチェックもしていますが、その後に圧力も入っています。完全に弱いとは見ず、弱いレンジと強い継続レンジが混ざった状態として扱います。';
+  }else if(p.rangeState==='single_pressure'){
+    reason='相手のベットはまだ一度だけなので、バリューだけでなくドローや軽いプローブも残ります。ここは即断せず、サイズとこちらの手役で続行頻度を決める場面です。';
+  }else if(p.rangeState==='pressure_dense'){
+    reason='相手が複数ストリートで打っているため、リバーに近づくほどレンジは強いバリューと強いドロー寄りに絞られます。特にライブ$2/$5では、このラインの大きいベットはブラフ不足になりやすいです。';
+  }else if(p.rangeState==='turn_call_dense'){
+    reason='ターンでこちらのベットにコールした相手は、リバーで完全な空振りよりも、ペア以上・完成ドロー・強いブロッカーを多く残します。薄いバリューやブラフは、相手が何でコールしてくれるかを先に考えます。';
+  }else{
+    reason='この時点では相手レンジはまだ大きく絞り切れていません。手役の強さだけでなく、相手がここまでどのラインで残ったかを見ます。';
+  }
+  let action='';
+  if(p.severity==='good')action=lane+'は自然です。相手レンジの更新と噛み合っています。';
+  else if(p.severity==='bad')action=lane+'は危険寄りです。見た目のエクイティより、相手の残っているレンジの強さを優先して見直したいです。';
+  else if(p.severity==='border')action=lane+'は境界です。GTOでは混ざることがありますが、実戦では相手のブラフ頻度で大きく変わります。';
+  else action=lane+'はサイズと相手傾向込みで判断する場面です。';
+  return reason+' '+boardNote+' '+size+' '+action;
+}
+function naturalBoardTextureDefinitionText(ev){
+  const p=ev&&ev.boardTextureProfile;
+  if(!p)return'';
+  if(p.dynamic||p.flushThreat||p.straightThreat||p.paired||p.transition&&p.transition!=='none'){
+    return '「完成寄り/動的ボード」は、フラッシュ・ストレート・フルハウス系、または次のカードで強弱が大きく変わるボードのことです。このタイプでは、トップペアやワンペアの価値を少し低く見積もります。';
+  }
+  if(p.primary==='dry'||p.primary==='high_dry'){
+    return 'このボードは比較的ドライで、強いドローや完成役が少なめです。小さめのベットやチェックでレンジ全体を扱いやすい場面です。';
+  }
+  return'';
+}
 function naturalSpotLabel(label){
   const t=String(label||'').trim();
   const map={
@@ -11697,8 +11757,10 @@ function coachReviewText(ev){
   const close=recommendationClose(action,ev.quality,rec,!!ev.suggest);
   const mixedLineExtra=mixedLineExplanationText(ev);
   const postflopExtra=postflopCoachExtraText(ev);
-  const theoryExtra=gtoTheoryReviewText(ev);
-  return (verdict+' '+scene+(reason?' '+reason:'')+(theoryExtra?' '+theoryExtra:'')+(mixedLineExtra?' '+mixedLineExtra:'')+(postflopExtra?' '+postflopExtra:'')+' '+close)
+  const theoryExtra=ev.rangeActionUpdateProfile?'':gtoTheoryReviewText(ev);
+  const rangeActionExtra=naturalRangeActionUpdateText(ev);
+  const boardDefinitionExtra=naturalBoardTextureDefinitionText(ev);
+  return (verdict+' '+scene+(reason?' '+reason:'')+(rangeActionExtra?' '+rangeActionExtra:'')+(boardDefinitionExtra?' '+boardDefinitionExtra:'')+(theoryExtra?' '+theoryExtra:'')+(mixedLineExtra?' '+mixedLineExtra:'')+(postflopExtra?' '+postflopExtra:'')+' '+close)
     .replace(/プリフロップ/g,'フロップ前')
     .replace(/\s+/g,' ')
     .replace(/。。+/g,'。')
