@@ -4663,6 +4663,48 @@ function boardTextureProfileText(p){
   return bits.join(' / ');
 }
 
+// [Codex fix 2026-06-16] ボード分類をGTO頻度へ接続する。基礎bet率を置き換えず、構造ごとの補正として扱う。
+function boardTextureFrequencyAdjustment(baseBetProb,profile,opts){
+  baseBetProb=Math.max(0,Math.min(1,baseBetProb||0));
+  if(!profile)return{betProb:baseBetProb,checkProb:1-baseBetProb,baseBetPct:Math.round(baseBetProb*100),betPct:Math.round(baseBetProb*100),checkPct:Math.round((1-baseBetProb)*100),label:'標準ボード',reason:'ボード構造による追加補正なし',preferredSizePct:null};
+  opts=opts||{};
+  const street=opts.street||profile.street||'flop';
+  const role=opts.role||{};
+  const isPfr=!!opts.isPfr;
+  const nOpponents=opts.nOpponents||1;
+  let mult=1.0,cap=0.88,floor=0.03,preferredSizePct=null;
+  const notes=[];
+  function note(t){if(t)notes.push(t);}
+  if(profile.rangeTilt==='pfr_range_advantage'){
+    if(isPfr){mult*=street==='flop'?1.22:1.08;cap=Math.min(cap,street==='flop'?0.82:0.74);preferredSizePct=33;note('PFR側のレンジ優位が出やすく、小さめ高頻度のCBを作りやすい');}
+    else{mult*=0.88;cap=Math.min(cap,0.62);note('受け側はレンジ優位が薄く、無理なリード頻度を落とす');}
+  }
+  if(profile.primary==='monotone'){
+    mult*=0.72;cap=Math.min(cap,0.56);preferredSizePct=role.isNut||role.role==='nutted'?50:33;note('モノトーンはフラッシュ保有とブロッカーが重要で、全体のベット頻度は下がる');
+  }else if(profile.primary==='four_flush'){
+    mult*=0.55;cap=Math.min(cap,0.45);preferredSizePct=role.isNut||role.role==='nutted'?50:33;note('4枚同色ではナッツ/強ブロッカー以外の大きな圧力を控える');
+  }else if(profile.primary==='low_connected'||profile.primary==='wet_connected'||profile.primary==='straight_complete'){
+    mult*=0.68;cap=Math.min(cap,0.54);preferredSizePct=(role.role==='strong'||role.role==='nutted'||role.isNut)?65:40;note('低連結・完成寄りのボードは受け側のセット/ストレート絡みが増え、CB頻度を落とす');
+  }else if(profile.primary==='broadway_connected'){
+    mult*=0.82;cap=Math.min(cap,0.64);preferredSizePct=50;note('ブロードウェイ連結は強い継続レンジが残りやすく、頻度を少し絞る');
+  }else if(profile.primary==='paired'||profile.primary==='trips_board'){
+    mult*=profile.primary==='trips_board'?0.62:0.84;cap=Math.min(cap,profile.primary==='trips_board'?0.48:0.66);preferredSizePct=33;note('ペアボードはナッツ優位とフルハウス/トリップスの濃さを確認して打つ');
+  }else if(profile.primary==='two_tone'){
+    mult*=0.93;cap=Math.min(cap,0.72);preferredSizePct=50;note('2トーンはドローが残るため、完全なドライボードほど高頻度には打たない');
+  }else if(profile.primary==='low_dry'){
+    mult*=isPfr?0.86:0.95;cap=Math.min(cap,0.64);preferredSizePct=33;note('低いドライボードは受け側の小ペア/セットも残り、PFRの自動CBを少し抑える');
+  }
+  if(profile.transition==='flush_complete_card'||profile.transition==='four_flush_card'){mult*=0.62;cap=Math.min(cap,0.50);preferredSizePct=role.isNut||role.role==='nutted'?50:33;note('フラッシュ完成カードでワンペアやエアの継続頻度を落とす');}
+  else if(profile.transition==='board_pair'){mult*=0.74;cap=Math.min(cap,0.58);preferredSizePct=33;note('ボードペア化でナッツ構造が変わり、薄いバリュー/ブラフは慎重にする');}
+  else if(profile.transition==='straight_complete_card'){mult*=0.70;cap=Math.min(cap,0.55);preferredSizePct=(role.role==='strong'||role.isNut)?65:40;note('ストレート完成カードでレンジの強弱がはっきりし、弱い手の頻度を落とす');}
+  else if(profile.transition==='overcard'&&isPfr){mult*=1.08;cap=Math.min(cap,0.76);preferredSizePct=40;note('オーバーカードはPFR側のレンジに当たりやすく、継続頻度を少し上げる');}
+  if(nOpponents>=2){mult*=nOpponents>=3?0.72:0.84;cap=Math.min(cap,nOpponents>=3?0.46:0.58);note('マルチウェイではブラフ成功率が下がるため、頻度を落とす');}
+  if(role.isNut||role.role==='nutted'){floor=Math.max(floor,0.40);cap=Math.max(cap,0.70);note('ナッツ級はボードが重くてもバリュー頻度を残す');}
+  else if(role.role==='air'&&(profile.flushThreat||profile.straightThreat||profile.paired)){mult*=0.82;cap=Math.min(cap,0.44);note('エアは重いボードでフォールドエクイティが落ちる');}
+  const adjusted=Math.max(floor,Math.min(cap,baseBetProb*mult));
+  return{label:profile.label,primary:profile.primary,transition:profile.transition,baseBetPct:Math.round(baseBetProb*100),betPct:Math.round(adjusted*100),checkPct:Math.round((1-adjusted)*100),betProb:adjusted,checkProb:1-adjusted,multiplier:Math.round(mult*100)/100,capPct:Math.round(cap*100),preferredSizePct,reason:notes.slice(0,3).join('。')};
+}
+
 function playerDraw(holeCards,comm){
   if(!holeCards||holeCards.length<2||comm.length<3)return{flush:false,straight:false,oesd:false,gutshot:false,outs:0};
   // フラッシュドロー: ホールカードが含む4枚フラッシュ（完成していない）
@@ -5504,6 +5546,8 @@ function evalCheck(d,hr,human,nOpponents){
   const eq=estimateEquity(hc,comm,nOpponents,2000)*oppRangeAdj(hr,d.street);
   const pot=d.pot||0;
   const tex=boardTex(comm);
+  const prevCommLenCk={flop:0,turn:3,river:4}[d.street]||0;
+  const boardTextureCk=comm.length>=3?boardTextureProfile(comm,d.street,prevCommLenCk?hr.community.slice(0,prevCommLenCk):[]):null;
   const evalRes=hc.length&&comm.length>=3?HandEval.evaluate([...hc,...comm]):null;
   const role=evalRes?handRole(hc,comm,evalRes):{role:'unknown',note:'',isNut:false,isVuln:false};
   const isRiver=d.street==='river';
@@ -5566,8 +5610,11 @@ function evalCheck(d,hr,human,nOpponents){
     betProb*=isIPck?0.62:0.42;
     if(nOpponents>=2)betProb*=0.85;
   }
+  const textureFreqCk=boardTextureFrequencyAdjustment(betProb,boardTextureCk,{street:d.street,role,isPfr:humanWasLastPFAggCk,isIP:isIPck,nOpponents});
+  betProb=textureFreqCk.betProb;
   const checkProb=1-betProb;
   let sc=freqToDeduction(checkProb,d.street);
+  sc={...sc,boardTextureMixProfile:textureFreqCk};
   const isNutLike=role.isNut||role.role==='nutted';
   const isStrongHand=isNutLike||role.role==='strong';
   const isIPRiverNutCheck=d.street==='river'&&isIPck&&villainCkBefore&&isNutLike;
@@ -5853,6 +5900,8 @@ function evalBet(d,hr,human,nOpponents){
   const evalRes=hc.length&&comm.length>=3?HandEval.evaluate([...hc,...comm]):null;
   const role=evalRes?handRole(hc,comm,evalRes):{role:'unknown',note:'',isNut:false,isVuln:false};
   const tex=boardTex(comm);
+  const prevCommLenB={flop:0,turn:3,river:4}[d.street]||0;
+  const boardTextureB=comm.length>=3?boardTextureProfile(comm,d.street,prevCommLenB?hr.community.slice(0,prevCommLenB):[]):null;
   const isHU=nOpponents===1;
   const eqPct=Math.round(eq*100);
   const sw=STREET_W[d.street]||1.0;
@@ -5901,7 +5950,10 @@ function evalBet(d,hr,human,nOpponents){
   if(limpIsoBet&&!isIPbet&&!humanWasPfrB&&d.toCall===0){
     betProb*=0.72;
   }
+  const textureFreqB=boardTextureFrequencyAdjustment(betProb,boardTextureB,{street:d.street,role,isPfr:humanWasPfrB,isIP:isIPbet,nOpponents});
+  betProb=textureFreqB.betProb;
   let sc=freqToDeduction(betProb,d.street);
+  sc={...sc,boardTextureMixProfile:textureFreqB};
   // [Codex fix 2026-05-26] HUのペア+強ドローは、純粋なミドルペアベットより許容幅を広く取る。
   if(madeStrongDrawBet&&nOpponents<=1&&sc.quality==='bad'&&sc.deduction<=Math.round(18*sw)){
     sc={...sc,quality:'ok',deduction:0,isMix:true,evLoss:'mix'};
@@ -7721,6 +7773,7 @@ function analyzeHand(hr){
         if(result.realizationPct!=null)ev.realizationPct=result.realizationPct;
         if(result.rangeAdv)ev.rangeAdv=result.rangeAdv;
         if(result.nutAdv)ev.nutAdv=result.nutAdv;
+        if(result.boardTextureMixProfile)ev.boardTextureMixProfile=result.boardTextureMixProfile;
         if(result.quality==='bad')score-=(result.deduction||8);
         else if(result.quality==='ok'&&result.deduction)score-=result.deduction;
       }
@@ -10077,6 +10130,16 @@ function runFishTankRegressionTests(){
     return !!(flush&&flush.transition==='flush_complete_card'&&over&&over.transition==='overcard'&&paired&&paired.transition==='board_pair');
   });
 
+  add('GTO頻度: A-high dryはPFR小さめ高頻度、重いボードは頻度を落とす',function(){
+    const dry=boardTextureProfile(regressionCards(['Ad','9c','3s']),'flop',[]);
+    const mono=boardTextureProfile(regressionCards(['Ah','Th','4h']),'flop',[]);
+    const conn=boardTextureProfile(regressionCards(['9h','8c','7d']),'flop',[]);
+    const dryAdj=boardTextureFrequencyAdjustment(0.55,dry,{street:'flop',isPfr:true,role:{role:'air'},nOpponents:1});
+    const monoAdj=boardTextureFrequencyAdjustment(0.55,mono,{street:'flop',isPfr:true,role:{role:'air'},nOpponents:1});
+    const connAdj=boardTextureFrequencyAdjustment(0.60,conn,{street:'flop',isPfr:true,role:{role:'air'},nOpponents:1});
+    return !!(dryAdj.betPct>55&&dryAdj.preferredSizePct===33&&monoAdj.betPct<55&&connAdj.betPct<60);
+  });
+
   add('GTOボード分類: 評価JSONとGTOスナップショットに保持する',function(){
     const hr=regressionHand({
       heroHole:['As','Qd'],
@@ -10089,7 +10152,7 @@ function runFishTankRegressionTests(){
     const ev=humanEval(an,function(e){return e.street==='flop'&&e.action==='check';});
     const snap=evaluationSnapshot(hr,an);
     const se=snap&&snap.evaluations&&snap.evaluations[0];
-    return !!(ev&&ev.boardTextureProfile&&ev.boardTextureProfile.primary==='monotone'&&ev.gtoTheory&&ev.gtoTheory.boardTexture&&se&&se.boardTextureProfile&&se.gtoTheory&&se.gtoTheory.boardTexture);
+    return !!(ev&&ev.boardTextureProfile&&ev.boardTextureProfile.primary==='monotone'&&ev.boardTextureMixProfile&&ev.gtoTheory&&ev.gtoTheory.boardTexture&&ev.gtoTheory.boardTextureMix&&se&&se.boardTextureProfile&&se.boardTextureMixProfile&&se.gtoTheory&&se.gtoTheory.boardTexture&&se.gtoTheory.boardTextureMix);
   });
 
   add('監査バッチが複数モードを回して違和感一覧を返す',function(){
@@ -10895,6 +10958,7 @@ function gtoTheorySnapshot(ev){
     mix:mix||'単一路線寄り',
     boardClass:board,
     boardTexture:ev.boardTextureProfile||null,
+    boardTextureMix:ev.boardTextureMixProfile||null,
     rangeUpdate:rangeUpdate,
     liveAdjustment:liveAdjustment,
     recommendation:recommendation,
@@ -11681,6 +11745,7 @@ function evaluationSnapshot(hr,an){
         liveCashRiverDecisionProfile:e.liveCashRiverDecisionProfile||null,
         liveCashRiverDecisionWeightNote:e.liveCashRiverDecisionWeightNote||'',
         boardTextureProfile:e.boardTextureProfile||null,
+        boardTextureMixProfile:e.boardTextureMixProfile||null,
         onePairProfile:e.onePairProfile||null,
         onePairWeightNote:e.onePairWeightNote||'',
         tournamentPhaseAxis:e.tournamentPhaseAxis||'',
@@ -12721,7 +12786,7 @@ document.addEventListener('click',function(e){
   }
 });
 
-window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,runFishTankAuditBatch,fishTankAuditBatchReportText,buildFishTankAuditRepairQueue,fishTankAuditRepairPlanText,auditIssuesForHand,playAuditGame,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,boardTextureProfile,boardTextureProfileText,liveCashRangeProfile,liveCashSpotProfile,liveCashSpotProfileText,liveCashSprProfile,liveCashSprProfileText,liveCashInitiativeProfile,liveCashInitiativeProfileText,liveCashReraisedPotProfile,liveCashReraisedPotProfileText,liveCashMultiwayProfile,liveCashMultiwayProfileText,liveCashRiverDecisionProfile,liveCashRiverDecisionProfileText,tournamentRangeProfile,tournamentFinalTableProfile,tournamentFinalTableStackRole,tournamentFinalTableCollisionProfile,tournamentFinalTableRangeProfile,tournamentFinalTableRangeProfileText,tournamentFinalTablePostflopProfile,tournamentFinalTablePostflopProfileText,tournamentFinalTableLearningPoint,tournamentFinalTableLearningPointText,tournamentHeadsUpProfile};
+window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,runFishTankAuditBatch,fishTankAuditBatchReportText,buildFishTankAuditRepairQueue,fishTankAuditRepairPlanText,auditIssuesForHand,playAuditGame,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,boardTextureProfile,boardTextureProfileText,boardTextureFrequencyAdjustment,liveCashRangeProfile,liveCashSpotProfile,liveCashSpotProfileText,liveCashSprProfile,liveCashSprProfileText,liveCashInitiativeProfile,liveCashInitiativeProfileText,liveCashReraisedPotProfile,liveCashReraisedPotProfileText,liveCashMultiwayProfile,liveCashMultiwayProfileText,liveCashRiverDecisionProfile,liveCashRiverDecisionProfileText,tournamentRangeProfile,tournamentFinalTableProfile,tournamentFinalTableStackRole,tournamentFinalTableCollisionProfile,tournamentFinalTableRangeProfile,tournamentFinalTableRangeProfileText,tournamentFinalTablePostflopProfile,tournamentFinalTablePostflopProfileText,tournamentFinalTableLearningPoint,tournamentFinalTableLearningPointText,tournamentHeadsUpProfile};
 // [Codex fix 2026-06-05] Query-gated regression output for browser verification without exposing debug UI during normal play.
 if(new URLSearchParams(location.search).has('codex_regression')){
   setTimeout(function(){
