@@ -3012,7 +3012,7 @@ function primaryLessonForEval(ev){
   if(!lesson){
     const axis=ev.evalAxis||'';
     if(ev.street==='preflop')lesson=make({
-      category:'preflop-entry',title:'プリフロップの入口を整理する',priority:36,
+      category:'preflop-entry',title:'プリフロップの入口を整理する',priority:(ev.quality==='bad'||(ev.deduction||0)>=8?36:16),
       summary:'このハンドの主題は、参加レンジとレイズ/コール/フォールドの形を整理することです。',
       reason:'プリフロップの小さなズレは、後のストリートで難しいワンペア判断に変わりやすいです。',
       recommendation:ev.suggest||'推奨: 参加するなら主導権とポジションを取りやすい形を優先します。'
@@ -4750,6 +4750,55 @@ function boardTextureSizePlan(pot,profile,role,opts){
   if(!pct)return null;
   pct=Math.max(25,Math.min(125,Math.round(pct)));
   return{pct,amt:Math.round(pot*pct/100),reason,source:'board_texture'};
+}
+
+// [Codex fix 2026-06-16] ターン/リバーの変化カードを、実際の評価重みに接続する。
+function boardTextureTransitionProfile(d,profile,role,opts){
+  if(!d||!profile||!profile.transition||profile.transition==='none')return null;
+  opts=opts||{};
+  role=role||{};
+  const lane=d.action==='check'?'check':d.action==='call'?'call':(d.action==='raise'||d.action==='bet'||d.action==='allin')?'bet':d.action;
+  const pot=Math.max(1,d.pot||1);
+  const basePot=d.toCall>0?Math.max(1,pot-(d.toCall||0)):pot;
+  const sizePct=lane==='call'?Math.round((d.toCall||d.amount||0)/basePot*100):Math.round((d.amount||0)/pot*100);
+  const isNut=!!(role.isNut||role.role==='nutted');
+  const isStrong=!!(isNut||role.role==='strong');
+  const onePair=!!(role.pairTier||role.role==='medium');
+  let verdict='normal',severity='normal',policy='',suggest='',axis='ボード変化カード';
+  const t=profile.transition;
+  if(t==='flush_complete_card'||t==='four_flush_card'){
+    axis='フラッシュ完成カード';
+    if(isNut){verdict='good';severity='good';policy='フラッシュ完成カードでもナッツ級ならバリューを残せます。ただし下のフラッシュやフルハウスに注意し、サイズは中サイズ中心です。';}
+    else if((onePair||role.role==='air')&&(lane==='bet'||lane==='call')&&sizePct>=45){verdict='bad';severity='bad';policy='フラッシュ完成カードでワンペア以下が大きく続けると、相手の継続レンジがフラッシュ/強いドロー寄りになります。';suggest='推奨: チェックまたはフォールド寄り。打つなら小さめ';}
+    else if(lane==='check'||lane==='fold'){verdict='good';severity='good';policy='フラッシュ完成カードでは、非ナッツのワンペアやエアを無理に膨らませない判断が自然です。';}
+  }else if(t==='board_pair'){
+    axis='ボードペア化';
+    if(isNut){verdict='good';severity='good';policy='ボードペア化でナッツ級なら、フルハウス/クアッズ側としてバリューを残せます。';}
+    else if((onePair||role.isVuln)&&(lane==='bet'||lane==='call')&&sizePct>=50){verdict='bad';severity='bad';policy='ボードペア化でフルハウスがレンジに入るため、非ナッツのワンペア/フラッシュ/ストレートの大きな継続は危険です。';suggest='推奨: 小さく扱うかチェック。大きいベットには慎重に';}
+    else if(lane==='check'||lane==='fold'){verdict='good';severity='good';policy='ボードペア化では、非ナッツをポット管理する判断が自然です。';}
+  }else if(t==='straight_complete_card'){
+    axis='ストレート完成カード';
+    if(isStrong){verdict='normal';severity='normal';policy='ストレート完成カードで強い完成役なら、相手のコールレンジを見て中〜大サイズを選びます。';}
+    else if((onePair||role.role==='air')&&(lane==='bet'||lane==='call')&&sizePct>=45){verdict='bad';severity='bad';policy='ストレート完成カードでワンペア以下が大きく続けると、完成レンジに寄った相手へ払いすぎます。';suggest='推奨: チェック/フォールド寄り';}
+    else if(lane==='check'||lane==='fold'){verdict='good';severity='good';policy='ストレート完成カードでは、完成していない手を無理に押さないのが自然です。';}
+  }else if(t==='overcard'){
+    axis='オーバーカード';
+    if(opts.isPfr&&(lane==='bet'||lane==='check')){verdict=lane==='bet'?'good':'normal';severity=lane==='bet'?'good':'normal';policy='オーバーカードはPFR側のレンジに当たりやすく、小〜中サイズの継続を作りやすいカードです。';}
+    else if(!opts.isPfr&&lane==='bet'&&sizePct>=50&&!isStrong){verdict='border';severity='border';policy='オーバーカードを受け側から大きく打つ時は、相手の強いトップペア/オーバーペアにぶつかりやすいです。';}
+  }else if(t==='texture_card'){
+    axis='動的変化カード';
+    if(((onePair&&!isStrong)||role.role==='air')&&(lane==='bet'||lane==='call')&&sizePct>=60){verdict='border';severity='border';policy='ボードが重く変化した時は、ワンペア以下の大サイズを少し控えます。';}
+  }else if(t==='blank'){
+    axis='ブランクカード';
+    policy='大きな構造変化が少ないカードなので、前ストリートのレンジ優位と手役を継続して見ます。';
+  }
+  if(!policy)return null;
+  return{street:d.street,transition:t,transitionLabel:profile.transitionLabel,axis,lane,sizePct,onePair,isNut,isStrong,verdict,severity,policy,suggest};
+}
+function boardTextureTransitionProfileText(p){
+  if(!p)return'';
+  const lane={check:'チェック',call:'コール',bet:'ベット/レイズ',fold:'フォールド'}[p.lane]||p.lane;
+  return p.axis+' / '+lane+' / '+p.verdict+'：'+p.policy;
 }
 
 function playerDraw(holeCards,comm){
@@ -6613,6 +6662,36 @@ function analyzeHand(hr){
     }
     return next-before;
   }
+  // [Codex fix 2026-06-16] Turn/Riverの変化カードを、ワンペア過信や非ナッツ大サイズの評価に反映する。
+  function applyBoardTextureTransitionWeight(ev){
+    const p=ev.boardTextureTransitionProfile||null;
+    if(!p)return 0;
+    const before=ev.deduction||0;
+    let next=before;
+    const notes=[];
+    if(p.severity==='bad'){
+      next=Math.max(next,p.lane==='call'?18:p.lane==='bet'?14:10);
+      ev.quality='bad';
+      notes.push(boardTextureTransitionProfileText(p));
+      if(!ev.suggest&&p.suggest)ev.suggest=p.suggest;
+    }else if(p.severity==='border'){
+      next=Math.max(next,6);
+      if(ev.quality==='good')ev.quality='ok';
+      notes.push(boardTextureTransitionProfileText(p));
+      if(!ev.suggest&&p.suggest)ev.suggest=p.suggest;
+    }else if(p.severity==='good'){
+      if(before>0&&(p.lane==='check'||p.lane==='fold'))next=Math.min(next,4);
+      if(ev.quality==='bad')ev.quality='ok';
+      notes.push(boardTextureTransitionProfileText(p));
+    }
+    next=Math.max(0,Math.min(45,next));
+    if(next!==before||notes.length){
+      ev.deduction=next;
+      ev.boardTextureTransitionWeightNote=notes.join('。');
+      ev.comment=(ev.comment||'')+' 【ボード変化】'+ev.boardTextureTransitionWeightNote;
+    }
+    return next-before;
+  }
   // [Codex fix 2026-06-05] Ring cash spots get their own weight layer so tournament phase logic does not carry the whole product.
   function applyLiveCashSpotWeight(ev){
     const p=ev.liveCashSpotProfile||null;
@@ -7837,6 +7916,9 @@ function analyzeHand(hr){
       ev.boardTextureProfile=opComm.length>=3?boardTextureProfile(opComm,d.street,prevComm):null;
       const opEval=human.holeCards&&human.holeCards.length>=2&&opComm.length>=3?HandEval.evaluate([...human.holeCards,...opComm]):null;
       const opRole=opEval?handRole(human.holeCards,opComm,opEval):null;
+      const pfRaisesForTexture=hr.decisions.filter(function(x){return x.street==='preflop'&&(x.action==='raise'||x.action==='allin');});
+      const lastPfrForTexture=pfRaisesForTexture[pfRaisesForTexture.length-1]||null;
+      ev.boardTextureTransitionProfile=ev.boardTextureProfile?boardTextureTransitionProfile(d,ev.boardTextureProfile,opRole,{isPfr:!!(lastPfrForTexture&&lastPfrForTexture.isHuman),nOpponents:streetOpps}):null;
       // [Codex fix 2026-06-12] トリップス/クアッズ等の強い完成役をワンペア監査へ流さない。
       // Aトリップスを「弱いワンペア」と説明するような誤分類をここで遮断する。
       ev.onePairProfile=opEval&&opEval.cat===1?onePairPressureProfile(hr,d,opRole,opComm.length>=3?boardTex(opComm):null,streetOpps):null;
@@ -7987,6 +8069,7 @@ function analyzeHand(hr){
     applyLiveCashRiverDecisionWeight(ev);
     applyHeadsUpRiverWeight(ev);
     applyFinalTablePostflopWeight(ev);
+    applyBoardTextureTransitionWeight(ev);
     composeNaturalReview(ev,d,hr);
     attachGtoTheorySnapshot(ev);
     ev.finalTableLearningPoint=tournamentFinalTableLearningPoint(ev);
@@ -10204,6 +10287,14 @@ function runFishTankRegressionTests(){
     return !!(dryPlan&&dryPlan.pct===33&&monoPlan&&monoPlan.pct===33&&connStrong&&connStrong.pct>=65&&connOnePair&&connOnePair.pct<=45);
   });
 
+  add('GTO変化カード: フラッシュ完成やボードペア化で非ナッツ大サイズを重く見る',function(){
+    const flush=boardTextureProfile(regressionCards(['Kh','7h','2c','4h']),'turn',regressionCards(['Kh','7h','2c']));
+    const pair=boardTextureProfile(regressionCards(['Qd','8c','2s','8h']),'turn',regressionCards(['Qd','8c','2s']));
+    const flushProf=boardTextureTransitionProfile(regressionDecision({street:'turn',action:'call',amount:70,pot:100,toCall:70}),flush,{role:'value',pairTier:'top_pair'},{isPfr:false});
+    const pairProf=boardTextureTransitionProfile(regressionDecision({street:'turn',action:'bet',amount:70,pot:100,toCall:0}),pair,{role:'value',isVuln:true},{isPfr:true});
+    return !!(flushProf&&flushProf.severity==='bad'&&flushProf.axis==='フラッシュ完成カード'&&pairProf&&pairProf.severity==='bad'&&pairProf.axis==='ボードペア化');
+  });
+
   add('GTOボード分類: 評価JSONとGTOスナップショットに保持する',function(){
     const hr=regressionHand({
       heroHole:['As','Qd'],
@@ -10232,6 +10323,24 @@ function runFishTankRegressionTests(){
     const snap=evaluationSnapshot(hr,an);
     const se=snap&&snap.evaluations&&snap.evaluations[0];
     return !!(ev&&ev.boardTextureSizeProfile&&ev.boardTextureSizeProfile.pct===33&&ev.gtoTheory&&ev.gtoTheory.boardTextureSize&&se&&se.boardTextureSizeProfile&&se.gtoTheory&&se.gtoTheory.boardTextureSize);
+  });
+
+  add('GTO変化カード: 実評価JSONに変化カード補正を保持する',function(){
+    const hr=regressionHand({
+      heroHole:['Ah','Kd'],
+      villainHole:['Qs','Qd'],
+      board:['Kh','7h','2c','4h'],
+      decisions:[
+        regressionDecision({street:'turn',action:'bet',amount:70,pot:100,toCall:0,facingRaise:false,position:'BTN',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:500}),
+        regressionDecision({street:'turn',action:'call',amount:70,pot:170,toCall:70,potOdds:70/240,facingRaise:true,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:500})
+      ],
+      pot:240
+    });
+    const an=analyzeHand(hr);
+    const ev=humanEval(an,function(e){return e.street==='turn'&&e.action==='call';});
+    const snap=evaluationSnapshot(hr,an);
+    const se=snap&&snap.evaluations&&snap.evaluations.find(function(e){return e.street==='turn'&&e.action==='call';});
+    return !!(ev&&ev.boardTextureTransitionProfile&&ev.boardTextureTransitionProfile.severity==='bad'&&(ev.deduction||0)>=18&&ev.gtoTheory&&ev.gtoTheory.boardTextureTransition&&se&&se.boardTextureTransitionProfile&&se.boardTextureTransitionWeightNote);
   });
 
   add('監査バッチが複数モードを回して違和感一覧を返す',function(){
@@ -11039,6 +11148,7 @@ function gtoTheorySnapshot(ev){
     boardTexture:ev.boardTextureProfile||null,
     boardTextureMix:ev.boardTextureMixProfile||null,
     boardTextureSize:ev.boardTextureSizeProfile||null,
+    boardTextureTransition:ev.boardTextureTransitionProfile||null,
     rangeUpdate:rangeUpdate,
     liveAdjustment:liveAdjustment,
     recommendation:recommendation,
@@ -11827,6 +11937,8 @@ function evaluationSnapshot(hr,an){
         boardTextureProfile:e.boardTextureProfile||null,
         boardTextureMixProfile:e.boardTextureMixProfile||null,
         boardTextureSizeProfile:e.boardTextureSizeProfile||null,
+        boardTextureTransitionProfile:e.boardTextureTransitionProfile||null,
+        boardTextureTransitionWeightNote:e.boardTextureTransitionWeightNote||'',
         onePairProfile:e.onePairProfile||null,
         onePairWeightNote:e.onePairWeightNote||'',
         tournamentPhaseAxis:e.tournamentPhaseAxis||'',
@@ -12867,7 +12979,7 @@ document.addEventListener('click',function(e){
   }
 });
 
-window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,runFishTankAuditBatch,fishTankAuditBatchReportText,buildFishTankAuditRepairQueue,fishTankAuditRepairPlanText,auditIssuesForHand,playAuditGame,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,boardTextureProfile,boardTextureProfileText,boardTextureFrequencyAdjustment,boardTextureSizePlan,liveCashRangeProfile,liveCashSpotProfile,liveCashSpotProfileText,liveCashSprProfile,liveCashSprProfileText,liveCashInitiativeProfile,liveCashInitiativeProfileText,liveCashReraisedPotProfile,liveCashReraisedPotProfileText,liveCashMultiwayProfile,liveCashMultiwayProfileText,liveCashRiverDecisionProfile,liveCashRiverDecisionProfileText,tournamentRangeProfile,tournamentFinalTableProfile,tournamentFinalTableStackRole,tournamentFinalTableCollisionProfile,tournamentFinalTableRangeProfile,tournamentFinalTableRangeProfileText,tournamentFinalTablePostflopProfile,tournamentFinalTablePostflopProfileText,tournamentFinalTableLearningPoint,tournamentFinalTableLearningPointText,tournamentHeadsUpProfile};
+window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,runFishTankAuditBatch,fishTankAuditBatchReportText,buildFishTankAuditRepairQueue,fishTankAuditRepairPlanText,auditIssuesForHand,playAuditGame,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,boardTextureProfile,boardTextureProfileText,boardTextureFrequencyAdjustment,boardTextureSizePlan,boardTextureTransitionProfile,boardTextureTransitionProfileText,liveCashRangeProfile,liveCashSpotProfile,liveCashSpotProfileText,liveCashSprProfile,liveCashSprProfileText,liveCashInitiativeProfile,liveCashInitiativeProfileText,liveCashReraisedPotProfile,liveCashReraisedPotProfileText,liveCashMultiwayProfile,liveCashMultiwayProfileText,liveCashRiverDecisionProfile,liveCashRiverDecisionProfileText,tournamentRangeProfile,tournamentFinalTableProfile,tournamentFinalTableStackRole,tournamentFinalTableCollisionProfile,tournamentFinalTableRangeProfile,tournamentFinalTableRangeProfileText,tournamentFinalTablePostflopProfile,tournamentFinalTablePostflopProfileText,tournamentFinalTableLearningPoint,tournamentFinalTableLearningPointText,tournamentHeadsUpProfile};
 // [Codex fix 2026-06-05] Query-gated regression output for browser verification without exposing debug UI during normal play.
 if(new URLSearchParams(location.search).has('codex_regression')){
   setTimeout(function(){
