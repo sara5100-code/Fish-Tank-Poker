@@ -10761,6 +10761,31 @@ function runFishTankRegressionTests(){
     return /完成寄り\/動的ボード/.test(txt)&&/フラッシュ・ストレート・フルハウス/.test(txt)&&/ワンペア/.test(txt);
   });
 
+  add('コーチ文: プリフロップ非BBフラットを短く説明する',function(){
+    const txt=coachReviewText({
+      street:'preflop',
+      action:'call',
+      quality:'bad',
+      suggest:'推奨: フォールド',
+      strategyMix:'Fold 75-100% / Call 0-25%',
+      comment:'【初心者リーク】KJoのCOコールドコール。参照レンジでは Fold 75-100% / Call 0-25%。非BBのコールはポジション・後続プレイヤー・ドミネートリスクの影響が大きい。',
+      liveCashSpotProfile:{label:'IP flat',lane:'flat',policy:'参照レンジ: IP flat, out GTO基準はFold 75-100% / Call 0-25%',risk:'OOP・ドミネートリスク'}
+    });
+    return /フォールド寄り/.test(txt)&&/非BBでレイズにコール/.test(txt)&&/頻度の目安/.test(txt)&&!/IP flat|GTO基準|out/.test(txt)&&txt.length<260;
+  });
+
+  add('コーチ文: 正しいフォールドを重複させない',function(){
+    const txt=coachReviewText({
+      street:'preflop',
+      action:'fold',
+      quality:'good',
+      comment:'正解。96oのCOレイズへのフォールド。コールレンジ外の弱いハンドです。',
+      liveCashSpotProfile:{label:'対レイズフォールド',lane:'vsRaiseFold',policy:'コールレンジ外です。',risk:'逆インプライドオッズ'}
+    });
+    const count=(txt.match(/フォールド/g)||[]).length;
+    return /良い判断/.test(txt)&&count<=2&&!/フォールド継続|フォールドはこのまま/.test(txt);
+  });
+
   const results=tests.map(function(t){
     try{return{name:t.name,pass:!!t.fn()};}
     catch(e){return{name:t.name,pass:false,error:e&&e.message?e.message:String(e)};}
@@ -11621,6 +11646,82 @@ function extractFoldContext(comment){
   if(m3)return hand+'の'+m3[1];
   return hand+'のフォールド';
 }
+// [Codex fix 2026-06-17] プリフロップのコーチコメントは詳細メタをそのまま出さず、結論・理由・目安頻度に整理する。
+function readableStrategyMixText(ev){
+  let mix=String(ev&&ev.strategyMix||'').trim();
+  if(!mix){
+    const src=String(ev&&ev.comment||'');
+    const m=src.match(/(?:Fold|Call|Open|Raise|3bet|3BET|4bet|4BET)[^。]{0,90}%/);
+    if(m)mix=m[0];
+  }
+  if(!mix||/[縺繝蛻]/.test(mix))return'';
+  mix=mix
+    .replace(/\bFold\b/g,'フォールド')
+    .replace(/\bCall\/defend\b/g,'コール/ディフェンス')
+    .replace(/\bCall\b/g,'コール')
+    .replace(/\bOpen\b/g,'オープン')
+    .replace(/\bRaise\b/g,'レイズ')
+    .replace(/\b3bet\b/gi,'3ベット')
+    .replace(/\b4bet\b/gi,'4ベット')
+    .replace(/\s*\/\s*/g,' / ');
+  return '頻度の目安は '+mix+' です。';
+}
+function cleanPreflopRecText(rec){
+  rec=naturalRecommendationText(rec||'');
+  if(!rec||/[縺繝蛻]/.test(rec))return'';
+  rec=rec.replace(/^推奨[:：]\s*/,'').trim();
+  return rec;
+}
+function preflopCoachSummaryText(ev,action,rec){
+  if(!ev||ev.street!=='preflop'||!ev.liveCashSpotProfile)return'';
+  const p=ev.liveCashSpotProfile;
+  const label=String(p.label||'');
+  const lane=String(p.lane||'');
+  const comment=String(ev.comment||'');
+  const isBB=lane==='bbDefend'||/^BB\b|BB defend/.test(label)||(/BBディフェンス/.test(comment)&&!/非BB/.test(comment));
+  const isFlat=lane==='flat'||/flat/i.test(label)||/コールドコール|非BB|フラット/.test(comment);
+  const isOpen=lane==='open'||/open/i.test(label);
+  const isOpenFold=lane==='openFold';
+  const isVsRaiseFold=lane==='vsRaiseFold';
+  const isLimp=/limp|Limp|リンプ/.test(lane+' '+label+' '+comment);
+  const recText=cleanPreflopRecText(rec);
+  const mixText=readableStrategyMixText(ev);
+  let head='';
+  let reason='';
+  let advice='';
+  if(ev.quality==='good'&&ev.action==='fold'){
+    head='このフォールドは良い判断です。';
+    if(isOpenFold)reason='今のポジションから無理に参加すると、後ろに強いハンドで入られたり、弱いワンペアで難しい判断になりやすいです。';
+    else if(isVsRaiseFold||isFlat)reason='レイズに対してコールするには、ポジション・ドミネート耐性・実現率が足りません。見た目より利益にしにくいハンドです。';
+    else reason='レンジ外の弱いハンドで無理に参加しないことが、後の難しい判断を減らします。';
+    advice='このまま降りて問題ありません。';
+  }else if(ev.quality==='bad'){
+    if(isBB){
+      head='BBでも少し守りすぎです。';
+      reason='フロップ前のBBディフェンスです。BBはポットオッズが良いので広く守れますが、UTGオープン相手のように相手レンジが強い時は防衛目安をかなり絞ります。OOPで実現率を落としやすく、弱いトップペアやキッカー負けで払いすぎる形になりやすいです。';
+    }else if(isFlat){
+      head='ここはフォールド寄りです。';
+      reason='非BBでレイズにコールすると、後ろのプレイヤー・ポジション・ドミネートの影響が大きく、オフスートブロードウェイはトップペアでも上位キッカーに負けやすいです。';
+    }else if(isLimp){
+      head='オープンリンプは見直したいです。';
+      reason='参加するなら主導権を取るレイズか、最初からフォールドに整理したい場面です。リンプすると後ろからアイソレイズされ、悪いポジションで難しいポットになりやすいです。';
+    }else if(isOpen){
+      head='この参加レンジは広すぎます。';
+      reason='早いポジションほど後ろに強いハンドが残るため、ハンドの見た目より実現率とドミネートリスクを優先します。';
+    }else{
+      head='ここは見直したい判断です。';
+      reason='フロップ前は、手札の強さだけでなく、ポジション・後続人数・相手レンジに対する実現率まで含めて参加可否を決めます。';
+    }
+    advice=recText?('推奨は '+recText+' です。'):'まずはフォールド寄りに整理してください。';
+  }else{
+    head='ここは混合寄りの場面です。';
+    if(isBB)reason='BBは価格が良いので守る候補は増えますが、OOPで実現率が下がるぶん、相手のポジションとサイズで頻度を調整します。';
+    else if(isFlat)reason='コールも少し混ざりますが、非BBのフラットはドミネートと後続スクイーズの影響を受けます。相手が広い時だけ採用し、標準はフォールドか3ベット寄りに整理します。';
+    else reason='GTOでは頻度が割れることがあります。実戦では相手の広さ、後ろのプレイヤー、サイズを見て寄せます。';
+    advice=recText?('今回の目安は '+recText+' です。'):'相手傾向で頻度を寄せる場面です。';
+  }
+  return [head,reason,mixText,advice].filter(Boolean).join(' ').replace(/\s+/g,' ').trim();
+}
 function recommendationClose(action,quality,rec,hasSuggest){
   rec=naturalRecommendationText(rec);
   if(quality==='bad'){
@@ -11754,6 +11855,8 @@ function coachReviewText(ev){
     else rec='相手傾向とサイズを見て使い分けてください';
   }
   rec=naturalRecommendationText(rec);
+  const preflopCompact=preflopCoachSummaryText(ev,action,rec);
+  if(preflopCompact)return preflopCompact;
   const close=recommendationClose(action,ev.quality,rec,!!ev.suggest);
   const mixedLineExtra=mixedLineExplanationText(ev);
   const postflopExtra=postflopCoachExtraText(ev);
