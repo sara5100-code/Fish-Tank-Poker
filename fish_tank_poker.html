@@ -2111,7 +2111,7 @@ function liveCashSpotProfile(hr,d,holeCards,role,tex,nOpponents,lineContext){
   const allPreRaises=pref.filter(function(x){return x.action==='raise'||x.action==='allin';});
   const is3BetPot=allPreRaises.length>=2;
   const lastPfr=raises[raises.length-1]||null;
-  const humanWasLastPfr=!!(lastPfr&&lastPfr.isHuman);
+  const humanWasLastPfr=humanWasLastPreflopAggressor(hr);
   const heroOpenLimped=pref.some(function(x){return x.isHuman&&x.action==='call'&&!x.facingRaise&&(x.toCall||0)>0&&x.position!=='SB'&&x.position!=='BB';});
   const villainIsoAfterHeroLimp=pref.some(function(x){return !x.isHuman&&(x.action==='raise'||x.action==='allin')&&!x.facingRaise;});
   const limpIso=heroOpenLimped&&villainIsoAfterHeroLimp;
@@ -2340,13 +2340,30 @@ function liveCashSprProfileText(profile){
   if(!profile)return'';
   return 'SPR '+profile.spr+' / '+profile.verdict+'：'+profile.policy+' '+profile.risk;
 }
+// [Codex fix 2026-06-17] フロップトレーニングではプリフロップ実履歴が省略されるため、pfStoryから最後のプリフロップ主導権を補完する。
+function humanWasLastPreflopAggressor(hr){
+  if(!hr)return false;
+  const pref=(hr.decisions||[]).filter(function(x){return x.street==='preflop';});
+  const lastPfr=[...pref].reverse().find(function(x){return x.action==='raise'||x.action==='allin';})||null;
+  if(lastPfr)return !!lastPfr.isHuman;
+  const story=String(hr.pfStory&&hr.pfStory.narrative||'');
+  if(!story)return false;
+  const parts=story.split(/→/).map(function(x){return x.trim();});
+  let lastAgg='';
+  parts.forEach(function(part){
+    if(/オープン|レイズ|3BET|4BET|5BET|オールイン|all-?in|raise|open/i.test(part)&&!/コール|call/i.test(part)){
+      lastAgg=part;
+    }
+  });
+  return !!(lastAgg&&/あなた/.test(lastAgg));
+}
 // [Codex fix 2026-06-05] Initiative and position are a separate live-cash axis from raw equity or stack depth.
 function liveCashInitiativeProfile(hr,d,role,tex,nOpponents){
   if(!hr||!d||hr.tournamentContext&&hr.tournamentContext.enabled)return null;
   if(d.street==='preflop')return null;
   const pref=(hr.decisions||[]).filter(function(x){return x.street==='preflop';});
   const lastPfr=[...pref].reverse().find(function(x){return x.action==='raise'||x.action==='allin';})||null;
-  const humanWasPfr=!!(lastPfr&&lastPfr.isHuman);
+  const humanWasPfr=humanWasLastPreflopAggressor(hr);
   const posState=postflopPositionState(hr,d);
   const isOOP=!!(posState&&posState.isOOP);
   const isIP=!!(posState&&posState.isIP);
@@ -5861,7 +5878,7 @@ function evalCheck(d,hr,human,nOpponents){
   const is3BetPotCk=_pfRaisesCk.length>=2;
   const humanWas3BetterCk=is3BetPotCk&&hr.decisions.some(d2=>d2.street==='preflop'&&d2.isHuman&&(d2.action==='raise'||d2.action==='allin')&&d2.facingRaise);
   const lastPFAggCk=_pfRaisesCk[_pfRaisesCk.length-1]||null;
-  const humanWasLastPFAggCk=!!(lastPFAggCk&&lastPFAggCk.isHuman);
+  const humanWasLastPFAggCk=humanWasLastPreflopAggressor(hr);
   // ブロッカー検出
   const _blkCk=(function(){
     const _sCnt={};comm.forEach(function(c){_sCnt[c.suit]=(_sCnt[c.suit]||0)+1;});
@@ -6220,7 +6237,7 @@ function evalBet(d,hr,human,nOpponents){
   // ---- 3-betポット検出 ----
   const _pfRaisesB=hr.decisions.filter(d2=>d2.street==='preflop'&&(d2.action==='raise'||d2.action==='allin'));
   const lastPfrB=_pfRaisesB[_pfRaisesB.length-1]||null;
-  const humanWasPfrB=!!(lastPfrB&&lastPfrB.isHuman);
+  const humanWasPfrB=humanWasLastPreflopAggressor(hr);
   const is3BetPotB=_pfRaisesB.length>=2;
   const humanWas3BetterB=is3BetPotB&&hr.decisions.some(d2=>d2.street==='preflop'&&d2.isHuman&&(d2.action==='raise'||d2.action==='allin')&&d2.facingRaise);
   // ---- ブロッカー検出 ----
@@ -8188,8 +8205,9 @@ function analyzeHand(hr){
       const opRole=opEval?handRole(human.holeCards,opComm,opEval):null;
       const pfRaisesForTexture=hr.decisions.filter(function(x){return x.street==='preflop'&&(x.action==='raise'||x.action==='allin');});
       const lastPfrForTexture=pfRaisesForTexture[pfRaisesForTexture.length-1]||null;
-      ev.boardTextureTransitionProfile=ev.boardTextureProfile?boardTextureTransitionProfile(d,ev.boardTextureProfile,opRole,{isPfr:!!(lastPfrForTexture&&lastPfrForTexture.isHuman),nOpponents:streetOpps}):null;
-      ev.rangeNutAdvantageProfile=ev.boardTextureProfile?rangeNutAdvantageProfile(hr,d,ev.boardTextureProfile,opRole,{isPfr:!!(lastPfrForTexture&&lastPfrForTexture.isHuman),nOpponents:streetOpps}):null;
+      const humanWasTexturePfr=humanWasLastPreflopAggressor(hr);
+      ev.boardTextureTransitionProfile=ev.boardTextureProfile?boardTextureTransitionProfile(d,ev.boardTextureProfile,opRole,{isPfr:humanWasTexturePfr,nOpponents:streetOpps}):null;
+      ev.rangeNutAdvantageProfile=ev.boardTextureProfile?rangeNutAdvantageProfile(hr,d,ev.boardTextureProfile,opRole,{isPfr:humanWasTexturePfr,nOpponents:streetOpps}):null;
       if(ev.rangeNutAdvantageProfile){
         ev.rangeAdv=ev.rangeNutAdvantageProfile.heroRangeAdv||ev.rangeAdv;
         ev.nutAdv=ev.rangeNutAdvantageProfile.heroNutAdv||ev.nutAdv;
@@ -10122,6 +10140,24 @@ function runFishTankRegressionTests(){
     const an=analyzeHand(initiativePfrCbetHand());
     const ev=humanEval(an,function(e){return e.street==='flop'&&(e.action==='raise'||e.action==='bet');});
     return !!(ev&&ev.liveCashInitiativeProfile&&ev.liveCashInitiativeProfile.lane==='pfrCbet'&&ev.liveCashInitiativeProfile.severity==='good'&&ev.quality!=='bad');
+  });
+
+  add('リング主導権: pfStoryだけのOOP PFR CBをドンク扱いしない',function(){
+    const hr=regressionHand({
+      heroHole:['Ks','Ac'],
+      villainHole:['Td','Ts'],
+      board:['Ad','6c','7h','2c','Kd'],
+      pfStory:{participants:[0,1],narrative:'MP(あなた) 18T オープン → BTN(take) 18T コール | ポット 43T'},
+      decisions:[
+        regressionDecision({street:'flop',action:'bet',amount:14,pot:43,toCall:0,facingRaise:false,position:'MP',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:500}),
+        regressionDecision({street:'flop',action:'call',amount:14,pot:57,toCall:14,facingRaise:true,position:'BTN',playerName:'take',isHuman:false,playerIdx:1,playerChipsBefore:500})
+      ],
+      pot:57
+    });
+    const an=analyzeHand(hr);
+    const ev=humanEval(an,function(e){return e.street==='flop'&&(e.action==='raise'||e.action==='bet');});
+    const txt=(ev&&ev.coachComment)||coachReviewText(ev);
+    return !!(ev&&ev.liveCashInitiativeProfile&&ev.liveCashInitiativeProfile.lane==='pfrCbet'&&ev.liveCashInitiativeProfile.severity==='good'&&ev.quality!=='bad'&&!/ドンク|OOPリード|主導権がない/.test(txt));
   });
 
   add('リング主導権: 評価JSONにliveCashInitiativeProfileを保持する',function(){
