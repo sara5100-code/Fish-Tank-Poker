@@ -2679,9 +2679,16 @@ function liveCashRiverDecisionProfile(hr,d,role,tex,nOpponents){
   }else if(betLike&&strongMade){
     lane='riverValueTarget';
     const lowerTwoPair=role.madeClass==='two_pair'&&role.valueTier==='lower_two_pair';
-    const over=nonNutValue&&sizePct>=100||lowerTwoPair&&sizePct>=75;
+    const weakFlush=role.madeClass==='flush'&&(role.weakFlush||role.flushHighRank<=9);
+    const pairedWeakFlush=weakFlush&&tex&&tex.paired;
+    const over=nonNutValue&&sizePct>=100||lowerTwoPair&&sizePct>=75||pairedWeakFlush&&sizePct>=45;
     severity=over?'border':'good';
-    if(lowerTwoPair){
+    if(pairedWeakFlush){
+      verdict=over?'ペアボードの弱フラッシュは大きく取り切らない':'ペアボードの弱フラッシュは薄く扱う';
+      policy='弱いフラッシュは完成役ですが、ペアボードではフルハウス・トリップス・上位フラッシュに当たりやすく、強い完成役として取り切る手ではありません。';
+      risk=sizePct+'%pot / 弱フラッシュ / ペアボード / 相手圧力'+pressure+'回';
+      suggest=over?'推奨: 25〜40%potの小さめ薄バリュー、またはチェック。レイズにはかなり素直にフォールド':'推奨: 小さめ薄バリュー。レイズにはかなり慎重';
+    }else if(lowerTwoPair){
       verdict=over?'下のツーペアの大きめバリュー注意':'下のツーペアの実戦的バリュー';
       policy='下のツーペアはバリューを取れる手ですが、ナッツ級ではありません。相手がトップペアを降りないタイプなら打てますが、上位ツーペアや完成役に当たる時は大きく払いすぎないことが大事です。';
       risk=sizePct+'%pot / 下のツーペア / 相手圧力'+pressure+'回';
@@ -4791,6 +4798,7 @@ function boardTextureTransitionProfile(d,profile,role,opts){
   }else if(t==='board_pair'){
     axis='ボードペア化';
     if(isNut){verdict='good';severity='good';policy='ボードペア化でナッツ級なら、フルハウス/クアッズ側としてバリューを残せます。';}
+    else if(role&&role.madeClass==='flush'&&(role.weakFlush||role.flushHighRank<=9)&&(lane==='bet'||lane==='call')&&sizePct>=45){verdict='border';severity='border';policy='ボードペア上の弱フラッシュは完成役ですが、フルハウス・トリップス・上位フラッシュに当たりやすいため、小さめに扱います。';suggest='推奨: 25〜40%potかチェック。大きいレイズには慎重にフォールド';}
     else if((onePair||role.isVuln)&&(lane==='bet'||lane==='call')&&sizePct>=50){verdict='bad';severity='bad';policy='ボードペア化でフルハウスがレンジに入るため、非ナッツのワンペア/フラッシュ/ストレートの大きな継続は危険です。';suggest='推奨: 小さく扱うかチェック。大きいベットには慎重に';}
     else if(lane==='check'||lane==='fold'){verdict='good';severity='good';policy='ボードペア化では、非ナッツをポット管理する判断が自然です。';}
   }else if(t==='straight_complete_card'){
@@ -5254,9 +5262,10 @@ function handRole(holeCards,comm,evalResult){
     const isNutFlush=hi===14&&holeCards.some(c=>RANK_VAL[c.rank]===14&&comm.some(b=>b.suit===c.suit));
     // [Codex fix 2026-05-26] ペアボードでは「ナッツフラッシュ」という表現を避け、Aハイフラッシュとして格下げ表示する。
     if(isNutFlush&&tex.paired){
-      return{role:'strong',note:'Aハイフラッシュ。ペアボードのため全体ナッツではなく、フルハウス/クアッズに負けます。大きなレイズやオールインには相手レンジを慎重に見ましょう。',isNut:false,isVuln:true,nutFlush:true,riskFlags:{pairedBoard:true,strongerFullHouseQuads:true}};
+      return{role:'strong',note:'Aハイフラッシュ。ペアボードのため全体ナッツではなく、フルハウス/クアッズに負けます。大きなレイズやオールインには相手レンジを慎重に見ましょう。',isNut:false,isVuln:true,nutFlush:true,madeClass:'flush',flushHighRank:hi,weakFlush:false,riskFlags:{pairedBoard:true,strongerFullHouseQuads:true}};
     }
-    return{role:isNutFlush?'nutted':'strong',note:'フラッシュ'+(isNutFlush?' (ナッツ)。積極的にバリューを取りましょう。':'（弱め）。大きなレイズには慎重に。'),isNut:isNutFlush,isVuln:tex.paired,nutFlush:isNutFlush};
+    const weakFlush=hi<=9;
+    return{role:isNutFlush?'nutted':'strong',note:(weakFlush?'弱いフラッシュ':'フラッシュ')+(isNutFlush?' (ナッツ)。積極的にバリューを取りましょう。':weakFlush?'。下のハンドから大きく取り切る手ではなく、大きなレイズには慎重に。':'（弱め）。大きなレイズには慎重に。'),isNut:isNutFlush,isVuln:tex.paired||weakFlush,nutFlush:isNutFlush,madeClass:'flush',flushHighRank:hi,weakFlush};
   }
   if(cat===6){
     // フルハウスのナッツ判定: トリップス部(co[0].v)が全7枚中の最高ランク = 上位FHなし
@@ -7891,7 +7900,10 @@ function analyzeHand(hr){
               ev.suggest='推奨: フォールド';
               ev.strategyMix=flatChart.mix;
             }else if(hRank>=80){
-              ev.quality='ok';ev.comment=hd+'（'+rankStr+'）のBBコール。連結度・プレイアビリティ考慮でボーダーライン。参照レンジでは '+flatChart.mix+'。マルチウェイほど価値上昇。'+mwBBNote;ev.strategyMix=flatChart.mix;
+              ev.quality='ok';ev.deduction=7;score-=7;
+              ev.comment=hd+'（'+rankStr+'）のBBコール。連結度・プレイアビリティ考慮で完全な大ミスではありませんが、参照レンジでは '+flatChart.mix+'。ヘッズアップのOOPでは実現率が低く、ライブ$2/$5ではフォールド寄りに整理したい下限ハンドです。'+mwBBNote;
+              ev.suggest='推奨: フォールド寄り。BTNが広く小さく開ける時だけ一部コール';
+              ev.strategyMix=flatChart.mix;
             }else{
               ev.quality='ok';ev.comment=hd+'（'+rankStr+'）のBBコール。ボーダーラインのディフェンスです。参照レンジでは '+flatChart.mix+'。'+mwBBNote;ev.strategyMix=flatChart.mix;
             }
@@ -10465,6 +10477,55 @@ function runFishTankRegressionTests(){
     const ev=humanEval(analyzeHand(hr),function(e){return e.street==='preflop'&&e.action==='call';});
     const txt=coachReviewText(ev);
     return !!(ev&&ev.liveCashSpotProfile&&ev.liveCashSpotProfile.lane==='bbDefend'&&/UTGオープン相手|防衛目安|上位\d+%/.test(txt)&&/フロップ前/.test(txt)&&!/プリフロップ/.test(txt));
+  });
+
+  add('リング参加レンジ: 42sのBB下限コールをS評価にしない',function(){
+    const players=[
+      regressionPlayer('あなた',true,['4c','2c'],{chips:500}),
+      regressionPlayer('btn',false,['Ah','Kd'],{chips:500})
+    ];
+    const hr=regressionHand({
+      players:players,
+      heroHole:['4c','2c'],
+      villainHole:['Ah','Kd'],
+      board:[],
+      decisions:[
+        regressionDecision({street:'preflop',action:'raise',amount:14,pot:7,toCall:5,facingRaise:false,position:'BTN',playerName:'btn',isHuman:false,playerIdx:1,playerChipsBefore:500,pfRaiseCountBefore:0,pfFacingBetLevel:0,pfActionBetLevel:2}),
+        regressionDecision({street:'preflop',action:'call',amount:9,pot:21,toCall:9,potOdds:9/30,facingRaise:true,position:'BB',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:495,pfRaiseCountBefore:1,pfFacingBetLevel:2,pfActionBetLevel:2})
+      ],
+      pot:30
+    });
+    const an=analyzeHand(hr);
+    const ev=humanEval(an,function(e){return e.street==='preflop'&&e.action==='call';});
+    const rangeScore=an.liveCashScores&&an.liveCashScores.find(function(s){return s.label==='参加レンジ';});
+    return !!(ev&&ev.deduction>=6&&ev.quality==='ok'&&rangeScore&&rangeScore.grade!=='S'&&/フォールド寄り/.test((ev.suggest||'')+coachReviewText(ev)));
+  });
+
+  add('リバー評価: ペアボードの4ハイフラッシュを強い取り切り扱いしない',function(){
+    const players=[
+      regressionPlayer('あなた',true,['4c','2c'],{chips:500}),
+      regressionPlayer('btn',false,['Ah','Kd'],{chips:500})
+    ];
+    const hr=regressionHand({
+      players:players,
+      heroHole:['4c','2c'],
+      villainHole:['Ah','Kd'],
+      board:['Js','8c','Qh','6c','Jc'],
+      decisions:[
+        regressionDecision({street:'preflop',action:'raise',amount:14,pot:7,toCall:5,facingRaise:false,position:'BTN',playerName:'btn',isHuman:false,playerIdx:1,playerChipsBefore:500}),
+        regressionDecision({street:'preflop',action:'call',amount:9,pot:21,toCall:9,facingRaise:true,position:'BB',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:495}),
+        regressionDecision({street:'flop',action:'check',amount:0,pot:30,toCall:0,facingRaise:false,position:'BB',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:486}),
+        regressionDecision({street:'flop',action:'check',amount:0,pot:30,toCall:0,facingRaise:false,position:'BTN',playerName:'btn',isHuman:false,playerIdx:1,playerChipsBefore:486}),
+        regressionDecision({street:'turn',action:'check',amount:0,pot:30,toCall:0,facingRaise:false,position:'BB',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:486}),
+        regressionDecision({street:'turn',action:'check',amount:0,pot:30,toCall:0,facingRaise:false,position:'BTN',playerName:'btn',isHuman:false,playerIdx:1,playerChipsBefore:486}),
+        regressionDecision({street:'river',action:'bet',amount:15,pot:30,toCall:0,facingRaise:false,position:'BB',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:486})
+      ],
+      pot:45
+    });
+    const an=analyzeHand(hr);
+    const ev=humanEval(an,function(e){return e.street==='river'&&(e.action==='bet'||e.action==='raise');});
+    const txt=coachReviewText(ev);
+    return !!(ev&&ev.liveCashRiverDecisionProfile&&/弱フラッシュ/.test(ev.liveCashRiverDecisionProfile.verdict+ev.liveCashRiverDecisionProfile.policy+txt)&&/25〜40%pot|小さめ/.test(ev.liveCashRiverDecisionProfile.suggest+txt)&&!/強い完成役はリバーで取り切ります/.test(txt));
   });
 
   add('レビューUI: 詳細データを折りたたみ表示しない',function(){
