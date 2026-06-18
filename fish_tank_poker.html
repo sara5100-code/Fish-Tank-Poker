@@ -10562,6 +10562,21 @@ function runFishTankRegressionTests(){
     return txt.length<360&&!/「完成寄り\/動的ボード」|レンジ更新は|GTO基準/.test(txt)&&/フォールド|問題ありません/.test(txt);
   });
 
+  add('コーチ文: 複数ラインの比率は短文化しても残す',function(){
+    const txt=coachReviewText({
+      street:'flop',
+      action:'check',
+      quality:'ok',
+      isMix:true,
+      freqPct:57,
+      comment:'チェック。',
+      suggest:'ベットするならポットの33% (17T)',
+      boardTextureProfile:{dynamic:true,straightThreat:true},
+      onePairProfile:{policy:'弱めのワンペアはポット管理が中心です。',risk:'SPR約8 / 完成寄りボード / 圧力0段階'}
+    });
+    return /チェック 57% \/ ベット 43%/.test(txt)&&txt.length<420;
+  });
+
   add('トリップス監査: Aトリップスを弱いワンペア扱いしない',function(){
     const hr=regressionHand({
       heroHole:['As','Kd'],
@@ -11556,7 +11571,7 @@ function mixedLineExplanationText(ev){
   const rec=naturalRecommendationText(ev.suggest||'');
   const mix=inferredStrategyMixText(ev);
   if(ev.action==='check'){
-    if(rec)return'この局面では、チェックでポットを抑えてショーダウン価値を残す考え方と、'+rec+'で弱いペアやドローから先に取る考え方があります。';
+    if(rec)return'この局面では、チェックでポットを抑えてショーダウン価値を残す考え方と、'+rec+'で弱いペアやドローから先に取る考え方があります。'+(mix?'頻度感は'+mix+'です。':'');
     if(mix)return'この局面では、チェックで実現率を取りに行く考え方と、ベットで先にフォールドエクイティを取る考え方があります。頻度感は'+mix+'です。';
     return'この局面では、チェックで次のカードを見る考え方と、小さくベットして主導権を取りに行く考え方があります。';
   }
@@ -11565,7 +11580,7 @@ function mixedLineExplanationText(ev){
     return'この局面では、コールで受ける考え方と、フォールドで損失を抑える考え方があります。相手のブラフ頻度とサイズで寄せます。';
   }
   if(ev.action==='raise'||ev.action==='bet'||ev.action==='allin'){
-    if(rec)return'この局面では、今回のように打ってバリュー/プロテクションを取る考え方と、チェックでポットを抑える考え方があります。サイズ感は'+rec+'です。';
+    if(rec)return'この局面では、今回のように打ってバリュー/プロテクションを取る考え方と、チェックでポットを抑える考え方があります。サイズ感は'+rec+'です。'+(mix?'頻度感は'+mix+'です。':'');
     if(mix)return'この局面では、ベットで取りに行く考え方と、チェックでショーダウン価値を守る考え方があります。頻度感は'+mix+'です。';
     return'この局面では、打って相手の弱いレンジから取る考え方と、チェックでポットを管理する考え方があります。';
   }
@@ -11905,9 +11920,11 @@ function polishCoachReviewText(txt,ev){
   let visible=out;
   if(ev&&ev.street!=='preflop'){
     const mustKeep=/推奨|候補|頻度|サイズ|フォールド|コール|チェック|ベット|オールイン|問題ありません|見直し|許容範囲/;
+    const ratioKeep=/頻度|ベット\s*\d+%|チェック\s*\d+%|コール\s*\d+%|フォールド\s*\d+%|レイズ\s*\d+%|Raise\s*\d+%|Open\s*\d+%/;
     const first=visible.slice(0,3);
-    const tail=visible.slice(3).filter(function(s){return mustKeep.test(s);}).slice(0,1);
-    visible=first.concat(tail);
+    const ratio=visible.slice(3).find(function(s){return ratioKeep.test(s);});
+    const tail=visible.slice(3).filter(function(s){return s!==ratio&&mustKeep.test(s);}).slice(0,1);
+    visible=first.concat(ratio?[ratio]:[],tail);
   }
   let joined=visible.join('');
   if(ev&&ev.street==='river'){
