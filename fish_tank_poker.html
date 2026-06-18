@@ -2719,6 +2719,47 @@ function liveCashRiverLineProfile(before,d){
   }
   return{label,density,callTighten,valueTighten,bluffTighten,note};
 }
+function liveCashRiverRaiseResponseProfile(role,action,sizePct,completed,line,blocker,multiway){
+  role=role||{};
+  line=line||{};
+  blocker=blocker||{};
+  const onePair=!!(role.pairTier||/ワンペア|トップペア|中・低ペア|ミドルペア|オーバーペア/.test(role.note||''));
+  const weakPair=!!(onePair&&(['board_pair','under_pair','bottom_pair','low_pair','second_pair'].includes(role.pairTier)||role.role==='medium'));
+  const strongOnePair=!!(onePair&&['top_pair','overpair'].includes(role.pairTier||'')&&(role.role==='strong'||role.role==='value'));
+  const lowerTwoPair=role.madeClass==='two_pair'&&role.valueTier!=='top_two_pair';
+  const topTwo=role.madeClass==='two_pair'&&role.valueTier==='top_two_pair';
+  const straight=!!(/ストレート/.test(role.note||''));
+  const flush=role.madeClass==='flush';
+  const weakFlush=!!(flush&&(role.weakFlush||role.flushHighRank<=9));
+  const pairedNutFlush=!!(flush&&role.nutFlush&&role.isVuln&&!role.isNut);
+  const trips=role.madeClass==='trips'||role.madeClass==='board_trips';
+  const nutOrBoat=!!(role.isNut||role.role==='nutted'||role.madeClass==='quads'||role.madeClass==='straight_flush'||/フルハウス|フォーカード|ロイヤル/.test(role.note||''));
+  const nonNutStrong=!!(!nutOrBoat&&(topTwo||lowerTwoPair||straight||flush||trips||role.isVuln||onePair));
+  const vulnerable=!!(weakPair||onePair||lowerTwoPair||weakFlush||pairedNutFlush||straight&&completed||trips||role.isVuln||multiway);
+  const raiseLarge=sizePct>=45||line.density==='high'||line.density==='very_high'||completed;
+  let classLabel='非ナッツの完成役';
+  if(onePair)classLabel=strongOnePair?'強いワンペア':'弱いワンペア';
+  else if(lowerTwoPair)classLabel='下のツーペア';
+  else if(topTwo)classLabel='トップツーペア';
+  else if(weakFlush)classLabel='弱いフラッシュ';
+  else if(pairedNutFlush)classLabel='ペアボード上のAハイフラッシュ';
+  else if(flush)classLabel=role.isNut?'強いフラッシュ':'非ナッツフラッシュ';
+  else if(straight)classLabel=role.isNut?'強いストレート':'非ナッツストレート';
+  else if(trips)classLabel='トリップス';
+  if(nutOrBoat){
+    return{classLabel,severity:action==='fold'?'bad':'good',verdict:action==='fold'?'ナッツ級の降りすぎ':'レイズ対応できる強手',policy:'全体ナッツ級なら、リバーのレイズにも基本的には続行できます。相手がさらに上を持つ組み合わせだけ確認します。',suggest:action==='fold'?'推奨: コールまたはリレイズを検討':'推奨: コール以上で続行。相手タイプでリレイズ量を選ぶ'};
+  }
+  if(!nonNutStrong)return null;
+  if(action==='fold'){
+    const good=vulnerable||raiseLarge;
+    return{classLabel,severity:good?'good':'border',verdict:good?'リバーレイズへの良いフォールド':'リバーレイズへの慎重フォールド',policy:'リバーでこちらのベットにレイズが返ると、相手レンジはかなり強くなります。非ナッツは「強いから払う」ではなく、下のバリューやブラフが十分あるかで決めます。',suggest:good?'推奨: このフォールドを維持。相手がレイズブラフ過多の時だけコールを戻す':'相手依存: 小さいレイズなら一部コールも残す'};
+  }
+  if(action==='call'){
+    const bad=vulnerable&&raiseLarge||weakPair||weakFlush||pairedNutFlush||lowerTwoPair&&completed||onePair&&sizePct>=35;
+    return{classLabel,severity:bad?'bad':'border',verdict:bad?'リバーレイズへのコールしすぎ':'リバーレイズへの境界コール',policy:'リバーでレイズされた時は、相手のブラフ頻度が一気に減ります。特に$2/$5では、非ナッツのコールは大きな損失になりやすいです。',suggest:bad?'推奨: フォールド寄り。コールするなら相手がレイズブラフを見せている時だけ':'相手依存: 小さいレイズだけ一部コール。大きいレイズはフォールド寄り'};
+  }
+  return null;
+}
 // [Codex fix 2026-06-06] リングのリバーは、ワンペア受け・薄バリュー・ブラフ断念を金額とラインで最終判定する。
 function liveCashRiverDecisionProfile(hr,d,role,tex,nOpponents){
   if(!hr||!d||hr.tournamentContext&&hr.tournamentContext.enabled)return null;
@@ -2736,6 +2777,8 @@ function liveCashRiverDecisionProfile(hr,d,role,tex,nOpponents){
   const villainCallRiver=before.some(function(x){return !x.isHuman&&x.street==='river'&&x.action==='call';});
   const villainCalledTurn=before.some(function(x){return !x.isHuman&&x.street==='turn'&&x.action==='call';});
   const humanBetTurn=before.some(function(x){return x.isHuman&&x.street==='turn'&&(x.action==='raise'||x.action==='bet'||x.action==='allin');});
+  const humanRiverAggIndex=before.findIndex(function(x){return x.isHuman&&x.street==='river'&&(x.action==='raise'||x.action==='bet'||x.action==='allin');});
+  const facingRiverRaise=!!(facing&&humanRiverAggIndex>=0&&before.some(function(x,i){return i>humanRiverAggIndex&&!x.isHuman&&x.street==='river'&&(x.action==='raise'||x.action==='allin');}));
   const pressure=(villainBetFlop?1:0)+(villainBetTurn?1:0)+(villainBetRiver?1:0)+(villainCalledTurn&&humanBetTurn?1:0);
   const multiway=(nOpponents||1)>=2;
   const onePair=!!(role&&(role.pairTier||/ワンペア|トップペア|中・低ペア|ミドルペア|オーバーペア/.test(role.note||'')));
@@ -2752,7 +2795,15 @@ function liveCashRiverDecisionProfile(hr,d,role,tex,nOpponents){
   const thinTarget=liveCashRiverThinValueTarget(role,completed,pressure,multiway);
   const line=liveCashRiverLineProfile(before,d);
   let lane='',verdict='',severity='border',policy='',risk='',suggest='';
-  if(action==='call'&&facing&&onePair&&!strongMade){
+  const raiseResponse=facingRiverRaise&&(action==='call'||action==='fold')?liveCashRiverRaiseResponseProfile(role,action,sizePct,completed,line,blocker,multiway):null;
+  if(raiseResponse){
+    lane='riverRaiseResponse';
+    severity=raiseResponse.severity;
+    verdict=raiseResponse.verdict;
+    policy=raiseResponse.policy;
+    risk=sizePct+'%pot / '+(completed?'完成寄りボード':'比較的静的なボード')+' / 相手圧力'+pressure+'回 / ハンド='+raiseResponse.classLabel+' / ライン=リバーレイズ対応';
+    suggest=raiseResponse.suggest;
+  }else if(action==='call'&&facing&&onePair&&!strongMade){
     lane='riverOnePairCatch';
     // [Claude fix 2026-06-10] strongOnePair(TPTK/トップペア等)はpressure>=2だけでheavy=trueにしない。
     // KK66型でvillainがターンレイズ+リバーベットしても、TPTKは43%pot程度なら明確コール。
@@ -2838,7 +2889,7 @@ function liveCashRiverDecisionProfile(hr,d,role,tex,nOpponents){
     suggest='推奨: このフォールドを維持。相手が明確にブラフ過多の時だけコールを戻す';
   }
   if(!lane)return null;
-  return{lane,label:'リバー金額',axis:'リバーの金額判断',street:'river',position:d.position||'',sizePct,pressure,multiway,completed,onePair,weakPair,strongOnePair,strongMade,air,drawMiss,nonNutValue,blocker,thinTarget,line,severity,verdict,policy,risk,suggest};
+  return{lane,label:'リバー金額',axis:'リバーの金額判断',street:'river',position:d.position||'',sizePct,pressure,multiway,completed,onePair,weakPair,strongOnePair,strongMade,air,drawMiss,nonNutValue,blocker,thinTarget,line,raiseResponse,severity,verdict,policy,risk,suggest};
 }
 function liveCashRiverDecisionProfileText(profile){
   if(!profile)return'';
@@ -7749,6 +7800,27 @@ function analyzeHand(hr){
         if(ev.quality==='good')ev.quality='ok';
       }
       notes.push(liveCashRiverDecisionProfileText(rv));
+    }else if(rv.lane==='riverRaiseResponse'){
+      if(rv.severity==='bad'){
+        next=Math.max(next,rv.raiseResponse&&/ナッツ級の降りすぎ/.test(rv.raiseResponse.verdict||'')?12:22);
+        ev.quality='bad';
+        ev.comment=(ev.comment||'').replace(/EV優位（[^。]+）で明確なコールです。|コールで問題ありません。/,'リバーでレイズされた後は、必要勝率だけでは正当化しにくい判断です。');
+        if(!ev.suggest)ev.suggest=rv.suggest;
+      }else if(rv.severity==='good'){
+        if(ev.action==='fold'){
+          next=Math.min(next,4);
+          if(ev.quality==='bad')ev.quality='ok';
+        }else if(before>0){
+          next=Math.min(next,6);
+          if(ev.quality==='bad')ev.quality='ok';
+        }
+        if(!ev.suggest)ev.suggest=rv.suggest;
+      }else{
+        next=Math.max(next,8);
+        if(ev.quality==='good')ev.quality='ok';
+        if(!ev.suggest)ev.suggest=rv.suggest;
+      }
+      notes.push(liveCashRiverDecisionProfileText(rv));
     }else if(rv.lane==='riverPotControlCheck'||rv.lane==='riverGiveUp'||rv.lane==='riverDisciplineFold'){
       if(before>0){
         next=Math.min(next,rv.lane==='riverDisciplineFold'?4:5);
@@ -10563,6 +10635,74 @@ function runFishTankRegressionTests(){
     return !!(p&&p.line&&p.line.label==='ターンコール後のリバー継続'&&p.severity==='bad'&&/25〜45%pot|チェック/.test((p.suggest||'')+(ev.suggest||'')));
   });
 
+  add('リングリバーレイズ対応: トップペアのコールしすぎを重く見る',function(){
+    const hr=regressionHand({
+      heroHole:['As','Td'],
+      villainHole:['Kh','Qh'],
+      board:['Ts','9s','4d','3c','2h'],
+      decisions:[
+        regressionDecision({street:'river',action:'raise',amount:300,pot:1000,toCall:0,facingRaise:false,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:900}),
+        regressionDecision({street:'river',action:'raise',amount:900,pot:1300,toCall:0,facingRaise:false,position:'BTN',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:900}),
+        regressionDecision({street:'river',action:'call',amount:600,pot:2200,toCall:600,potOdds:600/2800,facingRaise:true,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:600})
+      ],
+      pot:2800
+    });
+    const ev=humanEval(analyzeHand(hr),function(e){return e.street==='river'&&e.action==='call';});
+    const p=ev&&ev.liveCashRiverDecisionProfile;
+    return !!(p&&p.lane==='riverRaiseResponse'&&p.severity==='bad'&&/強いワンペア/.test(p.risk)&&ev.quality==='bad'&&(ev.deduction||0)>=22);
+  });
+
+  add('リングリバーレイズ対応: トップペアのフォールドを良い撤退にする',function(){
+    const hr=regressionHand({
+      heroHole:['As','Td'],
+      villainHole:['Kh','Qh'],
+      board:['Ts','9s','4d','3c','2h'],
+      decisions:[
+        regressionDecision({street:'river',action:'raise',amount:300,pot:1000,toCall:0,facingRaise:false,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:900}),
+        regressionDecision({street:'river',action:'raise',amount:900,pot:1300,toCall:0,facingRaise:false,position:'BTN',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:900}),
+        regressionDecision({street:'river',action:'fold',amount:0,pot:2200,toCall:600,potOdds:600/2800,facingRaise:true,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:600})
+      ],
+      pot:2200
+    });
+    const ev=humanEval(analyzeHand(hr),function(e){return e.street==='river'&&e.action==='fold';});
+    const p=ev&&ev.liveCashRiverDecisionProfile;
+    return !!(p&&p.lane==='riverRaiseResponse'&&p.severity==='good'&&/良いフォールド/.test(p.verdict)&&ev.quality!=='bad'&&(ev.deduction||0)<=4);
+  });
+
+  add('リングリバーレイズ対応: ペアボード弱フラッシュのコールを危険視する',function(){
+    const hr=regressionHand({
+      heroHole:['4c','2c'],
+      villainHole:['Ah','Kd'],
+      board:['Js','8c','Qh','6c','Jc'],
+      decisions:[
+        regressionDecision({street:'river',action:'raise',amount:30,pot:100,toCall:0,facingRaise:false,position:'BB',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:500}),
+        regressionDecision({street:'river',action:'raise',amount:150,pot:130,toCall:0,facingRaise:false,position:'BTN',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:500}),
+        regressionDecision({street:'river',action:'call',amount:120,pot:280,toCall:120,potOdds:120/400,facingRaise:true,position:'BB',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:470})
+      ],
+      pot:400
+    });
+    const ev=humanEval(analyzeHand(hr),function(e){return e.street==='river'&&e.action==='call';});
+    const p=ev&&ev.liveCashRiverDecisionProfile;
+    return !!(p&&p.lane==='riverRaiseResponse'&&p.severity==='bad'&&/弱いフラッシュ/.test(p.risk)&&ev.quality==='bad');
+  });
+
+  add('リングリバーレイズ対応: ナッツ級はレイズにも続行候補にする',function(){
+    const hr=regressionHand({
+      heroHole:['Ac','Kc'],
+      villainHole:['Ah','Kd'],
+      board:['Qc','8c','2c','7d','3h'],
+      decisions:[
+        regressionDecision({street:'river',action:'raise',amount:300,pot:1000,toCall:0,facingRaise:false,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:900}),
+        regressionDecision({street:'river',action:'raise',amount:900,pot:1300,toCall:0,facingRaise:false,position:'BTN',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:900}),
+        regressionDecision({street:'river',action:'call',amount:600,pot:2200,toCall:600,potOdds:600/2800,facingRaise:true,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:600})
+      ],
+      pot:2800
+    });
+    const ev=humanEval(analyzeHand(hr),function(e){return e.street==='river'&&e.action==='call';});
+    const p=ev&&ev.liveCashRiverDecisionProfile;
+    return !!(p&&p.lane==='riverRaiseResponse'&&p.severity==='good'&&/強手|続行/.test(p.verdict+p.policy)&&ev.quality!=='bad');
+  });
+
   add('COリンプ→BTNアイソコール側のフロップOOPチェックを重く罰しない',function(){
     const ev=humanEval(analyzeHand(limpIsoTopPairHand()),function(e){return e.street==='flop'&&e.action==='check';});
     return !!(ev&&ev.liveCashSpotProfile&&ev.liveCashSpotProfile.lane==='limpIsoOopCheck'&&ev.quality!=='bad'&&(ev.deduction||0)<=5&&ev.realizationPct<100&&/OOP/.test(ev.comment||''));
@@ -11697,6 +11837,7 @@ function riverLineNaturalText(label){
   if(t==='ターンコール後のリバー継続')return'ターンで相手がコールして残った後なので、払ってくれる下の手を具体的に想定します。';
   if(t==='相手チェック後のリバーベット')return'相手がチェックした後なので取り切りや薄バリューを作れますが、完成ボードではサイズを絞ります。';
   if(t==='コールレンジ相手のリバーベット')return'相手は一度以上コールして残っているので、薄いバリューは小さめから考えます。';
+  if(t==='リバーレイズ対応')return'こちらのベットにレイズが返った場面なので、相手レンジをかなり強く見ます。';
   return t?('ラインは'+t+'です。'):'';
 }
 function naturalRiskText(risk,actor,street){
@@ -12215,7 +12356,7 @@ function coachReviewText(ev){
     reason=p.policy+' '+naturalRiskText(p.risk);
   }else if(ev.liveCashRiverDecisionProfile){
     const p=ev.liveCashRiverDecisionProfile;
-    const actor=p.lane==='riverOnePairCatch'||p.lane==='riverDisciplineFold'?'相手のベット':p.lane==='riverThinValueSize'||p.lane==='riverBluffCandidate'||p.lane==='riverValueTarget'?'今回のベット':'この判断';
+    const actor=p.lane==='riverRaiseResponse'?'相手のレイズ':p.lane==='riverOnePairCatch'||p.lane==='riverDisciplineFold'?'相手のベット':p.lane==='riverThinValueSize'||p.lane==='riverBluffCandidate'||p.lane==='riverValueTarget'?'今回のベット':'この判断';
     scene='リングゲームのリバーです。'+naturalRiskText(p.risk,actor,'river');
     reason=p.policy;
   }else if(ev.liveCashSpotProfile){
