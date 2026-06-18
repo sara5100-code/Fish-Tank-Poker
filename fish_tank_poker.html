@@ -2619,6 +2619,56 @@ function liveCashMultiwayProfileText(profile){
   if(!profile)return'';
   return profile.players+'way / '+profile.verdict+'：'+profile.policy+' '+profile.risk;
 }
+// [Codex fix 2026-06-19] リバーは完成ボード上のブロッカー有無と、薄バリューで払わせたい相手レンジを分けて見る。
+function liveCashRiverBlockerProfile(hr,role,tex){
+  const human=hr&&hr.players?hr.players.find(function(p){return p.isHuman;}):null;
+  const hole=human&&human.holeCards?human.holeCards:[];
+  const board=hr&&hr.community?hr.community.slice(0,5):[];
+  const suitCnt={};
+  board.forEach(function(c){suitCnt[c.suit]=(suitCnt[c.suit]||0)+1;});
+  const flushSuit=Object.keys(suitCnt).find(function(s){return suitCnt[s]>=3;})||'';
+  const fourFlush=!!(flushSuit&&suitCnt[flushSuit]>=4);
+  const heroFlushCards=flushSuit?hole.filter(function(c){return c.suit===flushSuit;}):[];
+  const hasFlushBlocker=heroFlushCards.length>0;
+  const hasNutFlushBlocker=heroFlushCards.some(function(c){return c.rank==='A';});
+  const ranks=[...new Set(board.map(function(c){return RANK_VAL[c.rank]||0;}))].sort(function(a,b){return a-b;});
+  let straightComplete=false;
+  for(let i=0;i<=ranks.length-5;i++){if(ranks[i+4]-ranks[i]===4)straightComplete=true;}
+  if(ranks.includes(14)&&ranks.includes(5)&&ranks.includes(4)&&ranks.includes(3)&&ranks.includes(2))straightComplete=true;
+  const boardPaired=!!(tex&&tex.paired);
+  let label='ブロッカー影響小',severity='neutral',note='';
+  if(flushSuit){
+    if(hasNutFlushBlocker){
+      label='ナッツフラッシュブロッカーあり';
+      severity='good';
+      note='こちらがA'+flushSuit+'を持つため、相手のナッツフラッシュは少し減ります。ただし完成役そのものを消せるわけではありません。';
+    }else if(hasFlushBlocker){
+      label='フラッシュブロッカーあり';
+      severity='medium';
+      note='こちらも同じスートを1枚持つため、相手のフラッシュ候補は少し減ります。';
+    }else{
+      label='フラッシュブロッカーなし';
+      severity='bad';
+      note='こちらは完成フラッシュをブロックしていません。相手のバリュー寄りリバーベットには厳しめに見ます。';
+    }
+  }else if(straightComplete){
+    label='ストレート完成ボード';
+    severity='medium';
+    note='ストレートが完成し得るボードです。こちらのワンペアはブラフキャッチ寄りに下げて見ます。';
+  }else if(boardPaired){
+    label='ペアボード';
+    severity='medium';
+    note='フルハウスやトリップスが一部残るため、非ナッツの大きな受けや大きな薄バリューは慎重に見ます。';
+  }
+  return{flushSuit,fourFlush,hasFlushBlocker,hasNutFlushBlocker,straightComplete,boardPaired,label,severity,note};
+}
+function liveCashRiverThinValueTarget(role,completed,pressure,multiway){
+  if(!role)return{label:'下のペア',note:'下のペアや弱いトップペアに小さく払ってもらう狙いです。'};
+  if(completed||pressure>=2||multiway)return{label:'かなり限られた下のワンペア',note:'完成役や強いレンジが増えるので、払ってくれる下のハンドはかなり限られます。小さめかチェック寄りです。'};
+  if(role.pairTier==='overpair')return{label:'トップペア/セカンドペア',note:'オーバーペアなら、トップペアやセカンドペアから小〜中サイズで取る狙いです。'};
+  if(role.pairTier==='top_pair')return{label:'弱いトップペア/セカンドペア',note:'トップペアなら、弱いトップペアやセカンドペアに残ってもらうサイズを選びます。'};
+  return{label:'下のペア',note:'中程度のワンペアは、下のペアがコールできる小さめサイズに寄せます。'};
+}
 // [Codex fix 2026-06-06] リングのリバーは、ワンペア受け・薄バリュー・ブラフ断念を金額とラインで最終判定する。
 function liveCashRiverDecisionProfile(hr,d,role,tex,nOpponents){
   if(!hr||!d||hr.tournamentContext&&hr.tournamentContext.enabled)return null;
@@ -2646,6 +2696,10 @@ function liveCashRiverDecisionProfile(hr,d,role,tex,nOpponents){
   const drawMiss=!!(air||role&&role.draw&&role.draw.outs);
   const completed=!!(tex&&(tex.flushy>=3||tex.straightDraw||tex.connected>=3||tex.paired||tex.dynamic));
   const nonNutValue=!!(strongMade&&!role.isNut&&(role.isVuln||completed));
+  const blocker=liveCashRiverBlockerProfile(hr,role,tex);
+  const blockerBad=!!(blocker&&blocker.severity==='bad'&&completed);
+  const blockerGood=!!(blocker&&blocker.hasNutFlushBlocker);
+  const thinTarget=liveCashRiverThinValueTarget(role,completed,pressure,multiway);
   let lane='',verdict='',severity='border',policy='',risk='',suggest='';
   if(action==='call'&&facing&&onePair&&!strongMade){
     lane='riverOnePairCatch';
@@ -2654,27 +2708,29 @@ function liveCashRiverDecisionProfile(hr,d,role,tex,nOpponents){
     // heavyはsizePct>=65 OR 非strongOnePairのpressure>=2 OR weakPair等の時のみ。
     const heavy=sizePct>=65||(pressure>=2&&!strongOnePair)||pressure>=3||
                 (completed&&!strongOnePair)||multiway&&(sizePct>=45||!strongOnePair)||
-                weakPair||villainBetRiver&&villainCallRiver;
+                weakPair||villainBetRiver&&villainCallRiver||
+                blockerBad&&sizePct>=45&&!blockerGood||
+                completed&&pressure>=2&&sizePct>=50;
     severity=heavy?'bad':'border';
     verdict=heavy?'ワンペアのリバーコール過多':'ワンペアのブラフキャッチ境界';
     policy='リバーのワンペアは「勝っていそう」ではなく、相手のサイズとラインにブラフが残るかで判断します。';
-    risk=sizePct+'%pot / '+(completed?'完成寄りボード':'比較的静的なボード')+' / 相手圧力'+pressure+'回'+(multiway?' / マルチウェイ':'');
-    suggest=heavy?'推奨: フォールド寄り。コールするなら相手が明確にブラフ過多の時だけ':'相手依存: 小〜中サイズなら一部コール、パッシブ相手はフォールド寄り';
+    risk=sizePct+'%pot / '+(completed?'完成寄りボード':'比較的静的なボード')+' / 相手圧力'+pressure+'回'+(multiway?' / マルチウェイ':'')+(blocker&&blocker.label?' / '+blocker.label:'');
+    suggest=heavy?'推奨: フォールド寄り。コールするなら相手が明確にブラフ過多、または強いブロッカーがある時だけ':'相手依存: 小〜中サイズなら一部コール、パッシブ相手はフォールド寄り';
   }else if(betLike&&onePair&&!strongMade){
     lane='riverThinValueSize';
-    const tooBig=sizePct>=65||completed&&sizePct>=50||multiway&&sizePct>=45;
+    const tooBig=sizePct>=65||completed&&sizePct>=50||multiway&&sizePct>=45||blockerBad&&sizePct>=50;
     severity=tooBig?'bad':sizePct>=45?'border':'good';
     verdict=tooBig?'ワンペアの薄バリューが大きすぎる':'ワンペアの薄バリューサイズ';
-    policy='リバーでワンペアから取る時は、下のペアや弱いTx/Qxを残せるサイズにします。大きくすると強いレンジだけに寄りやすいです。';
-    risk=sizePct+'%pot / '+(completed?'完成寄りボード':'比較的静的なボード')+' / 相手圧力'+pressure+'回'+(multiway?' / マルチウェイ':'');
+    policy='リバーでワンペアから取る時は、どの下のハンドに払ってほしいかを先に決めます。'+thinTarget.note;
+    risk=sizePct+'%pot / '+(completed?'完成寄りボード':'比較的静的なボード')+' / 相手圧力'+pressure+'回'+(multiway?' / マルチウェイ':'')+' / ターゲット='+thinTarget.label+(blocker&&blocker.label?' / '+blocker.label:'');
     suggest=tooBig?'推奨: チェックまたは25〜45%pot。完成寄りボードでは特に小さめ':'推奨: 25〜45%potの薄バリュー。レイズにはかなり慎重';
   }else if(betLike&&(air||drawMiss)&&!strongMade){
     lane='riverBluffCandidate';
-    const bad=multiway||completed||sizePct>=70||pressure>=2;
+    const bad=multiway||completed&&!blockerGood||sizePct>=70||pressure>=2;
     severity=bad?'bad':'border';
     verdict=bad?'リバーブラフの成功条件不足':'リバーブラフ候補';
-    policy='リバーのブラフは、相手のレンジに降りる手が多い時だけ作ります。完成ボードや$2/$5のコール多め相手には頻度を落とします。';
-    risk=sizePct+'%pot / '+(completed?'完成寄りボード':'比較的静的なボード')+' / 相手圧力'+pressure+'回'+(multiway?' / マルチウェイ':'');
+    policy='リバーのブラフは、相手のレンジに降りる手が多く、こちらにブロッカーや自然なストーリーがある時だけ作ります。完成ボードや$2/$5のコール多め相手には頻度を落とします。';
+    risk=sizePct+'%pot / '+(completed?'完成寄りボード':'比較的静的なボード')+' / 相手圧力'+pressure+'回'+(multiway?' / マルチウェイ':'')+(blocker&&blocker.label?' / '+blocker.label:'');
     suggest=bad?'推奨: チェックで諦める。打つなら明確なブロッカーと相手傾向が必要':'候補: 40〜60%potを低頻度。相手が降りるレンジを持つ時だけ';
   }else if(betLike&&strongMade){
     lane='riverValueTarget';
@@ -2729,7 +2785,7 @@ function liveCashRiverDecisionProfile(hr,d,role,tex,nOpponents){
     suggest='推奨: このフォールドを維持。相手が明確にブラフ過多の時だけコールを戻す';
   }
   if(!lane)return null;
-  return{lane,label:'リバー金額',axis:'リバーの金額判断',street:'river',position:d.position||'',sizePct,pressure,multiway,completed,onePair,weakPair,strongOnePair,strongMade,air,drawMiss,nonNutValue,severity,verdict,policy,risk,suggest};
+  return{lane,label:'リバー金額',axis:'リバーの金額判断',street:'river',position:d.position||'',sizePct,pressure,multiway,completed,onePair,weakPair,strongOnePair,strongMade,air,drawMiss,nonNutValue,blocker,thinTarget,severity,verdict,policy,risk,suggest};
 }
 function liveCashRiverDecisionProfileText(profile){
   if(!profile)return'';
@@ -7598,12 +7654,14 @@ function analyzeHand(hr){
         // 弱ペアのborderのみok→降格させる。強ペアは軽微な注記で留める。
         if(rv.strongOnePair){
           next=Math.max(next,4);
-          // quality: 変更しない（EV+のTPTKリバーコールは正解）
+          // [Codex fix 2026-06-19] 単発小さめサイズへの強ワンペアは、前段がbadでも悪手扱いにしない。
+          // ただし「明確コール」ではなく、相手依存のブラフキャッチとして説明する。
+          if(ev.quality==='bad'&&rv.sizePct<=40&&rv.pressure<=1&&!rv.multiway&&!(rv.blocker&&rv.blocker.severity==='bad'))ev.quality='ok';
         }else{
           next=Math.max(next,8);
           if(ev.quality==='good')ev.quality='ok';
         }
-        ev.comment=(ev.comment||'').replace(/EV優位（[^。]+）で明確なコールです。/,'リバー金額監査後は、明確コールではなく相手依存のブラフキャッチです。');
+        ev.comment=(ev.comment||'').replace(/EV優位（[^。]+）で明確なコールです。|コールで問題ありません。/,'小さめなのでコール候補ですが、明確コールではなく相手依存のブラフキャッチです。');
       }
       notes.push(liveCashRiverDecisionProfileText(rv));
     }else if(rv.lane==='riverThinValueSize'){
@@ -10348,6 +10406,36 @@ function runFishTankRegressionTests(){
     const an=analyzeHand(hr);
     const snap=evaluationSnapshot(hr,an);
     return !!(snap&&snap.evaluations&&snap.evaluations.some(function(e){return e.liveCashRiverDecisionProfile&&e.liveCashRiverDecisionProfile.lane==='riverOnePairCatch'&&e.liveCashRiverDecisionWeightNote;}));
+  });
+
+  add('リングリバー: 完成ボードのブロッカーなしワンペアコールを厳しく見る',function(){
+    const an=analyzeHand(ringRiverOnePairBigCallHand());
+    const ev=humanEval(an,function(e){return e.street==='river'&&e.action==='call';});
+    const p=ev&&ev.liveCashRiverDecisionProfile;
+    return !!(p&&p.lane==='riverOnePairCatch'&&p.blocker&&p.blocker.severity==='bad'&&/ブロッカーなし/.test(p.risk)&&p.severity==='bad');
+  });
+
+  add('リングリバー: 単発小さめベットへの強ワンペアは境界に残す',function(){
+    const hr=regressionHand({
+      heroHole:['As','Td'],
+      villainHole:['Kh','Qh'],
+      board:['Ts','9s','4d','3c','2h'],
+      decisions:[
+        regressionDecision({street:'river',action:'raise',amount:300,pot:1000,toCall:0,facingRaise:false,position:'BTN',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:900}),
+        regressionDecision({street:'river',action:'call',amount:300,pot:1300,toCall:300,potOdds:300/1600,facingRaise:true,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:900})
+      ],
+      pot:1600
+    });
+    const ev=humanEval(analyzeHand(hr),function(e){return e.street==='river'&&e.action==='call';});
+    const p=ev&&ev.liveCashRiverDecisionProfile;
+    return !!(p&&p.lane==='riverOnePairCatch'&&p.severity==='border'&&ev.quality!=='bad'&&!/明確なコール/.test(ev.comment||''));
+  });
+
+  add('リングリバー: ワンペア薄バリューに支払いターゲットを持たせる',function(){
+    const an=analyzeHand(ringRiverThinValueSmallHand());
+    const ev=humanEval(an,function(e){return e.street==='river'&&(e.action==='raise'||e.action==='bet');});
+    const p=ev&&ev.liveCashRiverDecisionProfile;
+    return !!(p&&p.lane==='riverThinValueSize'&&p.thinTarget&&p.thinTarget.label&&/ターゲット=/.test(p.risk)&&/どの下のハンド/.test(p.policy));
   });
 
   add('COリンプ→BTNアイソコール側のフロップOOPチェックを重く罰しない',function(){
