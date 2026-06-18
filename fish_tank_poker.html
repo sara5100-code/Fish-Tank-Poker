@@ -2669,6 +2669,56 @@ function liveCashRiverThinValueTarget(role,completed,pressure,multiway){
   if(role.pairTier==='top_pair')return{label:'弱いトップペア/セカンドペア',note:'トップペアなら、弱いトップペアやセカンドペアに残ってもらうサイズを選びます。'};
   return{label:'下のペア',note:'中程度のワンペアは、下のペアがコールできる小さめサイズに寄せます。'};
 }
+function liveCashRiverLineProfile(before,d){
+  before=before||[];
+  d=d||{};
+  const villainBetFlop=before.some(function(x){return !x.isHuman&&x.street==='flop'&&(x.action==='raise'||x.action==='bet'||x.action==='allin');});
+  const villainBetTurn=before.some(function(x){return !x.isHuman&&x.street==='turn'&&(x.action==='raise'||x.action==='bet'||x.action==='allin');});
+  const villainBetRiver=before.some(function(x){return !x.isHuman&&x.street==='river'&&(x.action==='raise'||x.action==='bet'||x.action==='allin');});
+  const villainCalledTurn=before.some(function(x){return !x.isHuman&&x.street==='turn'&&x.action==='call';});
+  const villainCalledFlop=before.some(function(x){return !x.isHuman&&x.street==='flop'&&x.action==='call';});
+  const humanBetTurn=before.some(function(x){return x.isHuman&&x.street==='turn'&&(x.action==='raise'||x.action==='bet'||x.action==='allin');});
+  const villainCheckedRiver=before.some(function(x){return !x.isHuman&&x.street==='river'&&x.action==='check';});
+  const facing=(d.toCall||0)>0;
+  const betLike=d.action==='raise'||d.action==='bet'||d.action==='allin';
+  let label='リバー単発判断',density='medium',callTighten=false,valueTighten=false,bluffTighten=false,note='このリバーだけで判断しすぎず、サイズと相手傾向を合わせて見ます。';
+  if(facing&&villainBetRiver&&villainBetFlop&&villainBetTurn){
+    label='3バレル';
+    density='very_high';
+    callTighten=true;
+    note='相手がフロップからリバーまで打ち続けたラインです。ライブ$2/$5では大きいサイズほどバリュー寄りに見ます。';
+  }else if(facing&&villainBetRiver&&villainBetTurn){
+    label='ターン・リバー連続ベット';
+    density='high';
+    callTighten=true;
+    note='相手が後半2ストリートで続けて打ったラインです。ワンペアはブラフキャッチ寄りに下げて見ます。';
+  }else if(facing&&villainBetRiver&&humanBetTurn&&villainCalledTurn){
+    label='ターンコール後のリバーベット';
+    density='high';
+    callTighten=true;
+    note='ターンでこちらのベットにコールした相手が、リバーで打ち返しているラインです。完成役や強いワンペア以上を濃く見ます。';
+  }else if(facing&&villainBetRiver&&!villainBetFlop&&!villainBetTurn){
+    label='単発リバーベット';
+    density='medium';
+    note='相手の圧力はリバーの一度だけです。小さめならブラフも残りますが、大きいサイズはバリュー寄りに寄せます。';
+  }else if(betLike&&humanBetTurn&&villainCalledTurn){
+    label='ターンコール後のリバー継続';
+    density='high';
+    valueTighten=true;
+    bluffTighten=true;
+    note='ターンで相手がコールしてリバーまで残ったラインです。こちらが打つなら、払ってくれる下の手か降ろせる手をかなり具体的に見ます。';
+  }else if(betLike&&villainCheckedRiver){
+    label='相手チェック後のリバーベット';
+    density='medium_low';
+    note='相手がリバーでチェックした後のベットです。取り切りや薄バリューを作れますが、完成ボードではサイズを絞ります。';
+  }else if(betLike&&villainCalledFlop){
+    label='コールレンジ相手のリバーベット';
+    density='medium';
+    valueTighten=true;
+    note='相手はフロップ以降に一度は続行しています。薄いバリューは相手のコールできる下の手を先に決めます。';
+  }
+  return{label,density,callTighten,valueTighten,bluffTighten,note};
+}
 // [Codex fix 2026-06-06] リングのリバーは、ワンペア受け・薄バリュー・ブラフ断念を金額とラインで最終判定する。
 function liveCashRiverDecisionProfile(hr,d,role,tex,nOpponents){
   if(!hr||!d||hr.tournamentContext&&hr.tournamentContext.enabled)return null;
@@ -2700,6 +2750,7 @@ function liveCashRiverDecisionProfile(hr,d,role,tex,nOpponents){
   const blockerBad=!!(blocker&&blocker.severity==='bad'&&completed);
   const blockerGood=!!(blocker&&blocker.hasNutFlushBlocker);
   const thinTarget=liveCashRiverThinValueTarget(role,completed,pressure,multiway);
+  const line=liveCashRiverLineProfile(before,d);
   let lane='',verdict='',severity='border',policy='',risk='',suggest='';
   if(action==='call'&&facing&&onePair&&!strongMade){
     lane='riverOnePairCatch';
@@ -2710,27 +2761,29 @@ function liveCashRiverDecisionProfile(hr,d,role,tex,nOpponents){
                 (completed&&!strongOnePair)||multiway&&(sizePct>=45||!strongOnePair)||
                 weakPair||villainBetRiver&&villainCallRiver||
                 blockerBad&&sizePct>=45&&!blockerGood||
-                completed&&pressure>=2&&sizePct>=50;
+                completed&&pressure>=2&&sizePct>=50||
+                line.callTighten&&sizePct>=55||
+                line.density==='very_high'&&sizePct>=45;
     severity=heavy?'bad':'border';
     verdict=heavy?'ワンペアのリバーコール過多':'ワンペアのブラフキャッチ境界';
     policy='リバーのワンペアは「勝っていそう」ではなく、相手のサイズとラインにブラフが残るかで判断します。';
-    risk=sizePct+'%pot / '+(completed?'完成寄りボード':'比較的静的なボード')+' / 相手圧力'+pressure+'回'+(multiway?' / マルチウェイ':'')+(blocker&&blocker.label?' / '+blocker.label:'');
+    risk=sizePct+'%pot / '+(completed?'完成寄りボード':'比較的静的なボード')+' / 相手圧力'+pressure+'回'+(multiway?' / マルチウェイ':'')+(blocker&&blocker.label?' / '+blocker.label:'')+' / ライン='+line.label;
     suggest=heavy?'推奨: フォールド寄り。コールするなら相手が明確にブラフ過多、または強いブロッカーがある時だけ':'相手依存: 小〜中サイズなら一部コール、パッシブ相手はフォールド寄り';
   }else if(betLike&&onePair&&!strongMade){
     lane='riverThinValueSize';
-    const tooBig=sizePct>=65||completed&&sizePct>=50||multiway&&sizePct>=45||blockerBad&&sizePct>=50;
+    const tooBig=sizePct>=65||completed&&sizePct>=50||multiway&&sizePct>=45||blockerBad&&sizePct>=50||line.valueTighten&&sizePct>=50;
     severity=tooBig?'bad':sizePct>=45?'border':'good';
     verdict=tooBig?'ワンペアの薄バリューが大きすぎる':'ワンペアの薄バリューサイズ';
     policy='リバーでワンペアから取る時は、どの下のハンドに払ってほしいかを先に決めます。'+thinTarget.note;
-    risk=sizePct+'%pot / '+(completed?'完成寄りボード':'比較的静的なボード')+' / 相手圧力'+pressure+'回'+(multiway?' / マルチウェイ':'')+' / ターゲット='+thinTarget.label+(blocker&&blocker.label?' / '+blocker.label:'');
+    risk=sizePct+'%pot / '+(completed?'完成寄りボード':'比較的静的なボード')+' / 相手圧力'+pressure+'回'+(multiway?' / マルチウェイ':'')+' / ターゲット='+thinTarget.label+(blocker&&blocker.label?' / '+blocker.label:'')+' / ライン='+line.label;
     suggest=tooBig?'推奨: チェックまたは25〜45%pot。完成寄りボードでは特に小さめ':'推奨: 25〜45%potの薄バリュー。レイズにはかなり慎重';
   }else if(betLike&&(air||drawMiss)&&!strongMade){
     lane='riverBluffCandidate';
-    const bad=multiway||completed&&!blockerGood||sizePct>=70||pressure>=2;
+    const bad=multiway||completed&&!blockerGood||sizePct>=70||pressure>=2||line.bluffTighten&&sizePct>=50;
     severity=bad?'bad':'border';
     verdict=bad?'リバーブラフの成功条件不足':'リバーブラフ候補';
     policy='リバーのブラフは、相手のレンジに降りる手が多く、こちらにブロッカーや自然なストーリーがある時だけ作ります。完成ボードや$2/$5のコール多め相手には頻度を落とします。';
-    risk=sizePct+'%pot / '+(completed?'完成寄りボード':'比較的静的なボード')+' / 相手圧力'+pressure+'回'+(multiway?' / マルチウェイ':'')+(blocker&&blocker.label?' / '+blocker.label:'');
+    risk=sizePct+'%pot / '+(completed?'完成寄りボード':'比較的静的なボード')+' / 相手圧力'+pressure+'回'+(multiway?' / マルチウェイ':'')+(blocker&&blocker.label?' / '+blocker.label:'')+' / ライン='+line.label;
     suggest=bad?'推奨: チェックで諦める。打つなら明確なブロッカーと相手傾向が必要':'候補: 40〜60%potを低頻度。相手が降りるレンジを持つ時だけ';
   }else if(betLike&&strongMade){
     lane='riverValueTarget';
@@ -2785,7 +2838,7 @@ function liveCashRiverDecisionProfile(hr,d,role,tex,nOpponents){
     suggest='推奨: このフォールドを維持。相手が明確にブラフ過多の時だけコールを戻す';
   }
   if(!lane)return null;
-  return{lane,label:'リバー金額',axis:'リバーの金額判断',street:'river',position:d.position||'',sizePct,pressure,multiway,completed,onePair,weakPair,strongOnePair,strongMade,air,drawMiss,nonNutValue,blocker,thinTarget,severity,verdict,policy,risk,suggest};
+  return{lane,label:'リバー金額',axis:'リバーの金額判断',street:'river',position:d.position||'',sizePct,pressure,multiway,completed,onePair,weakPair,strongOnePair,strongMade,air,drawMiss,nonNutValue,blocker,thinTarget,line,severity,verdict,policy,risk,suggest};
 }
 function liveCashRiverDecisionProfileText(profile){
   if(!profile)return'';
@@ -10438,6 +10491,78 @@ function runFishTankRegressionTests(){
     return !!(p&&p.lane==='riverThinValueSize'&&p.thinTarget&&p.thinTarget.label&&/ターゲット=/.test(p.risk)&&/どの下のハンド/.test(p.policy));
   });
 
+  add('リングリバーライン: 3バレル中サイズのワンペアコールを締める',function(){
+    const hr=regressionHand({
+      heroHole:['As','Td'],
+      villainHole:['Kh','Qh'],
+      board:['Ts','9s','4d','3c','2h'],
+      decisions:[
+        regressionDecision({street:'flop',action:'raise',amount:60,pot:100,toCall:0,facingRaise:false,position:'BTN',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:900}),
+        regressionDecision({street:'flop',action:'call',amount:60,pot:160,toCall:60,potOdds:60/220,facingRaise:true,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:900}),
+        regressionDecision({street:'turn',action:'raise',amount:140,pot:220,toCall:0,facingRaise:false,position:'BTN',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:840}),
+        regressionDecision({street:'turn',action:'call',amount:140,pot:360,toCall:140,potOdds:140/500,facingRaise:true,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:840}),
+        regressionDecision({street:'river',action:'raise',amount:275,pot:500,toCall:0,facingRaise:false,position:'BTN',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:700}),
+        regressionDecision({street:'river',action:'call',amount:275,pot:775,toCall:275,potOdds:275/1050,facingRaise:true,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:700})
+      ],
+      pot:1050
+    });
+    const ev=humanEval(analyzeHand(hr),function(e){return e.street==='river'&&e.action==='call';});
+    const p=ev&&ev.liveCashRiverDecisionProfile;
+    return !!(p&&p.line&&p.line.label==='3バレル'&&p.severity==='bad'&&/3バレル/.test(p.risk)&&(ev.deduction||0)>=20);
+  });
+
+  add('リングリバーライン: 単発小さめリバーベットは3バレル扱いしない',function(){
+    const hr=regressionHand({
+      heroHole:['As','Td'],
+      villainHole:['Kh','Qh'],
+      board:['Ts','9s','4d','3c','2h'],
+      decisions:[
+        regressionDecision({street:'river',action:'raise',amount:300,pot:1000,toCall:0,facingRaise:false,position:'BTN',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:900}),
+        regressionDecision({street:'river',action:'call',amount:300,pot:1300,toCall:300,potOdds:300/1600,facingRaise:true,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:900})
+      ],
+      pot:1600
+    });
+    const ev=humanEval(analyzeHand(hr),function(e){return e.street==='river'&&e.action==='call';});
+    const p=ev&&ev.liveCashRiverDecisionProfile;
+    const txt=coachReviewText(ev);
+    return !!(p&&p.line&&p.line.label==='単発リバーベット'&&p.severity==='border'&&ev.quality!=='bad'&&/リバーの一度だけ/.test(txt));
+  });
+
+  add('リングリバーライン: ターンコール後のリバーベットはバリュー密度を上げる',function(){
+    const hr=regressionHand({
+      heroHole:['As','Td'],
+      villainHole:['Kh','Qh'],
+      board:['Ts','9s','4d','3c','2h'],
+      decisions:[
+        regressionDecision({street:'turn',action:'raise',amount:180,pot:300,toCall:0,facingRaise:false,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:900}),
+        regressionDecision({street:'turn',action:'call',amount:180,pot:480,toCall:180,potOdds:180/660,facingRaise:true,position:'BTN',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:900}),
+        regressionDecision({street:'river',action:'raise',amount:360,pot:660,toCall:0,facingRaise:false,position:'BTN',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:720}),
+        regressionDecision({street:'river',action:'call',amount:360,pot:1020,toCall:360,potOdds:360/1380,facingRaise:true,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:720})
+      ],
+      pot:1380
+    });
+    const ev=humanEval(analyzeHand(hr),function(e){return e.street==='river'&&e.action==='call';});
+    const p=ev&&ev.liveCashRiverDecisionProfile;
+    return !!(p&&p.line&&p.line.label==='ターンコール後のリバーベット'&&p.severity==='bad'&&/完成役や強い継続/.test(coachReviewText(ev)));
+  });
+
+  add('リングリバーライン: ターンコール後のリバー薄バリューはサイズを絞る',function(){
+    const hr=regressionHand({
+      heroHole:['As','Td'],
+      villainHole:['Kh','Qh'],
+      board:['Ts','9s','4d','3c','2h'],
+      decisions:[
+        regressionDecision({street:'turn',action:'raise',amount:180,pot:300,toCall:0,facingRaise:false,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:900}),
+        regressionDecision({street:'turn',action:'call',amount:180,pot:480,toCall:180,potOdds:180/660,facingRaise:true,position:'BTN',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:900}),
+        regressionDecision({street:'river',action:'raise',amount:330,pot:660,toCall:0,facingRaise:false,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:720})
+      ],
+      pot:990
+    });
+    const ev=humanEval(analyzeHand(hr),function(e){return e.street==='river'&&(e.action==='raise'||e.action==='bet');});
+    const p=ev&&ev.liveCashRiverDecisionProfile;
+    return !!(p&&p.line&&p.line.label==='ターンコール後のリバー継続'&&p.severity==='bad'&&/25〜45%pot|チェック/.test((p.suggest||'')+(ev.suggest||'')));
+  });
+
   add('COリンプ→BTNアイソコール側のフロップOOPチェックを重く罰しない',function(){
     const ev=humanEval(analyzeHand(limpIsoTopPairHand()),function(e){return e.street==='flop'&&e.action==='check';});
     return !!(ev&&ev.liveCashSpotProfile&&ev.liveCashSpotProfile.lane==='limpIsoOopCheck'&&ev.quality!=='bad'&&(ev.deduction||0)<=5&&ev.realizationPct<100&&/OOP/.test(ev.comment||''));
@@ -11563,14 +11688,27 @@ function boardTextureNaturalText(label,street){
   }
   return t;
 }
+function riverLineNaturalText(label){
+  const t=String(label||'').trim();
+  if(t==='3バレル')return'相手は3ストリート続けて打っているので、ライブではかなりバリュー寄りに見ます。';
+  if(t==='ターン・リバー連続ベット')return'相手はターンとリバーで続けて打っているので、ワンペアはブラフキャッチ寄りに下げます。';
+  if(t==='ターンコール後のリバーベット')return'ターンでこちらのベットにコールした相手がリバーで打っているので、完成役や強い継続を少し濃く見ます。';
+  if(t==='単発リバーベット')return'相手の圧力はリバーの一度だけなので、小さめならブラフも残りますが、大きいサイズはバリュー寄りに見ます。';
+  if(t==='ターンコール後のリバー継続')return'ターンで相手がコールして残った後なので、払ってくれる下の手を具体的に想定します。';
+  if(t==='相手チェック後のリバーベット')return'相手がチェックした後なので取り切りや薄バリューを作れますが、完成ボードではサイズを絞ります。';
+  if(t==='コールレンジ相手のリバーベット')return'相手は一度以上コールして残っているので、薄いバリューは小さめから考えます。';
+  return t?('ラインは'+t+'です。'):'';
+}
 function naturalRiskText(risk,actor,street){
   const txt=plainReviewText(risk);
   if(!txt)return'';
-  let m=txt.match(/サイズ(\d+)%pot\s*\/\s*([^\/]+)\s*\/\s*相手圧力(\d+)回/);
+  let m=txt.match(/(?:サイズ)?(\d+)%pot\s*\/\s*([^\/]+)\s*\/\s*相手圧力(\d+)回/);
   if(m){
     const board=boardTextureNaturalText(m[2],street);
     const pressure=+m[3]>0?'ここまで相手の圧力は'+m[3]+'回入っています。':'ここまで相手の強い圧力は入っていません。';
-    return (actor||'サイズ')+'は'+m[1]+'%potで、'+board+'。'+pressure;
+    const line=(txt.match(/ライン=([^\/。]+)/)||[])[1];
+    const lineText=line?riverLineNaturalText(line.trim()):'';
+    return (actor||'サイズ')+'は'+m[1]+'%potで、'+board+'。'+pressure+(lineText?' '+lineText:'');
   }
   m=txt.match(/SPR約([^\/]+)\s*\/\s*([^\/]+)\s*\/\s*圧力(\d+)段階/);
   if(m){
