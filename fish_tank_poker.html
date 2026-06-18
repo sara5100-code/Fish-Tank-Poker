@@ -10545,7 +10545,21 @@ function runFishTankRegressionTests(){
 
   add('コーチ文: 最終整文で硬い重複表現を減らす',function(){
     const txt=polishCoachReviewText('ここは見直したい判断です。リングゲームのリバーです。今回のベットは50%potで、完成寄りボードです。ここは複数の選択肢があります。GTOでは混ざることがありますが、実戦では相手依存です。', {street:'river'});
-    return /リングゲームのリバーで、見直したい判断です/.test(txt)&&/複数のラインが成立します/.test(txt)&&/理論上は混ざります/.test(txt)&&!/ここは見直したい判断です。リングゲームのリバーです/.test(txt);
+    return /リングゲームのリバーで、見直したい判断です/.test(txt)&&/複数のラインが成立します/.test(txt)&&!/ここは見直したい判断です。リングゲームのリバーです|GTOでは/.test(txt)&&(txt.match(/。/g)||[]).length<=4;
+  });
+
+  add('コーチ文: ポストフロップ表示は長文化させない',function(){
+    const txt=coachReviewText({
+      street:'river',
+      action:'fold',
+      quality:'good',
+      suggest:'このラインを継続してください',
+      comment:'フォールド。',
+      liveCashRiverDecisionProfile:{lane:'riverDisciplineFold',policy:'完成ボードでワンペアは無理に受けません。',risk:'サイズ117%pot / 完成寄りボード / 相手圧力1回'},
+      boardTextureProfile:{dynamic:true,straightThreat:true,paired:false},
+      rangeActionUpdateProfile:{street:'river',lane:'fold',sizePct:117,rangeState:'single_pressure',pressure:1,severity:'good'}
+    });
+    return txt.length<360&&!/「完成寄り\/動的ボード」|レンジ更新は|GTO基準/.test(txt)&&/フォールド|問題ありません/.test(txt);
   });
 
   add('トリップス監査: Aトリップスを弱いワンペア扱いしない',function(){
@@ -11888,7 +11902,14 @@ function polishCoachReviewText(txt,ev){
     seen.add(key);
     out.push(s);
   });
-  let joined=out.join('');
+  let visible=out;
+  if(ev&&ev.street!=='preflop'){
+    const mustKeep=/推奨|候補|頻度|サイズ|フォールド|コール|チェック|ベット|オールイン|問題ありません|見直し|許容範囲/;
+    const first=visible.slice(0,3);
+    const tail=visible.slice(3).filter(function(s){return mustKeep.test(s);}).slice(0,1);
+    visible=first.concat(tail);
+  }
+  let joined=visible.join('');
   if(ev&&ev.street==='river'){
     joined=joined.replace(/強いドローが残りやすい/g,'完成役やブラフ候補が残りやすい');
   }
@@ -12018,10 +12039,9 @@ function coachReviewText(ev){
   const close=recommendationClose(action,ev.quality,rec,!!ev.suggest);
   const mixedLineExtra=mixedLineExplanationText(ev);
   const postflopExtra=postflopCoachExtraText(ev);
-  const theoryExtra=ev.rangeActionUpdateProfile?'':gtoTheoryReviewText(ev);
-  const rangeActionExtra=naturalRangeActionUpdateText(ev);
-  const boardDefinitionExtra=naturalBoardTextureDefinitionText(ev);
-  const rawText=(verdict+' '+scene+(reason?' '+reason:'')+(rangeActionExtra?' '+rangeActionExtra:'')+(boardDefinitionExtra?' '+boardDefinitionExtra:'')+(theoryExtra?' '+theoryExtra:'')+(mixedLineExtra?' '+mixedLineExtra:'')+(postflopExtra?' '+postflopExtra:'')+' '+close)
+  // 通常表示では評価軸の詳細を全部つながず、結論・理由・実戦アドバイスへ圧縮する。
+  // GTOスナップショットやボード定義は評価JSON/監査側に残し、レビュー欄の長文化を防ぐ。
+  const rawText=(verdict+' '+scene+(reason?' '+reason:'')+(mixedLineExtra?' '+mixedLineExtra:'')+(postflopExtra?' '+postflopExtra:'')+' '+close)
     .replace(/プリフロップ/g,'フロップ前')
     .replace(/\s+/g,' ')
     .replace(/。。+/g,'。')
