@@ -10543,6 +10543,11 @@ function runFishTankRegressionTests(){
     return /まだ入っていません/.test(txt)&&!/0段階あります/.test(txt);
   });
 
+  add('コーチ文: 最終整文で硬い重複表現を減らす',function(){
+    const txt=polishCoachReviewText('ここは見直したい判断です。リングゲームのリバーです。今回のベットは50%potで、完成寄りボードです。ここは複数の選択肢があります。GTOでは混ざることがありますが、実戦では相手依存です。', {street:'river'});
+    return /リングゲームのリバーで、見直したい判断です/.test(txt)&&/複数のラインが成立します/.test(txt)&&/理論上は混ざります/.test(txt)&&!/ここは見直したい判断です。リングゲームのリバーです/.test(txt);
+  });
+
   add('トリップス監査: Aトリップスを弱いワンペア扱いしない',function(){
     const hr=regressionHand({
       heroHole:['As','Kd'],
@@ -11850,6 +11855,45 @@ function recommendationClose(action,quality,rec,hasSuggest){
   if(quality==='good')return action+'はこのままで問題ありません。'+(hasSuggest?rec+'':'');
   return action+'は許容できます。次に同じ場面が来たら、'+rec+'も意識してください。';
 }
+// [Codex fix 2026-06-18] 評価軸ごとの文章を最後に整え、重複と硬いメタ表現を減らす。
+function polishCoachReviewText(txt,ev){
+  txt=String(txt||'').replace(/\s+/g,' ').trim();
+  if(!txt)return'';
+  txt=txt
+    .replace(/ここは見直したい判断です。リングゲームのリバーです。/g,'リングゲームのリバーで、見直したい判断です。')
+    .replace(/ここは見直したい判断です。リングゲームで、/g,'リングゲームで、見直したい判断です。')
+    .replace(/ここは複数の選択肢があります。/g,'複数のラインが成立します。')
+    .replace(/ここは混合寄りの場面です。/g,'混合戦略になる場面です。')
+    .replace(/ベット\/レイズ/g,'ベットまたはレイズ')
+    .replace(/GTOでは混ざることがありますが、実戦では/g,'理論上は混ざりますが、実戦では')
+    .replace(/許容できます。次に同じ場面が来たら、(.+?)も意識してください。/g,'許容範囲です。次は$1も候補にしてください。')
+    .replace(/このボードは完成役や強いドローが残りやすいので、/g,'このボードでは完成役や強いドローを意識して、')
+    .replace(/このボードは比較的落ち着いているので、/g,'ボードは比較的落ち着いているので、')
+    .replace(/見た目のエクイティより、相手の残っているレンジの強さを優先して見直したいです。/g,'手の強さだけでなく、相手に残る強いレンジを優先して見直します。');
+  const raw=txt.match(/[^。]+。?/g)||[txt];
+  const out=[];
+  const seen=new Set();
+  raw.forEach(function(s){
+    s=s.trim();
+    if(!s)return;
+    if(s.slice(-1)!=='。')s+='。';
+    const key=s
+      .replace(/\d+%pot/g,'X%pot')
+      .replace(/\d+%/g,'X%')
+      .replace(/[、。]/g,'')
+      .replace(/今回|ここ|この場面|同じ場面/g,'')
+      .trim();
+    if(seen.has(key))return;
+    if(out.length>=6&&/(GTO|理論上|ボード|レンジ更新|定義|候補)/.test(s))return;
+    seen.add(key);
+    out.push(s);
+  });
+  let joined=out.join('');
+  if(ev&&ev.street==='river'){
+    joined=joined.replace(/強いドローが残りやすい/g,'完成役やブラフ候補が残りやすい');
+  }
+  return joined.replace(/。。+/g,'。').trim();
+}
 function coachReviewText(ev){
   if(!ev)return'';
   const action={fold:'フォールド',check:'チェック',call:'コール',raise:(ev.street==='preflop'?'レイズ':'ベット'),allin:'オールイン'}[ev.action]||ev.action;
@@ -11970,18 +12014,19 @@ function coachReviewText(ev){
   }
   rec=naturalRecommendationText(rec);
   const preflopCompact=preflopCoachSummaryText(ev,action,rec);
-  if(preflopCompact)return preflopCompact;
+  if(preflopCompact)return polishCoachReviewText(preflopCompact,ev);
   const close=recommendationClose(action,ev.quality,rec,!!ev.suggest);
   const mixedLineExtra=mixedLineExplanationText(ev);
   const postflopExtra=postflopCoachExtraText(ev);
   const theoryExtra=ev.rangeActionUpdateProfile?'':gtoTheoryReviewText(ev);
   const rangeActionExtra=naturalRangeActionUpdateText(ev);
   const boardDefinitionExtra=naturalBoardTextureDefinitionText(ev);
-  return (verdict+' '+scene+(reason?' '+reason:'')+(rangeActionExtra?' '+rangeActionExtra:'')+(boardDefinitionExtra?' '+boardDefinitionExtra:'')+(theoryExtra?' '+theoryExtra:'')+(mixedLineExtra?' '+mixedLineExtra:'')+(postflopExtra?' '+postflopExtra:'')+' '+close)
+  const rawText=(verdict+' '+scene+(reason?' '+reason:'')+(rangeActionExtra?' '+rangeActionExtra:'')+(boardDefinitionExtra?' '+boardDefinitionExtra:'')+(theoryExtra?' '+theoryExtra:'')+(mixedLineExtra?' '+mixedLineExtra:'')+(postflopExtra?' '+postflopExtra:'')+' '+close)
     .replace(/プリフロップ/g,'フロップ前')
     .replace(/\s+/g,' ')
     .replace(/。。+/g,'。')
     .trim();
+  return polishCoachReviewText(rawText,ev);
 }
 function compactReviewDetailsHTML(ev,metaHTML){
   if(!metaHTML)return'';
