@@ -5145,6 +5145,94 @@ function boardTextureTransitionProfileText(p){
 }
 
 // [Codex fix 2026-06-16] Range advantage / nut advantageを、単なる表示ではなく判断軸として保持する。
+// [Codex fix 2026-06-20] ポストフロップのベットを「何のために打つか」で評価する。
+function postflopBetPurposeProfile(hr,d,role,texture,rangeProfile,opts){
+  if(!hr||!d||d.street==='preflop'||d.street==='river')return null;
+  const betLike=d.action==='bet'||d.action==='raise'||d.action==='allin';
+  if(!betLike)return null;
+  opts=opts||{}; role=role||{}; texture=texture||null; rangeProfile=rangeProfile||{};
+  const pot=Math.max(1,d.pot||1);
+  const sizePct=Math.round((d.amount||0)/pot*100);
+  const facing=!!((d.toCall||0)>0);
+  const street=d.street||'flop';
+  const multiway=(opts.nOpponents||1)>=2;
+  const isPfr=!!opts.isPfr;
+  const isRiver=street==='river';
+  const isNut=!!(role.isNut||role.role==='nutted');
+  const strongMade=!!(isNut||role.role==='strong'||(!role.pairTier&&role.role==='value'));
+  const onePair=!!(role.pairTier||/ワンペア|トップペア|オーバーペア|中・低ペア|ミドルペア/.test(role.note||''));
+  const strongOnePair=!!(onePair&&['top_pair','overpair'].includes(role.pairTier||'')&&(role.role==='strong'||role.role==='value'));
+  const weakMade=!!(onePair&&!strongOnePair&&!strongMade);
+  const drawOuts=role.draw&&role.draw.outs?role.draw.outs:0;
+  const strongDraw=!!(!isRiver&&drawOuts>=8);
+  const weakDraw=!!(!isRiver&&drawOuts>0&&drawOuts<8);
+  const air=!!(role.role==='air'||/ハイカード|ドロー失敗/.test(role.note||''));
+  const dynamic=!!(texture&&(texture.dynamic||texture.flushThreat||texture.straightThreat||texture.paired));
+  const staticDry=!!(texture&&texture.staticBoard);
+  const rangeHigh=!!(rangeProfile&&(rangeProfile.heroRangeAdv==='高'||rangeProfile.heroRangeAdv==='high'||rangeProfile.heroRangeAdv==='高い'||rangeProfile.rangeOwner==='hero'));
+  const nutLow=!!(rangeProfile&&(rangeProfile.heroNutAdv==='低'||rangeProfile.heroNutAdv==='low'||rangeProfile.nutOwner==='villain'));
+  const sizePlan=texture?boardTextureSizePlan(pot,texture,role,{isPfr,nOpponents:opts.nOpponents||1}):null;
+  const recommendedPct=sizePlan&&sizePlan.pct?sizePlan.pct:null;
+  const sizeTooLarge=!!(recommendedPct&&sizePct>=recommendedPct+25&&sizePct>=65);
+  const sizeTooSmall=!!(recommendedPct&&sizePct<=recommendedPct-25&&strongMade&&!isNut&&sizePct<=33);
+  let lane='postflopBet',purpose='ベット',target='相手レンジ',severity='border',verdict='ベット理由を確認',policy='',risk='',suggest='';
+  if(isNut||strongMade&&!onePair){
+    lane='value'; purpose='強いバリュー'; target='下の完成役や強いワンペア';
+    severity=sizeTooSmall?'border':'good';
+    verdict=sizeTooSmall?'強い手の小さすぎるバリュー':'強い手のバリューベット';
+    policy='強い完成役は、相手が払える下の完成役や強いワンペアを想定してベットします。';
+    suggest=sizeTooSmall?'推奨: もう少し大きく。目安は'+(recommendedPct||50)+'%pot前後':'推奨: バリュー継続。サイズは相手がコールできる下の手を基準に選びます';
+  }else if(strongOnePair){
+    lane=isRiver?'thinValue':'protectionValue'; purpose=isRiver?'薄いバリュー':'バリュー兼プロテクション'; target=isRiver?'下のワンペアや弱いショーダウン価値':'下のペア、オーバーカード、ドロー';
+    const tooBig=(isRiver&&dynamic&&sizePct>=55)||(!isRiver&&dynamic&&sizePct>=75)||multiway&&sizePct>=55||sizeTooLarge;
+    severity=tooBig?'bad':sizePct<=45||!dynamic?'good':'border';
+    verdict=tooBig?'ワンペアで大きく打ちすぎ':'ワンペアの目的あるベット';
+    policy=isRiver?'リバーのワンペアは、どの下の手にコールしてほしいかを先に決めます。':'フロップ/ターンの強いワンペアは、下の手から取りつつ、ドローやオーバーカードに無料で見せない目的があります。';
+    suggest=tooBig?'推奨: 小〜中サイズかチェック。目安は'+(recommendedPct||40)+'%pot前後':'推奨: 小〜中サイズ中心。大きくするなら相手が広くコールする根拠が必要です';
+  }else if(weakMade){
+    lane='weakMadeBet'; purpose='薄いプロテクション'; target='オーバーカードや弱いドロー';
+    const bad=multiway||dynamic&&sizePct>=45||sizePct>=60||nutLow;
+    severity=bad?'bad':'border';
+    verdict=bad?'弱い完成役で打ちすぎ':'弱い完成役の薄いプロテクション';
+    policy='弱いワンペアや下のペアは、強いバリューではなくショーダウン価値を守る手です。打つなら小さく、チェックも自然です。';
+    suggest=bad?'推奨: チェック寄り。打つなら25〜33%potまで':'相手依存: 小さく打つかチェック。大きいポットは作らない';
+  }else if(strongDraw){
+    lane='semiBluff'; purpose='セミブラフ'; target='フォールドするAハイ/弱ペアと、コールされても改善する未来';
+    const bad=multiway&&sizePct>=60||sizePct>=100&&!isNut;
+    severity=bad?'border':'good';
+    verdict=bad?'セミブラフのサイズ過多':'良いセミブラフ候補';
+    policy='強いドローは、今フォールドを取る価値と、コールされても改善する価値の両方があります。';
+    suggest=bad?'推奨: 33〜75%potに抑える。マルチウェイでは頻度を落とす':'推奨: 33〜75%potを中心にベット候補';
+  }else if(weakDraw){
+    lane='weakDrawBluff'; purpose='弱いドローのブラフ'; target='相手の空振りや弱いAハイ';
+    const good=rangeHigh&&staticDry&&sizePct<=40&&!multiway;
+    severity=good?'border':'bad';
+    verdict=good?'レンジ優位を使う小さめブラフ':'弱いドローで打ちすぎ';
+    policy='弱いドローは、改善率だけでは足りません。レンジ優位、フォールドエクイティ、サイズが揃う時だけ打ちます。';
+    suggest=good?'相手依存: 小さく低頻度で可':'推奨: チェック寄り。強いドローや良いブロッカーを待つ';
+  }else if(air){
+    lane=rangeHigh&&staticDry&&isPfr&&sizePct<=40&&!multiway?'rangeCbet':'airBluff';
+    purpose=lane==='rangeCbet'?'レンジCB':'空振りブラフ';
+    target=lane==='rangeCbet'?'相手の広い空振りレンジ':'フォールドしてくれる弱いレンジ';
+    severity=lane==='rangeCbet'?'good':'bad';
+    verdict=lane==='rangeCbet'?'レンジ優位を使う小さめCB':'ブラフ条件不足';
+    policy=lane==='rangeCbet'?'A/K/Q高のドライボードでは、PFR側が小さく広く打てる場面があります。':'エアで打つ時は、相手が十分に降りる構造とブロッカーが必要です。重いボードやマルチウェイでは無理に作りません。';
+    suggest=lane==='rangeCbet'?'推奨: 小さめCBで可。目安は33%pot':'推奨: チェック。打つなら強いブロッカーと明確なフォールド先が必要';
+  }
+  if(facing&&lane!=='value'&&lane!=='semiBluff'){
+    severity=severity==='good'?'border':'bad';
+    verdict='レイズ理由を再確認';
+    policy+=' 相手のベットにレイズする時は、コールされた時に勝っている手か、降ろしたい強い手が明確である必要があります。';
+    suggest='推奨: コール/フォールド寄り。レイズは強いバリューか強いドローに絞ります';
+  }
+  risk=sizePct+'%pot / '+purpose+' / 対象='+target+(texture?(' / ボード='+texture.label):'')+(multiway?' / マルチウェイ':'')+(recommendedPct?(' / 目安='+recommendedPct+'%pot'):'');
+  return{lane,purpose,target,street,sizePct,recommendedPct,axis:'ポストフロップのベット目的',severity,verdict,policy,risk,suggest,sizePlan,strongMade,onePair,strongOnePair,weakMade,strongDraw,weakDraw,air,rangeHigh,nutLow,dynamic,multiway};
+}
+function postflopBetPurposeProfileText(p){
+  if(!p)return'';
+  return p.verdict+' — '+p.policy+' 注意: '+p.risk;
+}
+
 function rangeNutAdvantageProfile(hr,d,profile,role,opts){
   if(!hr||!d||!profile||d.street==='preflop')return null;
   opts=opts||{};
@@ -7132,6 +7220,7 @@ function analyzeHand(hr){
       else if(ev.liveCashMultiwayProfile&&ev.liveCashMultiwayProfile.axis&&ev.liveCashMultiwayProfile.severity==='bad')primary=ev.liveCashMultiwayProfile.axis;
       else if(ev.liveCashReraisedPotProfile&&ev.liveCashReraisedPotProfile.axis&&ev.liveCashReraisedPotProfile.severity==='bad')primary=ev.liveCashReraisedPotProfile.axis;
       else if(ev.liveCashInitiativeProfile&&ev.liveCashInitiativeProfile.axis&&ev.liveCashInitiativeProfile.severity==='bad')primary=ev.liveCashInitiativeProfile.axis;
+      else if(ev.postflopBetPurposeProfile&&ev.postflopBetPurposeProfile.axis&&ev.postflopBetPurposeProfile.severity==='bad')primary=ev.postflopBetPurposeProfile.axis;
       else if(ev.liveCashSprProfile&&ev.liveCashSprProfile.axis&&!(ev.liveCashSpotProfile&&ev.liveCashSpotProfile.lane==='riverOnePairCall'))primary=ev.liveCashSprProfile.axis;
       else if(ev.liveCashSpotProfile&&ev.liveCashSpotProfile.axis)primary=ev.liveCashSpotProfile.axis;
       else if(ev.street==='river'&&facing)primary='リバーのコール/フォールド';
@@ -7171,6 +7260,10 @@ function analyzeHand(hr){
     if(ev.liveCashRiverDecisionProfile){
       addTag('リバー金額');
       addTag(ev.liveCashRiverDecisionProfile.label);
+    }
+    if(ev.postflopBetPurposeProfile){
+      addTag('ベット目的');
+      addTag(ev.postflopBetPurposeProfile.purpose);
     }
     if(ev.deduction>0)addTag('EV損失');
     ev.evalAxis=primary;
@@ -7304,6 +7397,37 @@ function analyzeHand(hr){
       ev.deduction=next;
       ev.rangeActionUpdateWeightNote=notes.join('。');
       ev.comment=(ev.comment||'')+' 【レンジ更新】'+ev.rangeActionUpdateWeightNote;
+    }
+    return next-before;
+  }
+  // [Codex fix 2026-06-20] ベットの目的が薄い時だけ追加補正する。既存のGTO/サイズ評価は温存。
+  function applyPostflopBetPurposeWeight(ev){
+    const p=ev.postflopBetPurposeProfile||null;
+    if(!p||ev.street==='preflop')return 0;
+    const before=ev.deduction||0;
+    let next=before;
+    const notes=[];
+    if(p.severity==='bad'){
+      next=Math.max(next,p.lane==='airBluff'||p.lane==='weakMadeBet'?14:12);
+      ev.quality='bad';
+      notes.push(postflopBetPurposeProfileText(p));
+      if(!ev.suggest&&p.suggest)ev.suggest=p.suggest;
+    }else if(p.severity==='border'){
+      next=Math.max(next,5);
+      if(ev.quality==='good')ev.quality='ok';
+      notes.push(postflopBetPurposeProfileText(p));
+      if(!ev.suggest&&p.suggest)ev.suggest=p.suggest;
+    }else if(p.severity==='good'){
+      if(before>0&&(p.lane==='value'||p.lane==='semiBluff'||p.lane==='rangeCbet'||p.lane==='protectionValue'))next=Math.min(next,5);
+      if(ev.quality==='bad')ev.quality='ok';
+      notes.push(postflopBetPurposeProfileText(p));
+      if(!ev.suggest&&p.suggest)ev.suggest=p.suggest;
+    }
+    next=Math.max(0,Math.min(45,next));
+    if(next!==before||notes.length){
+      ev.deduction=next;
+      ev.postflopBetPurposeWeightNote=notes.join('。');
+      ev.comment=(ev.comment||'')+' 【ベット目的】'+ev.postflopBetPurposeWeightNote;
     }
     return next-before;
   }
@@ -8586,6 +8710,7 @@ function analyzeHand(hr){
         ev.nutAdv=ev.rangeNutAdvantageProfile.heroNutAdv||ev.nutAdv;
       }
       ev.rangeActionUpdateProfile=ev.boardTextureProfile?rangeActionUpdateProfile(hr,d,ev.boardTextureProfile,opRole,{heroRangeAdv:ev.rangeAdv,nOpponents:streetOpps}):null;
+      ev.postflopBetPurposeProfile=ev.boardTextureProfile?postflopBetPurposeProfile(hr,d,opRole,ev.boardTextureProfile,ev.rangeNutAdvantageProfile,{isPfr:humanWasTexturePfr,nOpponents:streetOpps}):null;
       // [Codex fix 2026-06-12] トリップス/クアッズ等の強い完成役をワンペア監査へ流さない。
       // Aトリップスを「弱いワンペア」と説明するような誤分類をここで遮断する。
       ev.onePairProfile=opEval&&opEval.cat===1?onePairPressureProfile(hr,d,opRole,opComm.length>=3?boardTex(opComm):null,streetOpps):null;
@@ -8738,6 +8863,7 @@ function analyzeHand(hr){
     applyFinalTablePostflopWeight(ev);
     applyRangeNutAdvantageWeight(ev);
     applyRangeActionUpdateWeight(ev);
+    applyPostflopBetPurposeWeight(ev);
     applyBoardTextureTransitionWeight(ev);
     composeNaturalReview(ev,d,hr);
     attachGtoTheorySnapshot(ev);
@@ -8819,6 +8945,7 @@ function analyzeHand(hr){
       const rp=e.liveCashReraisedPotProfile||null;
       const mwp=e.liveCashMultiwayProfile||null;
       const rvp=e.liveCashRiverDecisionProfile||null;
+      const bpp=e.postflopBetPurposeProfile||null;
       const lane=p?p.lane:'';
       const mwlane=mwp?mwp.lane:'';
       const rplane=rp?rp.lane:'';
@@ -8862,9 +8989,10 @@ function analyzeHand(hr){
           if(lane==='riverOnePairCall'||(e.onePairProfile&&e.onePairProfile.verdict==='bad'))cats.river.ded+=Math.ceil(ded*0.35);
           if(rvp&&rvp.severity==='bad')cats.river.ded+=Math.ceil(ded*0.35);
         }
-        if((e.action==='raise'||e.action==='bet'||e.action==='allin')||lane==='riverThinValue'||rvlane==='riverThinValueSize'||rvlane==='riverValueTarget'||rvlane==='riverBluffCandidate'||/サイズ|薄バリュー/.test(txt)){
+        if(bpp||(e.action==='raise'||e.action==='bet'||e.action==='allin')||lane==='riverThinValue'||rvlane==='riverThinValueSize'||rvlane==='riverValueTarget'||rvlane==='riverBluffCandidate'||/サイズ|薄バリュー/.test(txt)){
           cats.value.seen=true;
           cats.value.ded+=ded;
+          if(bpp&&bpp.severity==='bad')cats.value.ded+=Math.ceil(ded*0.25);
           if(lane==='riverThinValue')cats.value.ded+=Math.ceil(ded*0.20);
           if(rvlane==='riverThinValueSize'||rvlane==='riverBluffCandidate')cats.value.ded+=Math.ceil(ded*0.20);
         }
@@ -11438,6 +11566,56 @@ function runFishTankRegressionTests(){
     return !!(ev&&ev.rangeActionUpdateProfile&&ev.gtoTheory&&ev.gtoTheory.rangeActionUpdate&&se&&se.rangeActionUpdateProfile&&se.gtoTheory&&se.gtoTheory.rangeActionUpdate);
   });
 
+  add('ポストフロップベット目的: 強いドローのセミブラフを肯定する',function(){
+    const hr=regressionHand({
+      heroHole:['Ah','Kh'],
+      villainHole:['7c','7d'],
+      board:['Qh','8h','2c'],
+      decisions:[
+        regressionDecision({street:'flop',action:'raise',amount:50,pot:100,toCall:0,facingRaise:false,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:500})
+      ],
+      pot:150
+    });
+    const ev=humanEval(analyzeHand(hr),function(e){return e.street==='flop'&&(e.action==='raise'||e.action==='bet');});
+    const p=ev&&ev.postflopBetPurposeProfile;
+    return !!(p&&p.lane==='semiBluff'&&p.severity==='good'&&ev.quality!=='bad'&&/セミブラフ/.test(coachReviewText(ev)+p.purpose+p.policy));
+  });
+
+  add('ポストフロップベット目的: 弱いワンペアの大きいベットを目的不足として見る',function(){
+    const hr=regressionHand({
+      heroHole:['7s','6s'],
+      villainHole:['Ah','Kd'],
+      board:['Kc','7d','2h'],
+      decisions:[
+        regressionDecision({street:'flop',action:'raise',amount:80,pot:100,toCall:0,facingRaise:false,position:'BB',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:500})
+      ],
+      pot:180
+    });
+    const ev=humanEval(analyzeHand(hr),function(e){return e.street==='flop'&&(e.action==='raise'||e.action==='bet');});
+    const p=ev&&ev.postflopBetPurposeProfile;
+    return !!(p&&p.lane==='weakMadeBet'&&p.severity==='bad'&&ev.quality==='bad'&&/弱い完成役|プロテクション/.test(coachReviewText(ev)+p.policy));
+  });
+
+  add('ポストフロップベット目的: A-high dryの小さめCBをレンジCBとして扱う',function(){
+    const hr=regressionHand({
+      heroHole:['Kc','Qc'],
+      villainHole:['7h','7d'],
+      board:['Ad','9c','3s'],
+      decisions:[
+        regressionDecision({street:'preflop',action:'raise',amount:15,pot:7,toCall:0,facingRaise:false,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:500}),
+        regressionDecision({street:'preflop',action:'call',amount:10,pot:22,toCall:10,potOdds:10/32,facingRaise:true,position:'BB',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:500}),
+        regressionDecision({street:'flop',action:'check',amount:0,pot:100,toCall:0,facingRaise:false,position:'BB',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:490}),
+        regressionDecision({street:'flop',action:'bet',amount:33,pot:100,toCall:0,facingRaise:false,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:485})
+      ],
+      pot:133
+    });
+    const ev=humanEval(analyzeHand(hr),function(e){return e.street==='flop'&&(e.action==='raise'||e.action==='bet');});
+    const p=ev&&ev.postflopBetPurposeProfile;
+    const snap=evaluationSnapshot(hr,analyzeHand(hr));
+    const se=snap&&snap.evaluations&&snap.evaluations.find(function(e){return e.street==='flop'&&(e.action==='raise'||e.action==='bet');});
+    return !!(p&&p.lane==='rangeCbet'&&p.severity==='good'&&ev.quality!=='bad'&&se&&se.postflopBetPurposeProfile&&/レンジCB/.test(coachReviewText(ev)+p.purpose));
+  });
+
   add('コーチ文: レンジ更新を口語で説明する',function(){
     const ev={
       street:'river',
@@ -12662,6 +12840,11 @@ function coachReviewText(ev){
     const blockerText=p.blocker&&p.blocker.coach?p.blocker.coach:'';
     scene='リングゲームのリバーです。'+tendencyText+naturalRiskText(p.risk,actor,'river')+(blockerText?blockerText:'');
     reason=p.policy;
+  }else if(ev.postflopBetPurposeProfile){
+    const p=ev.postflopBetPurposeProfile;
+    scene=ev.streetLabel||ev.street;
+    scene='ポストフロップのベット判断です。このベットの主目的は「'+p.purpose+'」です。';
+    reason=p.policy+' 狙う相手は「'+p.target+'」です。'+(p.recommendedPct?' サイズの目安は'+p.recommendedPct+'%pot前後です。':'');
   }else if(ev.liveCashSpotProfile){
     const p=ev.liveCashSpotProfile;
     // [Claude fix 2026-06-09] openFold/vsRaiseFold: ev.commentから手とポジションを取り出して自然な場面説明に変換
@@ -13340,6 +13523,8 @@ function evaluationSnapshot(hr,an){
         rangeNutAdvantageWeightNote:e.rangeNutAdvantageWeightNote||'',
         rangeActionUpdateProfile:e.rangeActionUpdateProfile||null,
         rangeActionUpdateWeightNote:e.rangeActionUpdateWeightNote||'',
+        postflopBetPurposeProfile:e.postflopBetPurposeProfile||null,
+        postflopBetPurposeWeightNote:e.postflopBetPurposeWeightNote||'',
         onePairProfile:e.onePairProfile||null,
         onePairWeightNote:e.onePairWeightNote||'',
         tournamentPhaseAxis:e.tournamentPhaseAxis||'',
@@ -14380,7 +14565,7 @@ document.addEventListener('click',function(e){
   }
 });
 
-window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,runFishTankAuditBatch,fishTankAuditBatchReportText,buildFishTankAuditRepairQueue,fishTankAuditRepairPlanText,auditIssuesForHand,playAuditGame,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,boardTextureProfile,boardTextureProfileText,boardTextureFrequencyAdjustment,boardTextureSizePlan,boardTextureTransitionProfile,boardTextureTransitionProfileText,rangeNutAdvantageProfile,rangeNutAdvantageProfileText,rangeActionUpdateProfile,rangeActionUpdateProfileText,liveCashRangeProfile,liveCashSpotProfile,liveCashSpotProfileText,liveCashSprProfile,liveCashSprProfileText,liveCashInitiativeProfile,liveCashInitiativeProfileText,liveCashReraisedPotProfile,liveCashReraisedPotProfileText,liveCashMultiwayProfile,liveCashMultiwayProfileText,liveCashRiverDecisionProfile,liveCashRiverDecisionProfileText,tournamentRangeProfile,tournamentFinalTableProfile,tournamentFinalTableStackRole,tournamentFinalTableCollisionProfile,tournamentFinalTableRangeProfile,tournamentFinalTableRangeProfileText,tournamentFinalTablePostflopProfile,tournamentFinalTablePostflopProfileText,tournamentFinalTableLearningPoint,tournamentFinalTableLearningPointText,tournamentHeadsUpProfile};
+window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,runFishTankAuditBatch,fishTankAuditBatchReportText,buildFishTankAuditRepairQueue,fishTankAuditRepairPlanText,auditIssuesForHand,playAuditGame,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,boardTextureProfile,boardTextureProfileText,boardTextureFrequencyAdjustment,boardTextureSizePlan,boardTextureTransitionProfile,boardTextureTransitionProfileText,rangeNutAdvantageProfile,rangeNutAdvantageProfileText,rangeActionUpdateProfile,rangeActionUpdateProfileText,postflopBetPurposeProfile,postflopBetPurposeProfileText,liveCashRangeProfile,liveCashSpotProfile,liveCashSpotProfileText,liveCashSprProfile,liveCashSprProfileText,liveCashInitiativeProfile,liveCashInitiativeProfileText,liveCashReraisedPotProfile,liveCashReraisedPotProfileText,liveCashMultiwayProfile,liveCashMultiwayProfileText,liveCashRiverDecisionProfile,liveCashRiverDecisionProfileText,tournamentRangeProfile,tournamentFinalTableProfile,tournamentFinalTableStackRole,tournamentFinalTableCollisionProfile,tournamentFinalTableRangeProfile,tournamentFinalTableRangeProfileText,tournamentFinalTablePostflopProfile,tournamentFinalTablePostflopProfileText,tournamentFinalTableLearningPoint,tournamentFinalTableLearningPointText,tournamentHeadsUpProfile};
 // [Codex fix 2026-06-05] Query-gated regression output for browser verification without exposing debug UI during normal play.
 if(new URLSearchParams(location.search).has('codex_regression')){
   setTimeout(function(){
