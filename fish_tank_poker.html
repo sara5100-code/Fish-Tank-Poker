@@ -44,6 +44,9 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,'Hiragino 
 .hud-btns{display:flex;gap:6px;}
 .hud-btn{padding:5px 12px;background:var(--panel2);border:1px solid var(--border);border-radius:8px;color:var(--dim);font-size:12px;cursor:pointer;font-family:inherit;transition:all .15s;}
 .hud-btn:hover{border-color:var(--accent);color:var(--accent);}
+/* [Codex fix 2026-06-21] 再評価・検査・監査は開発用。通常プレイでは出さず、URLに ?codex_dev=1 を付けた時だけ表示する。 */
+.dev-btn{display:none;}
+body.codex-dev .dev-btn{display:inline-flex;}
 /* ===== シナリオバナー ===== */
 #scenario-banner{display:none;position:relative;z-index:180;background:rgba(61,108,240,.07);border:1px solid rgba(61,108,240,.18);border-radius:8px;padding:5px 14px;font-size:11px;color:var(--accent);font-weight:700;text-align:center;width:100%;max-width:680px;letter-spacing:.02em;margin-bottom:5px;line-height:1.45;}
 .btn-scenario{width:100%;padding:12px;background:var(--panel2);border:1.5px solid var(--accent);border-radius:12px;color:var(--accent);font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;letter-spacing:.04em;margin-top:6px;transition:all .15s;}
@@ -70,6 +73,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,'Hiragino 
 /* ===== シート ===== */
 .seat{position:absolute;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:2px;width:90px;z-index:20;}
 .seat-info{background:rgba(244,247,255,.93);border:1px solid rgba(219,227,240,.9);border-radius:8px;padding:3px 5px;text-align:center;width:100%;position:relative;box-shadow:0 2px 8px rgba(26,40,80,.12);}
+.seat-info-main{min-width:0;}
 .seat.active-seat{z-index:45;}
 .seat.winner-seat{z-index:44;}
 .seat.active-seat .seat-info{border-color:var(--gold);box-shadow:0 0 0 2px rgba(122,96,16,.28),0 3px 10px rgba(26,40,80,.15);}
@@ -241,22 +245,22 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,'Hiragino 
   .setup-card{padding:20px 16px;width:100%;max-width:100%;}
   .setup-card h1{font-size:18px;}
   #game-screen.active{display:flex;flex-direction:column;height:auto!important;min-height:100dvh;overflow-y:auto;}
-  #hud{padding:6px 8px;height:44px;gap:6px;}
-  #hud .hud-title{font-size:12px;line-height:1.15;max-width:118px;white-space:normal;}
-  #hud-info{font-size:11px;line-height:1.2;min-width:58px;text-align:center;}
+  #hud{padding:6px 8px;height:auto;min-height:44px;gap:6px;align-items:center;}
+  #hud .hud-title{font-size:12px;line-height:1.15;max-width:112px;white-space:normal;flex:0 0 auto;}
+  #hud-info{font-size:11px;line-height:1.2;min-width:46px;text-align:center;flex:1 1 auto;}
   .hud-btns{gap:4px;flex-shrink:0;}
-  .hud-btn{padding:5px 8px;font-size:11px;border-radius:7px;}
-  .hud-btn.dev-btn{display:none;}
+  .hud-btn{padding:5px 7px;font-size:11px;border-radius:7px;min-width:0;}
   #main-area{overflow:visible;flex:none;}
-  #table-wrap{flex:none;padding:18px 6px 0;}
-  #table-container{aspect-ratio:1.25/1;max-width:100%;}
+  #table-wrap{flex:none;padding:14px 4px 0;overflow:hidden;}
+  #table-container{aspect-ratio:1.42/1;width:min(100%,480px);max-width:100%;}
   #human-area{padding:6px 10px 10px;width:100%;}
   #human-cards .card.big{width:44px;height:64px;font-size:16px;}
   .action-btn{padding:10px 5px;font-size:12px;}
   .qbtn{padding:7px 10px;font-size:11px;}
   #raise-amount{width:52px;font-size:11px;}
   #main-btns{gap:4px;}
-  .seat{width:72px;}
+  .seat{width:62px;}
+  .seat-info{padding:2px 4px;border-radius:7px;box-shadow:0 2px 6px rgba(26,40,80,.10);}
   .seat-name{font-size:9px;}.seat-chips{font-size:10px;}.seat-bet{font-size:8px;}.seat-pos-badge{font-size:7px;padding:1px 3px;}
   .seat-action{font-size:7px;padding:1px 2px;}
   .card{width:20px;height:32px;font-size:8px;border-radius:3px;}
@@ -271,7 +275,11 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,'Hiragino 
   #side-tabs{display:flex;}
 }
 @media(max-width:380px){
-  .seat{width:58px;}
+  #hud .hud-title{max-width:96px;font-size:11px;}
+  #hud-info{font-size:10px;min-width:40px;}
+  .hud-btn{padding:5px 6px;font-size:10px;}
+  .seat{width:54px;}
+  .seat-info{padding:2px 3px;}
   .seat-name{font-size:8px;}.seat-chips{font-size:9px;}
   .seat-action{font-size:6.5px;}
   .card.big{width:28px;height:42px;font-size:12px;}
@@ -460,6 +468,10 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,'Hiragino 
 
 <script>
 'use strict';
+// [Codex fix 2026-06-21] 通常ユーザーには開発用HUDを見せず、検証時だけURLパラメータで出す。
+if(new URLSearchParams(location.search).has('codex_dev')){
+  document.body.classList.add('codex-dev');
+}
 const RANKS=['2','3','4','5','6','7','8','9','T','J','Q','K','A'];
 const SUITS=['s','h','d','c'];
 const SUIT_SYM={s:'♠',h:'♥',d:'♦',c:'♣'};
@@ -13109,6 +13121,14 @@ function renderTable(){
     const sp={x:baseSp.x,y:baseSp.y};
     // [Codex fix 2026-06-15] スマホ幅では上側/端の席を少し内側へ寄せ、HUDや画面端との重なりを防ぐ。
     if(window.innerWidth<=600){
+      // [Codex fix 2026-06-21] 8〜9人卓のスマホ表示は、左右端と斜め席が重なりやすいので専用座標で少し離す。
+      const mpos=[
+        {x:50,y:88},{x:25,y:80},{x:11,y:58},{x:19,y:19},{x:39,y:12},
+        {x:61,y:12},{x:81,y:19},{x:89,y:58},{x:75,y:80}
+      ];
+      if(game.players.length>=8&&mpos[sel[pi]]){
+        sp.x=mpos[sel[pi]].x;sp.y=mpos[sel[pi]].y;
+      }
       if(sp.y<=10)sp.y+=6;
       else if(sp.y<=25)sp.y+=3;
       if(sp.x<=10)sp.x+=3;
@@ -13162,10 +13182,10 @@ function renderTable(){
       }[la.action]||la.action;
       seatActionHTML='<div class="seat-action '+abCls+'" title="'+(pl.isHuman?'あなた':pl.name)+'['+posStr+']: '+actionLabel+'">'+actionLabel+'</div>';
     }
-    const seatInfo='<div class="seat-info"><div>'+badge+'</div>'
+    const seatInfo='<div class="seat-info"><div class="seat-info-main"><div>'+badge+'</div>'
       +'<div class="seat-name" style="'+nc+'">'+(pl.isHuman?'あなた':pl.name)+'</div>'
       +'<div class="seat-chips">'+pl.chips+'</div>'
-      +'<div class="seat-bet">'+(pl.currentBet>0?pl.currentBet:'')+'</div>'
+      +'<div class="seat-bet">'+(pl.currentBet>0?pl.currentBet:'')+'</div></div>'
       +seatActionHTML
       +'</div>';
     const holesDiv='<div class="hole-cards">'+holes+'</div>';
