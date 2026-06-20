@@ -5225,12 +5225,89 @@ function postflopBetPurposeProfile(hr,d,role,texture,rangeProfile,opts){
     policy+=' 相手のベットにレイズする時は、コールされた時に勝っている手か、降ろしたい強い手が明確である必要があります。';
     suggest='推奨: コール/フォールド寄り。レイズは強いバリューか強いドローに絞ります';
   }
-  risk=sizePct+'%pot / '+purpose+' / 対象='+target+(texture?(' / ボード='+texture.label):'')+(multiway?' / マルチウェイ':'')+(recommendedPct?(' / 目安='+recommendedPct+'%pot'):'');
-  return{lane,purpose,target,street,sizePct,recommendedPct,axis:'ポストフロップのベット目的',severity,verdict,policy,risk,suggest,sizePlan,strongMade,onePair,strongOnePair,weakMade,strongDraw,weakDraw,air,rangeHigh,nutLow,dynamic,multiway};
+  const targetPlan=postflopBetTargetPlan({lane,purpose,target,street,sizePct,recommendedPct,severity,strongOnePair,weakMade,strongDraw,weakDraw,air,rangeHigh,nutLow,dynamic,multiway,isPfr,facing},texture,role,rangeProfile);
+  if(targetPlan&&targetPlan.severity==='bad'){
+    severity='bad';
+    if(targetPlan.verdict)verdict=targetPlan.verdict;
+    if(targetPlan.suggest)suggest=targetPlan.suggest;
+  }else if(targetPlan&&targetPlan.severity==='border'&&severity==='good'){
+    severity='border';
+  }
+  risk=sizePct+'%pot / '+purpose+' / 対象='+target+(texture?(' / ボード='+texture.label):'')+(multiway?' / マルチウェイ':'')+(recommendedPct?(' / 目安='+recommendedPct+'%pot'):'')+(targetPlan&&targetPlan.summary?(' / '+targetPlan.summary):'');
+  return{lane,purpose,target,street,sizePct,recommendedPct,axis:'ポストフロップのベット目的',severity,verdict,policy,risk,suggest,sizePlan,targetPlan,strongMade,onePair,strongOnePair,weakMade,strongDraw,weakDraw,air,rangeHigh,nutLow,dynamic,multiway};
 }
 function postflopBetPurposeProfileText(p){
   if(!p)return'';
-  return p.verdict+' — '+p.policy+' 注意: '+p.risk;
+  const plan=p.targetPlan&&p.targetPlan.text?' '+p.targetPlan.text:'';
+  return p.verdict+' — '+p.policy+plan+' 注意: '+p.risk;
+}
+
+// [Codex fix 2026-06-20] ベット対象レンジとサイズの整合性を分けて見る。
+function postflopBetTargetPlan(p,texture,role,rangeProfile){
+  if(!p)return null;
+  const size=p.sizePct||0;
+  const heavy=!!(texture&&(texture.dynamic||texture.flushThreat||texture.straightThreat||texture.paired));
+  const dry=!!(texture&&texture.staticBoard);
+  const multiway=!!p.multiway;
+  let target='相手の広い継続レンジ';
+  let foldOut='弱い空振り';
+  let sizeFit='neutral';
+  let severity='good';
+  let verdict='';
+  let suggest='';
+  let text='';
+  if(p.lane==='value'){
+    target=size>=75?'強いワンペア、2ペア、下の完成役':'下のペア、強いワンペア、ドローを含む広めの継続';
+    foldOut='ほぼ不要。降ろすより払わせる場面';
+    sizeFit=size>=75?'大きめで取り切り':'中サイズで広く払わせる';
+    text='このベットは、降ろすより下の完成役に払わせる目的です。サイズを大きくするほど、相手の続行レンジは強い手に寄ります。';
+  }else if(p.lane==='protectionValue'){
+    target='下のワンペア、オーバーカード、フラッシュ/ストレートドロー';
+    foldOut='エクイティのある空振りや弱いドロー';
+    const tooBig=(heavy||multiway)&&size>=65;
+    severity=tooBig?'bad':size<=55?'good':'border';
+    verdict=tooBig?'対象レンジに対してサイズが大きすぎ':'対象レンジとサイズはおおむね一致';
+    suggest=tooBig?'推奨: 33〜50%pot。弱い手にも払わせつつ、無料カードを防ぎます':'推奨: 33〜50%pot中心。大きくするなら相手が広く払う根拠が必要';
+    sizeFit=tooBig?'弱い手を降ろしすぎる':'下の手とドローに払わせやすい';
+    text='このベットは、下の手から少し取りつつ無料カードを防ぐ目的です。大きくしすぎると、払ってほしい弱い手が降りて強い手だけが残ります。';
+  }else if(p.lane==='weakMadeBet'){
+    target='オーバーカードや弱いドロー';
+    foldOut='自分より少し弱いがエクイティのある手';
+    const tooBig=size>=45||heavy||multiway;
+    severity=tooBig?'bad':'border';
+    verdict=tooBig?'薄いプロテクションに対してサイズが重い':'小さなプロテクション候補';
+    suggest=tooBig?'推奨: チェック多め。打つなら25〜33%potまで':'推奨: 小さく打つかチェック。大きいポットは作らない';
+    sizeFit=tooBig?'ベット対象が狭すぎる':'最低限のプロテクション';
+    text='弱いワンペアや下のペアは、強いバリューではありません。大きく打つほど、相手の弱い手は降り、苦しいコールだけが残りやすくなります。';
+  }else if(p.lane==='semiBluff'){
+    target='弱いペア、Aハイ、すぐには続けにくい空振り';
+    foldOut='今勝っている弱いメイドハンドや空振り';
+    const tooBig=multiway&&size>=65;
+    severity=tooBig?'border':'good';
+    verdict=tooBig?'セミブラフとしてはやや大きい':'対象レンジがあるセミブラフ';
+    suggest=tooBig?'推奨: 33〜50%pot寄り。マルチウェイではフォールド率を低く見積もります':'推奨: 33〜75%pot。フォールドと改善の両方を狙えます';
+    sizeFit=tooBig?'相手が降りにくい場面で重い':'フォールドと改善率が噛み合う';
+    text='セミブラフは、今すぐ降ろす価値と、コールされても改善する価値の両方で成立します。相手が多い時はフォールド率を低く見ます。';
+  }else if(p.lane==='rangeCbet'){
+    target='広い空振り、弱いペア、バックドアだけの手';
+    foldOut='相手レンジの外れた部分';
+    const bad=size>=55||!dry;
+    severity=bad?'border':'good';
+    verdict=bad?'レンジCBとしては少し重い':'レンジCBとして自然';
+    suggest=bad?'推奨: 25〜33%pot寄り。レンジ優位を小さく広く使います':'推奨: 25〜33%pot。広いレンジに小さく圧をかけます';
+    sizeFit=bad?'レンジCBの軽さとズレる':'小さく広く打つ目的に合う';
+    text='レンジCBは、強い手だけでなくレンジ全体の優位を小さく広く使うベットです。大きく打つほど、レンジ全体で打つ理由は薄くなります。';
+  }else if(p.lane==='weakDrawBluff'||p.lane==='airBluff'){
+    target='フォールドできる空振りと弱いAハイ';
+    foldOut='自分より強いが続けにくい手';
+    const good=p.rangeHigh&&dry&&size<=40&&!multiway;
+    severity=good?'border':'bad';
+    verdict=good?'ブラフ対象はあるが低頻度':'ブラフ対象レンジが足りない';
+    suggest=good?'相手依存: 小さく低頻度で可':'推奨: チェック。降ろせる手が少ない時は無理に作らない';
+    sizeFit=good?'小さくなら成立余地あり':'サイズ以前にフォールド先が足りない';
+    text='ブラフは、相手が実際に降ろせる手を十分に持っている時だけ成立します。降りる手が少ない相手や重いボードでは、チェックの価値が上がります。';
+  }
+  return{target,foldOut,sizeFit,severity,verdict,suggest,text,summary:'対象='+target+' / 降ろす手='+foldOut+' / サイズ整合='+sizeFit};
 }
 
 function rangeNutAdvantageProfile(hr,d,profile,role,opts){
@@ -11616,6 +11693,57 @@ function runFishTankRegressionTests(){
     return !!(p&&p.lane==='rangeCbet'&&p.severity==='good'&&ev.quality!=='bad'&&se&&se.postflopBetPurposeProfile&&/レンジCB/.test(coachReviewText(ev)+p.purpose));
   });
 
+  add('ポストフロップベット対象: 強いワンペアの重すぎるサイズを対象不一致にする',function(){
+    const hr=regressionHand({
+      heroHole:['As','Kd'],
+      villainHole:['Qc','Jc'],
+      board:['Kh','Th','9h'],
+      decisions:[
+        regressionDecision({street:'flop',action:'bet',amount:80,pot:100,toCall:0,facingRaise:false,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:500})
+      ],
+      pot:180
+    });
+    const ev=humanEval(analyzeHand(hr),function(e){return e.street==='flop'&&(e.action==='raise'||e.action==='bet');});
+    const p=ev&&ev.postflopBetPurposeProfile;
+    const t=p&&p.targetPlan;
+    return !!(p&&t&&p.lane==='protectionValue'&&t.severity==='bad'&&/弱い手が降り/.test(coachReviewText(ev)+t.text));
+  });
+
+  add('ポストフロップベット対象: セミブラフにフォールド対象と改善価値を持たせる',function(){
+    const hr=regressionHand({
+      heroHole:['Ah','Qh'],
+      villainHole:['8c','8d'],
+      board:['Jh','7h','2s'],
+      decisions:[
+        regressionDecision({street:'flop',action:'bet',amount:50,pot:100,toCall:0,facingRaise:false,position:'BTN',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:500})
+      ],
+      pot:150
+    });
+    const ev=humanEval(analyzeHand(hr),function(e){return e.street==='flop'&&(e.action==='raise'||e.action==='bet');});
+    const p=ev&&ev.postflopBetPurposeProfile;
+    const t=p&&p.targetPlan;
+    return !!(p&&t&&p.lane==='semiBluff'&&t.severity==='good'&&/改善する価値/.test(coachReviewText(ev)+t.text)&&/Aハイ|弱いペア/.test(t.target));
+  });
+
+  add('ポストフロップベット対象: レンジCBは小さく広く打つ説明を持つ',function(){
+    const hr=regressionHand({
+      heroHole:['Kc','Qc'],
+      villainHole:['7h','7d'],
+      board:['Ad','9c','3s'],
+      decisions:[
+        regressionDecision({street:'preflop',action:'raise',amount:15,pot:7,toCall:0,facingRaise:false,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:500}),
+        regressionDecision({street:'preflop',action:'call',amount:10,pot:22,toCall:10,potOdds:10/32,facingRaise:true,position:'BB',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:500}),
+        regressionDecision({street:'flop',action:'check',amount:0,pot:100,toCall:0,facingRaise:false,position:'BB',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:490}),
+        regressionDecision({street:'flop',action:'bet',amount:33,pot:100,toCall:0,facingRaise:false,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:485})
+      ],
+      pot:133
+    });
+    const ev=humanEval(analyzeHand(hr),function(e){return e.street==='flop'&&(e.action==='raise'||e.action==='bet');});
+    const p=ev&&ev.postflopBetPurposeProfile;
+    const t=p&&p.targetPlan;
+    return !!(p&&t&&p.lane==='rangeCbet'&&t.severity==='good'&&/小さく広く/.test(coachReviewText(ev)+t.text));
+  });
+
   add('コーチ文: レンジ更新を口語で説明する',function(){
     const ev={
       street:'river',
@@ -12844,7 +12972,7 @@ function coachReviewText(ev){
     const p=ev.postflopBetPurposeProfile;
     scene=ev.streetLabel||ev.street;
     scene='ポストフロップのベット判断です。このベットの主目的は「'+p.purpose+'」です。';
-    reason=p.policy+' 狙う相手は「'+p.target+'」です。'+(p.recommendedPct?' サイズの目安は'+p.recommendedPct+'%pot前後です。':'');
+    reason=p.policy+' 狙う相手は「'+p.target+'」です。'+(p.targetPlan&&p.targetPlan.text?' '+p.targetPlan.text:'')+(p.recommendedPct?' サイズの目安は'+p.recommendedPct+'%pot前後です。':'');
   }else if(ev.liveCashSpotProfile){
     const p=ev.liveCashSpotProfile;
     // [Claude fix 2026-06-09] openFold/vsRaiseFold: ev.commentから手とポジションを取り出して自然な場面説明に変換
