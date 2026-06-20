@@ -5474,6 +5474,65 @@ function postflopDefensePlanProfileText(p){
   if(!p)return'';
   return p.verdict+' — '+p.policy+' サイズ='+p.sizePct+'%pot / 圧力='+p.pressure+'回';
 }
+// [Codex fix 2026-06-20] コール後に次ストリートで困るカードを先に言語化し、受けた後の計画を作る。
+function postflopCallFuturePlanProfile(hr,d,role,texture,defenseProfile,opts){
+  if(!hr||!d||d.street==='preflop'||d.street==='river'||d.action!=='call'||!((d.toCall||0)>0))return null;
+  opts=opts||{}; role=role||{}; texture=texture||{}; defenseProfile=defenseProfile||null;
+  const nextStreet=d.street==='flop'?'turn':'river';
+  const scare=[];
+  const good=[];
+  const hasPair=!!role.pairTier;
+  const isStrong=!!(role.isNut||role.role==='nutted'||role.role==='strong');
+  const hasDraw=!!(role.draw&&role.draw.outs>0);
+  const strongDraw=!!(role.draw&&role.draw.outs>=8);
+  const weakDraw=!!(role.draw&&role.draw.outs>0&&role.draw.outs<8);
+  const oop=!!opts.isOOP;
+  const multiway=(opts.nOpponents||1)>=2;
+  const sizePct=defenseProfile&&defenseProfile.sizePct!=null?defenseProfile.sizePct:Math.round((d.toCall||0)/Math.max(1,(d.pot||0)-(d.toCall||0))*100);
+  if(texture.flushThreat)scare.push('同スート完成');
+  if(texture.straightThreat)scare.push('連結完成');
+  if(texture.dynamic)scare.push('強いオーバーカード');
+  if(texture.paired)scare.push('ボードペア化');
+  if(hasDraw)good.push('ドロー完成カード');
+  if(hasPair&&!isStrong)good.push('安全なブランク');
+  if(isStrong)good.push('相手が続けやすいブランク');
+  let severity='border',verdict='次ストリート計画を持つコール',policy='',suggest='',plan='';
+  if(isStrong){
+    severity='good';
+    verdict='強い手で計画のあるコール';
+    policy='強い手で受ける時は、次の安全カードでバリューを取りに行きます。怖いカードでもすぐ諦めるのではなく、相手のサイズを見て取り切りとポット管理を分けます。';
+    suggest='次の安全カードではコール継続かレイズ、危険カードではサイズを見て判断';
+  }else if(strongDraw){
+    severity=sizePct>=85||multiway?'border':'good';
+    verdict='強いドローで先を見たコール';
+    policy='強いドローのコールは、引けた時の取り切りと、引けなかった時に無理をしないことがセットです。ターンで改善しなければ、大きい2発目には頻度を落とします。';
+    suggest='改善カードは続行。外れて大きく打たれたらフォールド寄り';
+  }else if(weakDraw){
+    severity='bad';
+    verdict='弱いドローで先が苦しいコール';
+    policy='弱いドローは、引けるカードが少なく、引けても強い完成役になりにくいことがあります。次も打たれると降りる場面が多いので、フロップ/ターンで安くないコールは苦しくなります。';
+    suggest='次も大きく打たれる前提なら、今フォールド寄り';
+  }else if(hasPair){
+    const bad=sizePct>=55&&(texture.dynamic||texture.flushThreat||texture.straightThreat||oop||multiway);
+    severity=bad?'bad':'border';
+    verdict=bad?'ワンペアで次が苦しいコール':'ワンペアの慎重なコール';
+    policy='ワンペアのコールは、今だけ勝っているかよりも、次に嫌なカードが落ちてもう一度打たれた時に続けられるかが大事です。嫌なカードが多いボードでは、受ける回数を減らします。';
+    suggest=bad?'次ストリートの大きい圧力には降りる準備。今もフォールド寄り':'安全カードなら一部継続。危険カードと大サイズには慎重に';
+  }else{
+    severity='bad';
+    verdict='空振りで計画不足のコール';
+    policy='ショーダウン価値が薄い手で受けるなら、次にどのカードでブラフを続けるかが必要です。計画がないコールは、次のベットに押し出されやすくなります。';
+    suggest='明確な改善カードやブラフ計画がなければフォールド';
+  }
+  const scareText=scare.length?scare.slice(0,3).join('・'):'大きな危険カードは少なめ';
+  const goodText=good.length?good.slice(0,2).join('・'):'相手が止まるカード';
+  plan='次の良いカード: '+goodText+'。嫌なカード: '+scareText+'。';
+  return{axis:'コール後の次ストリート計画',street:d.street,nextStreet,severity,verdict,policy,suggest,plan,scareCards:scare,goodCards:good,sizePct,oop,multiway,strongDraw,weakDraw,hasPair,isStrong};
+}
+function postflopCallFuturePlanProfileText(p){
+  if(!p)return'';
+  return p.verdict+' — '+p.plan+' '+p.suggest;
+}
 function beforeStreetAggressionCount(hr,d,forHero){
   const idx=streetDecisionIndex(hr,d);
   const before=idx>=0?hr.decisions.slice(0,idx):hr.decisions;
@@ -7475,6 +7534,7 @@ function analyzeHand(hr){
       else if(ev.liveCashReraisedPotProfile&&ev.liveCashReraisedPotProfile.axis&&ev.liveCashReraisedPotProfile.severity==='bad')primary=ev.liveCashReraisedPotProfile.axis;
       else if(ev.liveCashInitiativeProfile&&ev.liveCashInitiativeProfile.axis&&ev.liveCashInitiativeProfile.severity==='bad')primary=ev.liveCashInitiativeProfile.axis;
       else if(ev.postflopDefensePlanProfile&&ev.postflopDefensePlanProfile.axis&&ev.postflopDefensePlanProfile.severity==='bad')primary=ev.postflopDefensePlanProfile.axis;
+      else if(ev.postflopCallFuturePlanProfile&&ev.postflopCallFuturePlanProfile.axis&&ev.postflopCallFuturePlanProfile.severity==='bad')primary=ev.postflopCallFuturePlanProfile.axis;
       else if(ev.postflopBarrelPlanProfile&&ev.postflopBarrelPlanProfile.axis&&ev.postflopBarrelPlanProfile.severity==='bad')primary=ev.postflopBarrelPlanProfile.axis;
       else if(ev.postflopBetPurposeProfile&&ev.postflopBetPurposeProfile.axis&&ev.postflopBetPurposeProfile.severity==='bad')primary=ev.postflopBetPurposeProfile.axis;
       else if(ev.liveCashSprProfile&&ev.liveCashSprProfile.axis&&!(ev.liveCashSpotProfile&&ev.liveCashSpotProfile.lane==='riverOnePairCall'))primary=ev.liveCashSprProfile.axis;
@@ -7528,6 +7588,10 @@ function analyzeHand(hr){
     if(ev.postflopDefensePlanProfile){
       addTag('受け方');
       addTag(ev.postflopDefensePlanProfile.verdict);
+    }
+    if(ev.postflopCallFuturePlanProfile){
+      addTag('次ストリート');
+      addTag(ev.postflopCallFuturePlanProfile.verdict);
     }
     if(ev.deduction>0)addTag('EV損失');
     ev.evalAxis=primary;
@@ -7752,6 +7816,36 @@ function analyzeHand(hr){
       ev.deduction=next;
       ev.postflopDefensePlanWeightNote=notes.join('。');
       ev.comment=(ev.comment||'')+' 【受け方】'+ev.postflopDefensePlanWeightNote;
+    }
+    return next-before;
+  }
+  // [Codex fix 2026-06-20] コール後の未来計画が薄いコールは、単発の必要EQだけで肯定しない。
+  function applyPostflopCallFuturePlanWeight(ev){
+    const p=ev.postflopCallFuturePlanProfile||null;
+    if(!p)return 0;
+    const before=ev.deduction||0;
+    let next=before;
+    const notes=[];
+    if(p.severity==='bad'){
+      next=Math.max(next,p.weakDraw?12:10);
+      ev.quality='bad';
+      notes.push(postflopCallFuturePlanProfileText(p));
+      if(!ev.suggest&&p.suggest)ev.suggest=p.suggest;
+    }else if(p.severity==='border'){
+      next=Math.max(next,4);
+      if(ev.quality==='good')ev.quality='ok';
+      notes.push(postflopCallFuturePlanProfileText(p));
+      if(!ev.suggest&&p.suggest)ev.suggest=p.suggest;
+    }else if(p.severity==='good'){
+      if(before>0)next=Math.min(next,5);
+      if(ev.quality==='bad')ev.quality='ok';
+      notes.push(postflopCallFuturePlanProfileText(p));
+    }
+    next=Math.max(0,Math.min(45,next));
+    if(next!==before||notes.length){
+      ev.deduction=next;
+      ev.postflopCallFuturePlanWeightNote=notes.join('。');
+      ev.comment=(ev.comment||'')+' 【次ストリート計画】'+ev.postflopCallFuturePlanWeightNote;
     }
     return next-before;
   }
@@ -9038,6 +9132,7 @@ function analyzeHand(hr){
       ev.postflopBetPurposeProfile=ev.boardTextureProfile?postflopBetPurposeProfile(hr,d,opRole,ev.boardTextureProfile,ev.rangeNutAdvantageProfile,{isPfr:humanWasTexturePfr,nOpponents:streetOpps}):null;
       ev.postflopBarrelPlanProfile=ev.boardTextureProfile?postflopBarrelPlanProfile(hr,d,opRole,ev.boardTextureProfile,ev.postflopBetPurposeProfile,ev.rangeActionUpdateProfile,{isPfr:humanWasTexturePfr,nOpponents:streetOpps}):null;
       ev.postflopDefensePlanProfile=ev.boardTextureProfile?postflopDefensePlanProfile(hr,d,opRole,ev.boardTextureProfile,ev.rangeActionUpdateProfile,{isOOP:defensePosState.isOOP,nOpponents:streetOpps}):null;
+      ev.postflopCallFuturePlanProfile=ev.boardTextureProfile?postflopCallFuturePlanProfile(hr,d,opRole,ev.boardTextureProfile,ev.postflopDefensePlanProfile,{isOOP:defensePosState.isOOP,nOpponents:streetOpps}):null;
       // [Codex fix 2026-06-12] トリップス/クアッズ等の強い完成役をワンペア監査へ流さない。
       // Aトリップスを「弱いワンペア」と説明するような誤分類をここで遮断する。
       ev.onePairProfile=opEval&&opEval.cat===1?onePairPressureProfile(hr,d,opRole,opComm.length>=3?boardTex(opComm):null,streetOpps):null;
@@ -9193,6 +9288,7 @@ function analyzeHand(hr){
     applyPostflopBetPurposeWeight(ev);
     applyPostflopBarrelPlanWeight(ev);
     applyPostflopDefensePlanWeight(ev);
+    applyPostflopCallFuturePlanWeight(ev);
     applyBoardTextureTransitionWeight(ev);
     composeNaturalReview(ev,d,hr);
     attachGtoTheorySnapshot(ev);
@@ -12102,6 +12198,58 @@ function runFishTankRegressionTests(){
     return !!(p&&p.lane==='fold'&&p.completed&&p.severity==='good'&&ev.quality!=='bad'&&se&&se.postflopDefensePlanProfile);
   });
 
+  add('コール後計画: 弱いドローのコールは次ストリートで苦しいと説明する',function(){
+    const hr=regressionHand({
+      heroHole:['Ah','5s'],
+      villainHole:['Qc','Qs'],
+      board:['Kd','4s','3c'],
+      decisions:[
+        regressionDecision({street:'flop',action:'bet',amount:70,pot:100,toCall:0,facingRaise:false,position:'BTN',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:500}),
+        regressionDecision({street:'flop',action:'call',amount:70,pot:170,toCall:70,potOdds:70/240,facingRaise:true,position:'BB',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:500})
+      ],
+      pot:240
+    });
+    const ev=humanEval(analyzeHand(hr),function(e){return e.street==='flop'&&e.action==='call';});
+    const p=ev&&ev.postflopCallFuturePlanProfile;
+    const txt=coachReviewText(ev);
+    return !!(p&&p.weakDraw&&p.severity==='bad'&&/次ストリート|次に/.test(txt)&&/フォールド寄り|苦しく/.test(txt+p.policy+p.suggest));
+  });
+
+  add('コール後計画: 強いドローは改善カードと外れた時を分ける',function(){
+    const hr=regressionHand({
+      heroHole:['Ah','Qh'],
+      villainHole:['8c','8d'],
+      board:['Jh','7h','2s'],
+      decisions:[
+        regressionDecision({street:'flop',action:'bet',amount:33,pot:100,toCall:0,facingRaise:false,position:'BTN',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:500}),
+        regressionDecision({street:'flop',action:'call',amount:33,pot:133,toCall:33,potOdds:33/166,facingRaise:true,position:'BB',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:500})
+      ],
+      pot:166
+    });
+    const ev=humanEval(analyzeHand(hr),function(e){return e.street==='flop'&&e.action==='call';});
+    const p=ev&&ev.postflopCallFuturePlanProfile;
+    const snap=evaluationSnapshot(hr,analyzeHand(hr));
+    const se=snap&&snap.evaluations&&snap.evaluations.find(function(e){return e.street==='flop'&&e.action==='call';});
+    return !!(p&&p.strongDraw&&p.severity==='good'&&/改善カード/.test(p.suggest+p.policy)&&se&&se.postflopCallFuturePlanProfile);
+  });
+
+  add('コール後計画: ワンペアの重いコールは嫌なカードを説明する',function(){
+    const hr=regressionHand({
+      heroHole:['Js','9d'],
+      villainHole:['Ah','Jh'],
+      board:['Qh','9h','8c'],
+      decisions:[
+        regressionDecision({street:'flop',action:'bet',amount:70,pot:100,toCall:0,facingRaise:false,position:'BTN',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:500}),
+        regressionDecision({street:'flop',action:'call',amount:70,pot:170,toCall:70,potOdds:70/240,facingRaise:true,position:'BB',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:500})
+      ],
+      pot:240
+    });
+    const ev=humanEval(analyzeHand(hr),function(e){return e.street==='flop'&&e.action==='call';});
+    const p=ev&&ev.postflopCallFuturePlanProfile;
+    const txt=coachReviewText(ev);
+    return !!(p&&p.hasPair&&p.severity==='bad'&&/嫌なカード/.test(txt+p.plan)&&/同スート完成|連結完成/.test(p.plan));
+  });
+
   add('コーチ文: レンジ更新を口語で説明する',function(){
     const ev={
       street:'river',
@@ -13330,6 +13478,10 @@ function coachReviewText(ev){
     const p=ev.postflopBarrelPlanProfile;
     scene='ターンの継続ベット判断です。フロップで打って相手にコールされた後、ターンカードで続ける理由が残っているかを見ます。';
     reason=p.policy+' 狙う相手は「'+p.target+'」です。'+(p.suggest?' '+p.suggest:'');
+  }else if(ev.postflopCallFuturePlanProfile){
+    const p=ev.postflopCallFuturePlanProfile;
+    scene='コールした後の次ストリート計画です。今の価格だけでなく、次に続けやすいカードと降りるカードを分けます。';
+    reason=p.policy+' '+p.plan+(p.suggest?' '+p.suggest:'');
   }else if(ev.postflopDefensePlanProfile){
     const p=ev.postflopDefensePlanProfile;
     scene='相手のベットに対する受け方です。必要EQだけでなく、次のストリートでどれだけ実現できるかまで見ます。';
@@ -14023,6 +14175,8 @@ function evaluationSnapshot(hr,an){
         postflopBarrelPlanWeightNote:e.postflopBarrelPlanWeightNote||'',
         postflopDefensePlanProfile:e.postflopDefensePlanProfile||null,
         postflopDefensePlanWeightNote:e.postflopDefensePlanWeightNote||'',
+        postflopCallFuturePlanProfile:e.postflopCallFuturePlanProfile||null,
+        postflopCallFuturePlanWeightNote:e.postflopCallFuturePlanWeightNote||'',
         onePairProfile:e.onePairProfile||null,
         onePairWeightNote:e.onePairWeightNote||'',
         tournamentPhaseAxis:e.tournamentPhaseAxis||'',
@@ -15063,7 +15217,7 @@ document.addEventListener('click',function(e){
   }
 });
 
-window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,runFishTankAuditBatch,fishTankAuditBatchReportText,buildFishTankAuditRepairQueue,fishTankAuditRepairPlanText,auditIssuesForHand,playAuditGame,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,boardTextureProfile,boardTextureProfileText,boardTextureFrequencyAdjustment,boardTextureSizePlan,boardTextureTransitionProfile,boardTextureTransitionProfileText,rangeNutAdvantageProfile,rangeNutAdvantageProfileText,rangeActionUpdateProfile,rangeActionUpdateProfileText,postflopBetPurposeProfile,postflopBetPurposeProfileText,postflopBarrelPlanProfile,postflopBarrelPlanProfileText,postflopDefensePlanProfile,postflopDefensePlanProfileText,liveCashRangeProfile,liveCashSpotProfile,liveCashSpotProfileText,liveCashSprProfile,liveCashSprProfileText,liveCashInitiativeProfile,liveCashInitiativeProfileText,liveCashReraisedPotProfile,liveCashReraisedPotProfileText,liveCashMultiwayProfile,liveCashMultiwayProfileText,liveCashRiverDecisionProfile,liveCashRiverDecisionProfileText,tournamentRangeProfile,tournamentFinalTableProfile,tournamentFinalTableStackRole,tournamentFinalTableCollisionProfile,tournamentFinalTableRangeProfile,tournamentFinalTableRangeProfileText,tournamentFinalTablePostflopProfile,tournamentFinalTablePostflopProfileText,tournamentFinalTableLearningPoint,tournamentFinalTableLearningPointText,tournamentHeadsUpProfile};
+window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,runFishTankAuditBatch,fishTankAuditBatchReportText,buildFishTankAuditRepairQueue,fishTankAuditRepairPlanText,auditIssuesForHand,playAuditGame,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,boardTextureProfile,boardTextureProfileText,boardTextureFrequencyAdjustment,boardTextureSizePlan,boardTextureTransitionProfile,boardTextureTransitionProfileText,rangeNutAdvantageProfile,rangeNutAdvantageProfileText,rangeActionUpdateProfile,rangeActionUpdateProfileText,postflopBetPurposeProfile,postflopBetPurposeProfileText,postflopBarrelPlanProfile,postflopBarrelPlanProfileText,postflopDefensePlanProfile,postflopDefensePlanProfileText,postflopCallFuturePlanProfile,postflopCallFuturePlanProfileText,liveCashRangeProfile,liveCashSpotProfile,liveCashSpotProfileText,liveCashSprProfile,liveCashSprProfileText,liveCashInitiativeProfile,liveCashInitiativeProfileText,liveCashReraisedPotProfile,liveCashReraisedPotProfileText,liveCashMultiwayProfile,liveCashMultiwayProfileText,liveCashRiverDecisionProfile,liveCashRiverDecisionProfileText,tournamentRangeProfile,tournamentFinalTableProfile,tournamentFinalTableStackRole,tournamentFinalTableCollisionProfile,tournamentFinalTableRangeProfile,tournamentFinalTableRangeProfileText,tournamentFinalTablePostflopProfile,tournamentFinalTablePostflopProfileText,tournamentFinalTableLearningPoint,tournamentFinalTableLearningPointText,tournamentHeadsUpProfile};
 // [Codex fix 2026-06-05] Query-gated regression output for browser verification without exposing debug UI during normal play.
 if(new URLSearchParams(location.search).has('codex_regression')){
   setTimeout(function(){
