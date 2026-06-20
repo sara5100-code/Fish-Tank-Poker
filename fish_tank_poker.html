@@ -12429,6 +12429,44 @@ function runFishTankRegressionTests(){
     return !!(ev&&ev.liveCashRiverDecisionProfile&&ev.liveCashRiverDecisionProfile.lane==='riverHeroRaise'&&ev.liveCashRiverDecisionProfile.severity==='good'&&ev.quality==='good'&&/相手レンジはかなり強く/.test(coachReviewText(ev)));
   });
 
+  add('リバーレイズ説明: 非ナッツはコールされる相手と降ろしたい相手を本文に出す',function(){
+    const txt=coachReviewText({
+      street:'river',
+      action:'raise',
+      quality:'bad',
+      liveCashRiverDecisionProfile:{
+        lane:'riverHeroRaise',
+        sizePct:125,
+        completed:true,
+        heroRaise:{classLabel:'非ナッツフラッシュ',severity:'bad'},
+        severity:'bad',
+        policy:'非ナッツはコール止めを優先します。',
+        risk:'125%pot / 完成寄りボード / ライン=リバーでこちらがレイズ',
+        suggest:'推奨: コール止め'
+      }
+    });
+    return !!(/コールされる相手/.test(txt)&&/降ろしたい相手/.test(txt)&&/非ナッツ/.test(txt));
+  });
+
+  add('リバーレイズ説明: ナッツ級は取り切り対象を本文に出す',function(){
+    const txt=coachReviewText({
+      street:'river',
+      action:'raise',
+      quality:'good',
+      liveCashRiverDecisionProfile:{
+        lane:'riverHeroRaise',
+        sizePct:90,
+        completed:false,
+        heroRaise:{classLabel:'ナッツ級',severity:'good'},
+        severity:'good',
+        policy:'レイズで取り切ります。',
+        risk:'90%pot / 比較的静的なボード / ライン=リバーでこちらがレイズ',
+        suggest:'推奨: レイズ'
+      }
+    });
+    return !!(/コールしてほしい相手/.test(txt)&&/取り切り/.test(txt)&&/相手レンジはかなり強く/.test(txt));
+  });
+
   add('リングリバー相手傾向: ブラフ不足タイプのリバーベットへワンペア受けを締める',function(){
     const players=[
       regressionPlayer('あなた',true,['Ks','Qs'],{chips:500}),
@@ -13265,6 +13303,27 @@ function naturalFacingBetDecisionText(ev){
   const compactPlan=(winPlan+(nextPlan?' '+nextPlan:'')).replace(/。/g,'、').replace(/、$/,'');
   return [sizeText,'続ける根拠は「'+goodTarget+'」で、'+compactPlan,fp.suggest?naturalRecommendationText(fp.suggest):''].filter(Boolean).join(' ');
 }
+// [Codex fix 2026-06-21] リバーでこちらがレイズする時の説明を、相手の続行レンジとサイズ目的に整理する。
+function naturalRiverHeroRaiseText(ev){
+  const p=ev&&ev.liveCashRiverDecisionProfile;
+  if(!p||p.lane!=='riverHeroRaise')return'';
+  const hr=p.heroRaise||{};
+  const hand=hr.classLabel||'この手';
+  const size=p.sizePct!=null?p.sizePct+'%pot':'このサイズ';
+  const board=p.completed?'完成寄りボード':'比較的静的なボード';
+  if(hr.severity==='good'||p.severity==='good'){
+    return [
+      '相手のベットにこちらがレイズする場面で、こちらは'+hand+'です。',
+      'コールしてほしい相手は、下の強い完成役や降りきれない強いワンペアで、相手レンジはかなり強くなりますが、全体ナッツ級なら取り切りを狙えます。',
+      '今回のサイズは'+size+'です。相手がコールしすぎるなら大きめ、慎重な相手には2.5〜4倍前後を目安にします。'
+    ].join(' ');
+  }
+  return [
+    '相手のベットにこちらがレイズする場面で、こちらは'+hand+'です。',
+    'コールされる相手は上位完成役や強いブラフキャッチに締まり、相手レンジはかなり強くなります。降ろしたい相手は薄いワンペアや空振りですが、そこはコールではなくフォールドしやすい層です。',
+    board+'では、非ナッツを'+size+'まで大きく上げると、弱い手は降りて強い手だけに続けられやすいです。'
+  ].join(' ');
+}
 function inferredStrategyMixText(ev){
   if(!ev)return'';
   if(ev.strategyMix)return ev.strategyMix;
@@ -13635,9 +13694,10 @@ function coachReviewText(ev){
     const actor=p.lane==='riverRaiseResponse'?'相手のレイズ':p.lane==='riverHeroRaise'?'今回のレイズ':p.lane==='riverOnePairCatch'||p.lane==='riverDisciplineFold'?'相手のベット':p.lane==='riverThinValueSize'||p.lane==='riverBluffCandidate'||p.lane==='riverValueTarget'?'今回のベット':'この判断';
     const tendencyText=p.opponentTendency&&p.opponentTendency.label&&p.opponentTendency.label!=='標準的'?'相手は'+p.opponentTendency.label+'寄りです。':'';
     const blockerText=p.blocker&&p.blocker.coach?p.blocker.coach:'';
+    const heroRaiseText=p.lane==='riverHeroRaise'?naturalRiverHeroRaiseText(ev):'';
     const facingText=(p.lane==='riverOnePairCatch'||p.lane==='riverDisciplineFold'||p.lane==='riverRaiseResponse')?naturalFacingBetDecisionText(ev):'';
-    scene=facingText||('リングゲームのリバーです。'+tendencyText+naturalRiskText(p.risk,actor,'river')+(blockerText?blockerText:''));
-    reason=facingText?'':p.policy;
+    scene=heroRaiseText||facingText||('リングゲームのリバーです。'+tendencyText+naturalRiskText(p.risk,actor,'river')+(blockerText?blockerText:''));
+    reason=(heroRaiseText||facingText)?'':p.policy;
   }else if(ev.postflopBarrelPlanProfile){
     const p=ev.postflopBarrelPlanProfile;
     scene='ターンの継続ベット判断です。フロップで打って相手にコールされた後、ターンカードで続ける理由が残っているかを見ます。';
