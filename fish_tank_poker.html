@@ -5044,7 +5044,7 @@ function boardTextureFrequencyAdjustment(baseBetProb,profile,opts){
   if(role.isNut||role.role==='nutted'){floor=Math.max(floor,0.40);cap=Math.max(cap,0.70);note('ナッツ級はボードが重くてもバリュー頻度を残す');}
   else if(role.role==='air'&&(profile.flushThreat||profile.straightThreat||profile.paired)){mult*=0.82;cap=Math.min(cap,0.44);note('エアは重いボードでフォールドエクイティが落ちる');}
   const adjusted=Math.max(floor,Math.min(cap,baseBetProb*mult));
-  return{label:profile.label,primary:profile.primary,transition:profile.transition,baseBetPct:Math.round(baseBetProb*100),betPct:Math.round(adjusted*100),checkPct:Math.round((1-adjusted)*100),betProb:adjusted,checkProb:1-adjusted,multiplier:Math.round(mult*100)/100,capPct:Math.round(cap*100),preferredSizePct,reason:notes.slice(0,3).join('。')};
+  return{label:profile.label,primary:profile.primary,transition:profile.transition,baseBetPct:Math.round(baseBetProb*100),betPct:Math.round(adjusted*100),checkPct:Math.round((1-adjusted)*100),betProb:adjusted,checkProb:1-adjusted,multiplier:Math.round(mult*100)/100,capPct:Math.round(cap*100),preferredSizePct:preferredSizePct?standardBetSizePct(preferredSizePct):preferredSizePct,reason:notes.slice(0,3).join('。')};
 }
 
 // [Codex fix 2026-06-16] ボード分類から、初心者が選ぶべき標準ベットサイズを決める。
@@ -5090,7 +5090,7 @@ function boardTextureSizePlan(pot,profile,role,opts){
     reason='マルチウェイではコールされるレンジが強いため、非ナッツの大サイズを避けます。';
   }
   if(!pct)return null;
-  pct=Math.max(25,Math.min(125,Math.round(pct)));
+  pct=standardBetSizePct(Math.max(25,Math.min(125,Math.round(pct))));
   return{pct,amt:Math.round(pot*pct/100),reason,source:'board_texture'};
 }
 
@@ -6474,9 +6474,13 @@ function cautiousOnePairBetPlan(pot,d,role,tex,isIP){
   if(!onePair||role.isNut)return null;
   const dangerous=tex&&(tex.flushy>=3||tex.flushDraw||tex.straightDraw||tex.dynamic||tex.paired);
   if(!dangerous)return null;
-  if(d.street==='flop')return{pct:isIP?45:40,amt:Math.round(pot*(isIP?45:40)/100)};
-  if(d.street==='turn')return{pct:isIP?40:33,amt:Math.round(pot*(isIP?40:33)/100)};
-  if(d.street==='river')return{pct:isIP?45:40,amt:Math.round(pot*(isIP?45:40)/100)};
+  function plan(pct){
+    pct=standardBetSizePct(pct);
+    return{pct:pct,amt:Math.round(pot*pct/100)};
+  }
+  if(d.street==='flop')return plan(isIP?45:40);
+  if(d.street==='turn')return plan(isIP?40:33);
+  if(d.street==='river')return plan(isIP?45:40);
   return null;
 }
 
@@ -6625,6 +6629,7 @@ function suggestBet(pot,eq,street){
   if(street==='river'){pct=eq>0.92?100:eq>0.80?75:eq>0.68?60:45;}
   else if(street==='turn'){pct=eq>0.75?75:eq>0.62?65:50;}
   else{pct=eq>0.70?65:eq>0.56?50:33;}
+  pct=standardBetSizePct(pct);
   return{pct,amt:Math.round(pot*pct/100)};
 }
 function formatBetSuggestion(label,plan,d){
@@ -6636,6 +6641,34 @@ function formatBetSuggestion(label,plan,d){
   return label+'ポットの'+plan.pct+'% ('+plan.amt+'T)';
 }
 
+// [Codex fix 2026-06-21] 初心者向けのベットサイズは、常に同じ基準へ丸めて表示・練習する。
+function standardBetSizePct(pct){
+  const sizes=[33,50,75,100,125];
+  pct=Math.max(0,Math.round(+pct||0));
+  let best=sizes[0],dist=Math.abs(pct-best);
+  sizes.forEach(function(s){
+    const d=Math.abs(pct-s);
+    if(d<dist){best=s;dist=d;}
+  });
+  return best;
+}
+function preflopOpenQuickOptions(bb,totalStack){
+  const cap=Math.max(0,Math.round(totalStack||0));
+  const b=Math.max(1,Math.round(bb||1));
+  return [[2,'2BB'],[2.5,'2.5BB'],[3,'3BB']].map(function(arr){
+    const amt=Math.round(Math.min(b*arr[0],cap));
+    return{label:arr[1],amt:amt,title:'プリフロップの標準オープンサイズ'};
+  }).filter(function(o){return o.amt>0;});
+}
+function raiseOverBetQuickOptions(currentBet,minRaise,totalStack){
+  const cap=Math.max(0,Math.round(totalStack||0));
+  const cur=Math.max(1,Math.round(currentBet||1));
+  const minR=Math.max(1,Math.round(minRaise||cur));
+  return [[2,'2x'],[3,'3x'],[4,'4x'],[5,'5x']].map(function(arr){
+    const amt=Math.round(Math.min(cur*arr[0],cap));
+    return{label:arr[1],amt:amt,title:'相手ベット額に対するレイズ倍率'};
+  }).filter(function(o){return o.amt>=minR&&o.amt>0;});
+}
 function postflopQuickBetOptions(pot,minBet,totalStack){
   // [Codex fix 2026-06-15] 初心者が毎回同じ基準でサイズ選択を練習できるよう、表示セットを固定する。
   // 33/50/75/100/125%から選び、最小ベット未満は内部的にminへ丸める。
@@ -11877,6 +11910,27 @@ function runFishTankRegressionTests(){
     return opts.length>=5&&['33%','50%','75%','100%','125%'].every(function(x){return labels.includes(x);});
   });
 
+  add('size training: recommended bet size snaps to standard buttons',function(){
+    return standardBetSizePct(40)===33&&standardBetSizePct(45)===50&&standardBetSizePct(65)===75&&standardBetSizePct(112)===100;
+  });
+
+  add('size training: preflop quick open uses 2BB/2.5BB/3BB',function(){
+    const opts=preflopOpenQuickOptions(200,5000);
+    const labels=opts.map(function(o){return o.label;});
+    return ['2BB','2.5BB','3BB'].every(function(x){return labels.includes(x);});
+  });
+
+  add('size training: facing raise quick options use 2x/3x/4x/5x',function(){
+    const opts=raiseOverBetQuickOptions(600,800,5000);
+    const labels=opts.map(function(o){return o.label;});
+    return ['2x','3x','4x','5x'].every(function(x){return labels.includes(x);});
+  });
+
+  add('size training: cautious one-pair plan returns standard sizes',function(){
+    const plan=cautiousOnePairBetPlan(100,{street:'flop'},{role:'value',pairTier:'top_pair'},{flushDraw:true,dynamic:true},false);
+    return !!(plan&&[33,50,75,100,125].includes(plan.pct));
+  });
+
   add('新ハンド開始時に前ハンドのアクション表示を消す',function(){
     const g=new GameEngine({sb:2,bb:5,aiLevel:'medium',startingChips:500,numPlayers:6});
     g.handNum=9;
@@ -11917,7 +11971,7 @@ function runFishTankRegressionTests(){
     const monoPlan=boardTextureSizePlan(100,mono,{role:'value',pairTier:'top_pair'},{street:'flop',isPfr:true,nOpponents:1});
     const connStrong=boardTextureSizePlan(100,conn,{role:'strong'},{street:'flop',isPfr:true,nOpponents:1});
     const connOnePair=boardTextureSizePlan(100,conn,{role:'value',pairTier:'top_pair'},{street:'flop',isPfr:true,nOpponents:1});
-    return !!(dryPlan&&dryPlan.pct===33&&monoPlan&&monoPlan.pct===33&&connStrong&&connStrong.pct>=65&&connOnePair&&connOnePair.pct<=45);
+    return !!(dryPlan&&dryPlan.pct===33&&monoPlan&&monoPlan.pct===33&&connStrong&&connStrong.pct>=75&&connOnePair&&connOnePair.pct<=50);
   });
 
   add('GTO変化カード: フラッシュ完成やボードペア化で非ナッツ大サイズを重く見る',function(){
@@ -13167,12 +13221,9 @@ function renderActions(){
         addQ('Jam',h.chips+h.currentBet,'Tモード: '+(tctx.focusLabel||'')+'ではreshove/fold判断が重要です');
       }
       // 相手のレイズに対してレイズ返し → 2x/3x/4x/5x（ベット額の倍数）
-      [[2,'2x'],[3,'3x'],[4,'4x'],[5,'5x']].forEach(function(arr){
-        const mult=arr[0],label=arr[1];
-        const amt=Math.round(Math.min(game.currentBet*mult,h.chips+h.currentBet));
-        const minR=game.currentBet+game.minRaise;
-        if(amt>=minR&&amt>h.currentBet){
-          addQ(label,amt);
+      raiseOverBetQuickOptions(game.currentBet,game.currentBet+game.minRaise,h.chips+h.currentBet).forEach(function(opt){
+        if(opt.amt>h.currentBet){
+          addQ(opt.label,opt.amt,opt.title);
         }
       });
     } else if(pfNoRaise||pre){
@@ -13180,12 +13231,9 @@ function renderActions(){
         addQ('Jam',h.chips+h.currentBet,'Tモード: 14BB前後はopen jam候補が増えます');
       }
       // プリフロップ: オープン or ISO（リンパーへのレイズ）→ 常に 2BB/2.5BB/3BB から選ぶ。
-      const openBtns=[[2,'2BB'],[2.5,'2.5BB'],[3,'3BB']];
-      openBtns.forEach(function(arr){
-        const mult=arr[0],label=arr[1];
-        const amt=Math.round(Math.min(game.bb*mult,h.chips+h.currentBet));
-        if(amt>h.currentBet){
-          addQ(label,amt);
+      preflopOpenQuickOptions(game.bb,h.chips+h.currentBet).forEach(function(opt){
+        if(opt.amt>h.currentBet){
+          addQ(opt.label,opt.amt,opt.title);
         }
       });
     } else {
@@ -15637,7 +15685,7 @@ document.addEventListener('click',function(e){
   }
 });
 
-window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,runFishTankAuditBatch,fishTankAuditBatchReportText,buildFishTankAuditRepairQueue,fishTankAuditRepairPlanText,auditIssuesForHand,playAuditGame,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,boardTextureProfile,boardTextureProfileText,boardTextureFrequencyAdjustment,boardTextureSizePlan,boardTextureTransitionProfile,boardTextureTransitionProfileText,rangeNutAdvantageProfile,rangeNutAdvantageProfileText,rangeActionUpdateProfile,rangeActionUpdateProfileText,postflopBetPurposeProfile,postflopBetPurposeProfileText,postflopRaisePlanProfile,postflopRaisePlanProfileText,postflopBarrelPlanProfile,postflopBarrelPlanProfileText,postflopDefensePlanProfile,postflopDefensePlanProfileText,postflopCallFuturePlanProfile,postflopCallFuturePlanProfileText,liveCashRangeProfile,liveCashSpotProfile,liveCashSpotProfileText,liveCashSprProfile,liveCashSprProfileText,liveCashInitiativeProfile,liveCashInitiativeProfileText,liveCashReraisedPotProfile,liveCashReraisedPotProfileText,liveCashMultiwayProfile,liveCashMultiwayProfileText,liveCashRiverDecisionProfile,liveCashRiverDecisionProfileText,tournamentRangeProfile,tournamentFinalTableProfile,tournamentFinalTableStackRole,tournamentFinalTableCollisionProfile,tournamentFinalTableRangeProfile,tournamentFinalTableRangeProfileText,tournamentFinalTablePostflopProfile,tournamentFinalTablePostflopProfileText,tournamentFinalTableLearningPoint,tournamentFinalTableLearningPointText,tournamentHeadsUpProfile};
+window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,runFishTankAuditBatch,fishTankAuditBatchReportText,buildFishTankAuditRepairQueue,fishTankAuditRepairPlanText,auditIssuesForHand,playAuditGame,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,boardTextureProfile,boardTextureProfileText,boardTextureFrequencyAdjustment,boardTextureSizePlan,boardTextureTransitionProfile,boardTextureTransitionProfileText,rangeNutAdvantageProfile,rangeNutAdvantageProfileText,rangeActionUpdateProfile,rangeActionUpdateProfileText,postflopBetPurposeProfile,postflopBetPurposeProfileText,postflopRaisePlanProfile,postflopRaisePlanProfileText,postflopBarrelPlanProfile,postflopBarrelPlanProfileText,postflopDefensePlanProfile,postflopDefensePlanProfileText,postflopCallFuturePlanProfile,postflopCallFuturePlanProfileText,standardBetSizePct,preflopOpenQuickOptions,raiseOverBetQuickOptions,postflopQuickBetOptions,liveCashRangeProfile,liveCashSpotProfile,liveCashSpotProfileText,liveCashSprProfile,liveCashSprProfileText,liveCashInitiativeProfile,liveCashInitiativeProfileText,liveCashReraisedPotProfile,liveCashReraisedPotProfileText,liveCashMultiwayProfile,liveCashMultiwayProfileText,liveCashRiverDecisionProfile,liveCashRiverDecisionProfileText,tournamentRangeProfile,tournamentFinalTableProfile,tournamentFinalTableStackRole,tournamentFinalTableCollisionProfile,tournamentFinalTableRangeProfile,tournamentFinalTableRangeProfileText,tournamentFinalTablePostflopProfile,tournamentFinalTablePostflopProfileText,tournamentFinalTableLearningPoint,tournamentFinalTableLearningPointText,tournamentHeadsUpProfile};
 // [Codex fix 2026-06-05] Query-gated regression output for browser verification without exposing debug UI during normal play.
 if(new URLSearchParams(location.search).has('codex_regression')){
   setTimeout(function(){
