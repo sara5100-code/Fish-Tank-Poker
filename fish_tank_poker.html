@@ -253,12 +253,20 @@ body.codex-dev .dev-btn{display:inline-flex;}
   #main-area{overflow:visible;flex:none;}
   #table-wrap{flex:none;padding:14px 4px 0;overflow:hidden;}
   #table-container{aspect-ratio:1.42/1;width:min(100%,480px);max-width:100%;}
-  #human-area{padding:6px 10px 10px;width:100%;}
+  #human-area{position:sticky;bottom:0;z-index:70;padding:7px 10px 10px;width:100%;border-radius:12px 12px 0 0;}
   #human-cards .card.big{width:44px;height:64px;font-size:16px;}
-  .action-btn{padding:10px 5px;font-size:12px;}
-  .qbtn{padding:7px 10px;font-size:11px;}
+  #action-area{gap:6px;}
+  #info-row{min-height:14px;}
+  #to-call-label{font-size:11px;white-space:normal;line-height:1.25;}
+  #size-row{gap:7px;}
+  #raise-slider{min-height:24px;}
+  #quick-btns-row{width:100%;}
+  #quick-btns{display:grid;grid-template-columns:repeat(auto-fit,minmax(58px,1fr));gap:6px;width:100%;}
+  .qbtn{padding:9px 6px;font-size:11px;border-radius:9px;text-align:center;}
+  #main-btns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;}
+  .action-btn{padding:12px 6px;font-size:12px;min-height:42px;}
+  #btn-allin{padding:10px;font-size:12px;min-height:38px;}
   #raise-amount{width:52px;font-size:11px;}
-  #main-btns{gap:4px;}
   .seat{width:62px;}
   .seat-info{padding:2px 4px;border-radius:7px;box-shadow:0 2px 6px rgba(26,40,80,.10);}
   .seat-name{font-size:9px;}.seat-chips{font-size:10px;}.seat-bet{font-size:8px;}.seat-pos-badge{font-size:7px;padding:1px 3px;}
@@ -270,7 +278,20 @@ body.codex-dev .dev-btn{display:inline-flex;}
   #pot-display{font-size:11px;padding:3px 10px;}
   #stage-label{font-size:9px;}
   #community-cards{gap:3px;}
-  #analysis-box{width:100%;max-width:100%;max-height:92dvh;border-radius:14px;padding:14px 12px;}
+  #analysis-modal{align-items:flex-end;backdrop-filter:blur(3px);}
+  #analysis-box{width:100%;max-width:100%;max-height:94dvh;border-radius:18px 18px 0 0;padding:14px 12px 18px;}
+  #analysis-box h2{font-size:16px;}
+  .analysis-sub{font-size:11px;line-height:1.45;margin-bottom:12px;}
+  .analysis-section{margin-bottom:14px;}
+  .analysis-section h3{font-size:12px;margin-bottom:6px;}
+  .decision-row{display:flex;flex-direction:column;gap:6px;padding:9px 10px;margin-bottom:8px;font-size:12px;border-radius:10px;}
+  .decision-row>.dr-action{min-width:0;width:max-content;max-width:100%;padding:2px 7px;border-radius:6px;background:var(--panel);border:1px solid currentColor;font-size:12px;line-height:1.4;}
+  .decision-row>div:last-child{width:100%;min-width:0;}
+  .coach-review{font-size:12px!important;line-height:1.65!important;}
+  .analysis-grade{padding:10px!important;margin-bottom:12px!important;}
+  .grade-letter{font-size:34px!important;}
+  #analysis-content [style*="grid-template-columns:repeat(2"]{grid-template-columns:1fr!important;}
+  #analysis-content button{min-height:34px;}
   #side-panel{max-height:130px;}
   #side-tabs{display:flex;}
 }
@@ -285,7 +306,9 @@ body.codex-dev .dev-btn{display:inline-flex;}
   .card.big{width:28px;height:42px;font-size:12px;}
   .c-card{width:30px;height:44px;font-size:13px;}
   #human-cards .card.big{width:36px;height:54px;font-size:14px;}
-  .action-btn{padding:9px 4px;font-size:11px;}
+  #quick-btns{grid-template-columns:repeat(auto-fit,minmax(52px,1fr));gap:5px;}
+  .qbtn{font-size:10px;padding:8px 4px;}
+  .action-btn{padding:10px 4px;font-size:11px;min-height:40px;}
   #raise-amount{width:48px;}
 }
 
