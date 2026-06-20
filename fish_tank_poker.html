@@ -12297,6 +12297,49 @@ function runFishTankRegressionTests(){
     return !!(p&&p.hasPair&&p.severity==='bad'&&/嫌なカード/.test(txt+p.plan)&&/同スート完成|連結完成/.test(p.plan));
   });
 
+  add('受け側説明: リバーコールは必要勝率とブラフ量を本文に出す',function(){
+    const txt=coachReviewText({
+      street:'river',
+      action:'call',
+      quality:'bad',
+      liveCashRiverDecisionProfile:{
+        lane:'riverOnePairCatch',
+        sizePct:75,
+        completed:true,
+        pressure:2,
+        policy:'リバーのワンペアは相手のサイズとラインにブラフが残るかで判断します。',
+        risk:'75%pot / 完成寄りボード / 相手圧力2回 / ライン=ターン・リバー連続ベット',
+        suggest:'推奨: フォールド寄り',
+        line:{label:'ターン・リバー連続ベット'},
+        opponentTendency:{label:'ブラフ不足'}
+      }
+    });
+    return !!(/必要勝率は約30%/.test(txt)&&/ブラフ/.test(txt)&&/ワンペア/.test(txt)&&/ターンとリバー/.test(txt));
+  });
+
+  add('受け側説明: フロップ/ターンのコールは勝っている想定を本文に出す',function(){
+    const txt=coachReviewText({
+      street:'flop',
+      action:'call',
+      quality:'bad',
+      postflopDefensePlanProfile:{
+        lane:'call',
+        sizePct:70,
+        target:'相手のCB、薄いバリュー、一部ブラフ',
+        weakMade:true,
+        completed:true,
+        pressure:1,
+        suggest:'推奨: フォールド寄り'
+      },
+      postflopCallFuturePlanProfile:{
+        plan:'次の良いカード: 安全なブランク。嫌なカード: 同スート完成・連結完成。',
+        policy:'ワンペアのコールは次に嫌なカードが落ちた時を考えます。',
+        suggest:'次ストリートの大きい圧力には降りる準備'
+      }
+    });
+    return !!(/必要勝率/.test(txt)&&/続ける根拠/.test(txt)&&/相手のCB/.test(txt)&&/嫌なカード/.test(txt));
+  });
+
   add('コーチ文: レンジ更新を口語で説明する',function(){
     const ev={
       street:'river',
@@ -13181,6 +13224,47 @@ function naturalPostflopBetPurposeText(ev){
   const core=streetLead+'、このベットは'+purposeText+'で、コールしてほしい相手は「'+target+'」、降ろしたい相手は「'+foldOut+'」、今回のサイズは'+actual+'、目安は'+rec+'です。';
   return [core,sizeNote,advice].filter(Boolean).join(' ');
 }
+// [Codex fix 2026-06-20] ベットされた側の説明を、必要勝率・勝っている想定・相手ブラフ量に整理する。
+function naturalFacingBetDecisionText(ev){
+  if(!ev)return'';
+  const rv=ev.liveCashRiverDecisionProfile||null;
+  const fp=ev.postflopDefensePlanProfile||null;
+  const next=ev.postflopCallFuturePlanProfile||null;
+  const p=rv||fp||null;
+  if(!p)return'';
+  const action={call:'コール',fold:'フォールド',raise:'レイズ',bet:'ベット',allin:'オールイン',check:'チェック'}[ev.action]||ev.action||'判断';
+  const sizePct=p.sizePct!=null?p.sizePct:null;
+  const required=sizePct!=null?Math.round(sizePct/(100+2*sizePct)*100):null;
+  if(rv){
+    const lane=rv.lane||'';
+    const board=rv.completed?'完成寄りボード':'比較的静的なボード';
+    const tendency=rv.opponentTendency&&rv.opponentTendency.label&&rv.opponentTendency.label!=='標準的'?'相手は'+rv.opponentTendency.label+'寄り、':'';
+    const line=rv.line&&rv.line.label?riverLineNaturalText(rv.line.label):'';
+    let heroPlan='';
+    if(lane==='riverOnePairCatch'){
+      heroPlan=(line?line+' ':'')+'コールするなら、相手に約'+(required||'十分な')+'%以上のブラフや薄すぎるバリューが必要です。ワンペアで勝っている想定は、空振りブラフや薄いワンペア系のベットです。';
+    }else if(lane==='riverDisciplineFold'){
+      heroPlan=(line?line+' ':'')+'フォールドは、相手のバリュー密度が必要ブラフ量を上回ると見る判断です。勝っている可能性より、相手ラインにブラフが足りるかを優先します。';
+    }else if(lane==='riverRaiseResponse'){
+      heroPlan=(line?line+' ':'')+'相手のレイズに続けるには、こちらが上位完成役に十分耐えている必要があります。リバーのレイズは$2/$5ではかなりバリュー寄りに見ます。';
+    }else{
+      return'';
+    }
+    const sizeText=sizePct!=null?'リバーで'+(tendency?tendency:'')+'相手の'+sizePct+'%potに対する'+action+'で、必要勝率は約'+required+'%です。':'リバーで相手のベット/レイズに対する'+action+'で、相手のサイズとラインを見ます。';
+    return [sizeText,heroPlan,board+'です。',rv.suggest?naturalRecommendationText(rv.suggest):''].filter(Boolean).join(' ');
+  }
+  const goodTarget=fp.target||'相手のベットレンジ';
+  let winPlan='';
+  if(fp.isStrong)winPlan='こちらは強い手なので、相手のバリューにもブラフにも十分続けられます。コールだけでなく、取り切るレイズも候補です。';
+  else if(fp.strongDraw)winPlan='勝っているというより、完成した時の価値と相手が止まる未来で受けます。外れた時にもう一発大きく打たれたら頻度を落とします。';
+  else if(fp.weakDraw)winPlan='弱いドローは完成しても強い手になりにくく、次ストリートでも打たれると苦しいです。安くないなら必要勝率だけで受けない方が自然です。';
+  else if(fp.weakMade||fp.strongOnePair)winPlan='ワンペア系で勝っている想定は、相手のCB・薄いバリュー・一部ブラフです。次に嫌なカードが多いなら、今から受ける回数を減らします。';
+  else winPlan='ショーダウン価値や改善率が薄い手は、次のベットで押し出されやすいです。';
+  const nextPlan=next&&next.plan?next.plan:'';
+  const sizeText=sizePct!=null?'相手の'+sizePct+'%potに対する'+action+'で、必要勝率は約'+required+'%です。':'相手のベットに対する'+action+'で、サイズを確認します。';
+  const compactPlan=(winPlan+(nextPlan?' '+nextPlan:'')).replace(/。/g,'、').replace(/、$/,'');
+  return [sizeText,'続ける根拠は「'+goodTarget+'」で、'+compactPlan,fp.suggest?naturalRecommendationText(fp.suggest):''].filter(Boolean).join(' ');
+}
 function inferredStrategyMixText(ev){
   if(!ev)return'';
   if(ev.strategyMix)return ev.strategyMix;
@@ -13551,20 +13635,23 @@ function coachReviewText(ev){
     const actor=p.lane==='riverRaiseResponse'?'相手のレイズ':p.lane==='riverHeroRaise'?'今回のレイズ':p.lane==='riverOnePairCatch'||p.lane==='riverDisciplineFold'?'相手のベット':p.lane==='riverThinValueSize'||p.lane==='riverBluffCandidate'||p.lane==='riverValueTarget'?'今回のベット':'この判断';
     const tendencyText=p.opponentTendency&&p.opponentTendency.label&&p.opponentTendency.label!=='標準的'?'相手は'+p.opponentTendency.label+'寄りです。':'';
     const blockerText=p.blocker&&p.blocker.coach?p.blocker.coach:'';
-    scene='リングゲームのリバーです。'+tendencyText+naturalRiskText(p.risk,actor,'river')+(blockerText?blockerText:'');
-    reason=p.policy;
+    const facingText=(p.lane==='riverOnePairCatch'||p.lane==='riverDisciplineFold'||p.lane==='riverRaiseResponse')?naturalFacingBetDecisionText(ev):'';
+    scene=facingText||('リングゲームのリバーです。'+tendencyText+naturalRiskText(p.risk,actor,'river')+(blockerText?blockerText:''));
+    reason=facingText?'':p.policy;
   }else if(ev.postflopBarrelPlanProfile){
     const p=ev.postflopBarrelPlanProfile;
     scene='ターンの継続ベット判断です。フロップで打って相手にコールされた後、ターンカードで続ける理由が残っているかを見ます。';
     reason=p.policy+' 狙う相手は「'+p.target+'」です。'+(p.suggest?' '+p.suggest:'');
   }else if(ev.postflopCallFuturePlanProfile){
     const p=ev.postflopCallFuturePlanProfile;
-    scene='コールした後の次ストリート計画です。今の価格だけでなく、次に続けやすいカードと降りるカードを分けます。';
-    reason=p.policy+' '+p.plan+(p.suggest?' '+p.suggest:'');
+    const facingText=naturalFacingBetDecisionText(ev);
+    scene=facingText||'コールした後の次ストリート計画です。今の価格だけでなく、次に続けやすいカードと降りるカードを分けます。';
+    reason=facingText?'':p.policy+' '+p.plan+(p.suggest?' '+p.suggest:'');
   }else if(ev.postflopDefensePlanProfile){
     const p=ev.postflopDefensePlanProfile;
-    scene='相手のベットに対する受け方です。必要EQだけでなく、次のストリートでどれだけ実現できるかまで見ます。';
-    reason=p.policy+' 相手レンジは「'+p.target+'」として見ます。'+(p.suggest?' '+p.suggest:'');
+    const facingText=naturalFacingBetDecisionText(ev);
+    scene=facingText||'相手のベットに対する受け方です。必要EQだけでなく、次のストリートでどれだけ実現できるかまで見ます。';
+    reason=facingText?'':p.policy+' 相手レンジは「'+p.target+'」として見ます。'+(p.suggest?' '+p.suggest:'');
   }else if(ev.postflopBetPurposeProfile){
     const p=ev.postflopBetPurposeProfile;
     scene=ev.streetLabel||ev.street;
