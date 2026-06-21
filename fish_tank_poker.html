@@ -5024,9 +5024,13 @@ function boardTextureProfile(comm,street,prevComm){
     else if(gap===2)connectedness+=1;
   }
   const broadway=uniq.filter(function(v){return v>=10;}).length;
-  const low=uniq.filter(function(v){return v<=8;}).length>=Math.min(3,uniq.length);
+  const low=uniq.filter(function(v){return v<=9;}).length>=Math.min(3,uniq.length);
   const paired=Object.values(rankCounts).some(function(v){return v>=2;});
   const trips=Object.values(rankCounts).some(function(v){return v>=3;});
+  const pairedRanks=Object.keys(rankCounts).filter(function(r){return rankCounts[r]>=2;}).map(function(r){return RANK_VAL[r]||0;}).sort(function(a,b){return b-a;});
+  const pairRank=pairedRanks.length?pairedRanks[0]:null;
+  const topRank=uniq.length?uniq[uniq.length-1]:null;
+  const pairClass=pairRank==null?'none':pairRank>=12?'high_pair':pairRank>=9?'middle_pair':'low_pair';
   const monotone=maxSuit>=3&&comm.length===3;
   const fourFlush=maxSuit>=4;
   const twoTone=maxSuit===2&&comm.length===3;
@@ -5063,7 +5067,8 @@ function boardTextureProfile(comm,street,prevComm){
     else transition='texture_card';
   }
   const rangeTilt=(primary==='a_high_dry'||primary==='k_high_dry'||primary==='q_high_dry')?'pfr_range_advantage':
-    (primary==='low_connected'||primary==='wet_connected'||primary==='paired')?'caller_nut_interaction':'neutral';
+    (primary==='low_connected'||primary==='wet_connected'||(primary==='paired'&&pairClass==='low_pair'))?'caller_nut_interaction':
+    (primary==='paired'&&pairClass==='high_pair')?'pfr_range_advantage':'neutral';
   const nutVolatility=(paired||trips)?'fullhouse/quads':fourFlush||monotone?'flush_heavy':straightComplete||straightThreat?'straight_heavy':'low';
   const labels={a_high_dry:'A-high dry',k_high_dry:'K-high dry',q_high_dry:'Q-high dry',low_dry:'low dry',two_tone:'two-tone',monotone:'monotone',four_flush:'four-flush',paired:'paired board',trips_board:'trips board',low_connected:'low connected',broadway_connected:'broadway connected',wet_connected:'wet connected',straight_complete:'straight complete',standard:'standard'};
   const transitionLabels={none:'none',blank:'blank',overcard:'overcard',board_pair:'board pair',flush_complete_card:'flush-completing card',four_flush_card:'four-flush card',straight_complete_card:'straight-completing card',texture_card:'texture-changing card'};
@@ -5075,7 +5080,7 @@ function boardTextureProfile(comm,street,prevComm){
   if(staticBoard)reasons.push('高いカード中心でPFR側が小さく高頻度に打ちやすい');
   if(low&&!straightThreat)reasons.push('低いカード中心で受け側のペア/セットも残りやすい');
   if(transition!=='none')reasons.push('前ストリートからの変化: '+transitionLabels[transition]);
-  return{street,primary,label:labels[primary]||primary,transition,transitionLabel:transitionLabels[transition]||transition,paired,trips,monotone,twoTone,fourFlush,flushThreat,straightThreat,straightComplete,connectedness,broadway,low,dynamic,staticBoard,rangeTilt,nutVolatility,reasons,raw:tex};
+  return{street,primary,label:labels[primary]||primary,transition,transitionLabel:transitionLabels[transition]||transition,paired,trips,pairRank,pairClass,topRank,monotone,twoTone,fourFlush,flushThreat,straightThreat,straightComplete,connectedness,broadway,low,dynamic,staticBoard,rangeTilt,nutVolatility,reasons,raw:tex};
 }
 function boardTextureProfileText(p){
   if(!p)return'';
@@ -5715,52 +5720,58 @@ function beforeStreetAggressionCount(hr,d,forHero){
   return set.size;
 }
 
-function rangeNutAdvantageProfile(hr,d,profile,role,opts){
-  if(!hr||!d||!profile||d.street==='preflop')return null;
-  opts=opts||{};
-  role=role||{};
-  const lane=d.action==='check'?'check':d.action==='call'?'call':(d.action==='bet'||d.action==='raise'||d.action==='allin')?'bet':d.action;
-  const pot=Math.max(1,d.pot||1);
-  const basePot=d.toCall>0?Math.max(1,pot-(d.toCall||0)):pot;
-  const sizePct=lane==='call'?Math.round((d.toCall||d.amount||0)/basePot*100):Math.round((d.amount||0)/pot*100);
+// [Codex fix 2026-06-21] ボード別に、PFR側/受け側のレンジ優位とナッツ優位を細かく分ける。
+function boardRangeNutOwnerProfile(profile,role,opts){
+  opts=opts||{}; role=role||{};
   const pfrOwner=opts.isPfr?'hero':'villain';
   const callerOwner=opts.isPfr?'villain':'hero';
-  const isStrong=!!(role.isNut||role.role==='nutted'||role.role==='strong');
   const isNut=!!(role.isNut||role.role==='nutted');
-  const hasGoodDraw=!!(role.draw&&role.draw.outs>=8&&d.street!=='river');
   let rangeOwner='neutral';
   let nutOwner='neutral';
   const reasons=[];
+  if(!profile)return{rangeOwner,nutOwner,reasons};
   if(profile.primary==='a_high_dry'||profile.primary==='k_high_dry'||profile.primary==='q_high_dry'){
-    rangeOwner=pfrOwner;
-    nutOwner=pfrOwner;
+    rangeOwner=pfrOwner; nutOwner=pfrOwner;
     reasons.push('高いカードのドライボードは、オープン/3BET側の強いAx・Kx・オーバーペアが多く残ります。');
-  }else if(profile.primary==='low_connected'||profile.primary==='broadway_connected'||profile.primary==='wet_connected'||profile.primary==='straight_complete'){
-    rangeOwner='neutral';
-    nutOwner=callerOwner;
-    reasons.push('低い連結ボードは、受け側のセット・ツーペア・ストレート絡みが増えます。');
   }else if(profile.primary==='paired'||profile.primary==='trips_board'){
-    rangeOwner=profile.primary==='trips_board'?'neutral':pfrOwner;
-    nutOwner=callerOwner;
-    reasons.push('ペアボードは、誰がトリップス/フルハウスを多く持つかを優先して見ます。');
+    if(profile.pairClass==='high_pair'){
+      rangeOwner=pfrOwner; nutOwner=pfrOwner;
+      reasons.push('高いペアボードはPFR側に強いトップカード/オーバーペア由来のトリップス候補が残りやすいです。');
+    }else if(profile.pairClass==='middle_pair'){
+      rangeOwner='neutral'; nutOwner='neutral';
+      reasons.push('中位ペアボードは双方にトリップス候補が残り、レンジ全体よりキッカーとラインを見ます。');
+    }else{
+      rangeOwner='neutral'; nutOwner=callerOwner;
+      reasons.push('低いペアボードは受け側の小ペア・スーテッド系にトリップス/フルハウス候補が増えます。');
+    }
+    if(profile.primary==='trips_board'&&profile.pairClass!=='high_pair'){
+      rangeOwner='neutral'; nutOwner=callerOwner;
+      reasons.push('トリップスボードは全体レンジ差より、誰がポケットペア/強キッカーを持つかが重要です。');
+    }
   }else if(profile.primary==='monotone'||profile.primary==='four_flush'){
-    rangeOwner='neutral';
-    nutOwner=isNut?'hero':'neutral';
-    reasons.push('同色が多いボードは、レンジ全体よりもナッツブロッカーと完成フラッシュの有無が重要です。');
+    if(profile.broadway>=1||profile.topRank>=12)rangeOwner=pfrOwner;
+    else rangeOwner='neutral';
+    nutOwner=isNut?'hero':(profile.low?callerOwner:'neutral');
+    reasons.push('同色が多いボードはレンジ全体より、Aハイフラッシュ/ブロッカーと低い同色コネクターの有無を見ます。');
+  }else if(profile.primary==='low_connected'||profile.primary==='wet_connected'||profile.primary==='straight_complete'){
+    rangeOwner='neutral'; nutOwner=callerOwner;
+    reasons.push('低い連結ボードは、受け側のセット・ツーペア・ストレート絡みが増えます。');
+  }else if(profile.primary==='broadway_connected'){
+    rangeOwner=pfrOwner; nutOwner='neutral';
+    reasons.push('ブロードウェイ連結はPFR側の高カード密度が残る一方、受け側のスーテッドブロードウェイも強く絡みます。');
   }else if(profile.primary==='two_tone'){
-    rangeOwner=pfrOwner;
-    nutOwner='neutral';
+    rangeOwner=pfrOwner; nutOwner='neutral';
     reasons.push('2トーンはPFR側が小さく打ちやすい一方、受け側のドロー継続も残ります。');
   }else if(profile.primary==='low_dry'){
-    rangeOwner='neutral';
-    nutOwner=callerOwner;
+    rangeOwner='neutral'; nutOwner=callerOwner;
     reasons.push('低いドライボードはPFRのレンジ優位が薄まり、受け側の小ペア/セットが残ります。');
   }
   if(profile.transition==='overcard'){
     rangeOwner=pfrOwner;
     reasons.push('オーバーカードはPFR側のレンジに当たりやすい変化です。');
   }else if(profile.transition==='board_pair'){
-    nutOwner=callerOwner;
+    if(profile.pairClass==='high_pair'){rangeOwner=pfrOwner;nutOwner=pfrOwner;}
+    else nutOwner=callerOwner;
     reasons.push('ボードペア化でフルハウス/トリップスの比重が上がります。');
   }else if(profile.transition==='flush_complete_card'||profile.transition==='four_flush_card'){
     nutOwner=isNut?'hero':'neutral';
@@ -5770,6 +5781,23 @@ function rangeNutAdvantageProfile(hr,d,profile,role,opts){
     reasons.push('ストレート完成カードでは、受け側の連結ハンドが強くなります。');
   }
   if(isNut)nutOwner='hero';
+  return{rangeOwner,nutOwner,reasons};
+}
+function rangeNutAdvantageProfile(hr,d,profile,role,opts){
+  if(!hr||!d||!profile||d.street==='preflop')return null;
+  opts=opts||{};
+  role=role||{};
+  const lane=d.action==='check'?'check':d.action==='call'?'call':(d.action==='bet'||d.action==='raise'||d.action==='allin')?'bet':d.action;
+  const pot=Math.max(1,d.pot||1);
+  const basePot=d.toCall>0?Math.max(1,pot-(d.toCall||0)):pot;
+  const sizePct=lane==='call'?Math.round((d.toCall||d.amount||0)/basePot*100):Math.round((d.amount||0)/pot*100);
+  const isStrong=!!(role.isNut||role.role==='nutted'||role.role==='strong');
+  const isNut=!!(role.isNut||role.role==='nutted');
+  const hasGoodDraw=!!(role.draw&&role.draw.outs>=8&&d.street!=='river');
+  const owners=boardRangeNutOwnerProfile(profile,role,opts);
+  let rangeOwner=owners.rangeOwner;
+  let nutOwner=owners.nutOwner;
+  const reasons=(owners.reasons||[]).slice();
   function level(owner){
     if(owner==='hero')return'高';
     if(owner==='villain')return'低';
@@ -12137,6 +12165,20 @@ function runFishTankRegressionTests(){
     const dryProf=rangeNutAdvantageProfile(regressionHand({}),regressionDecision({street:'flop',action:'bet',amount:33,pot:100,toCall:0}),dry,{role:'air'},{isPfr:true});
     const lowProf=rangeNutAdvantageProfile(regressionHand({}),regressionDecision({street:'flop',action:'bet',amount:70,pot:100,toCall:0}),low,{role:'air'},{isPfr:true});
     return !!(dryProf&&dryProf.heroRangeAdv==='高'&&dryProf.severity==='good'&&lowProf&&lowProf.heroNutAdv==='低'&&lowProf.severity==='bad');
+  });
+
+  add('GTOレンジ/ナッツ優位: 高いペアボードはPFR側、低いペアボードは受け側を厚く見る',function(){
+    const highPair=boardTextureProfile(regressionCards(['Ah','Ad','7c']),'flop',[]);
+    const lowPair=boardTextureProfile(regressionCards(['7h','7d','2c']),'flop',[]);
+    const highProf=rangeNutAdvantageProfile(regressionHand({}),regressionDecision({street:'flop',action:'bet',amount:33,pot:100,toCall:0}),highPair,{role:'air'},{isPfr:true});
+    const lowProf=rangeNutAdvantageProfile(regressionHand({}),regressionDecision({street:'flop',action:'bet',amount:70,pot:100,toCall:0}),lowPair,{role:'air'},{isPfr:true});
+    return !!(highPair&&highPair.pairClass==='high_pair'&&highProf&&highProf.heroRangeAdv==='高'&&highProf.heroNutAdv==='高'&&lowPair&&lowPair.pairClass==='low_pair'&&lowProf&&lowProf.heroNutAdv==='低'&&lowProf.severity==='bad');
+  });
+
+  add('GTOレンジ/ナッツ優位: 低いモノトーンは受け側ナッツ絡みを残す',function(){
+    const mono=boardTextureProfile(regressionCards(['8h','6h','3h']),'flop',[]);
+    const prof=rangeNutAdvantageProfile(regressionHand({}),regressionDecision({street:'flop',action:'bet',amount:60,pot:100,toCall:0}),mono,{role:'air'},{isPfr:true});
+    return !!(mono&&mono.primary==='monotone'&&prof&&prof.heroRangeAdv==='中'&&prof.heroNutAdv==='低'&&prof.severity==='bad');
   });
 
   add('GTOレンジ/ナッツ優位: 評価JSONとGTOスナップショットに保持する',function(){
