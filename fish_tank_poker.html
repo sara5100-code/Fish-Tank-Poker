@@ -12673,6 +12673,30 @@ function runFishTankRegressionTests(){
     return /良い判断/.test(txt)&&count<=2&&!/フォールド継続|フォールドはこのまま/.test(txt);
   });
 
+  add('コーチ文: 判断の入口をアクション名で自然に始める',function(){
+    const txt=coachReviewText({
+      street:'flop',
+      action:'check',
+      quality:'good',
+      comment:'チェック。',
+      onePairProfile:{weakPair:true,policy:'弱いワンペアはショーダウン価値を守ります。',risk:'SPR約10 / 比較的静的なボード / 圧力0段階'}
+    });
+    return /^チェックで問題ありません。/.test(txt)&&!/この判断で大丈夫です/.test(txt);
+  });
+
+  add('コーチ文: 混合ライン説明を短く自然にする',function(){
+    const txt=coachReviewText({
+      street:'turn',
+      action:'check',
+      quality:'ok',
+      isMix:true,
+      freqPct:55,
+      comment:'チェック。',
+      suggest:'ベットするならポットの50% (20T)'
+    });
+    return /複数のラインが成立します/.test(txt)&&/チェックで/.test(txt)&&/ベット/.test(txt)&&/頻度感/.test(txt)&&!/この局面では/.test(txt);
+  });
+
   add('リングリバー: 非ナッツで相手ベットへ大きくレイズしすぎない',function(){
     const hr=regressionHand({
       heroHole:['4c','2c'],
@@ -13449,27 +13473,28 @@ function naturalSpotLabel(label){
 }
 function naturalCoachVerdict(ev){
   if(!ev)return'';
-  if(ev.quality==='bad')return'ここは見直したい判断です。';
-  if(ev.quality==='good')return'この判断で大丈夫です。';
-  return'ここは複数の選択肢があります。';
+  const a={fold:'フォールド',check:'チェック',call:'コール',raise:(ev.street==='preflop'?'レイズ':'ベット'),bet:'ベット',allin:'オールイン'}[ev.action]||'この判断';
+  if(ev.quality==='bad')return a+'は見直したいです。';
+  if(ev.quality==='good')return a+'で問題ありません。';
+  return'複数のラインが成立します。';
 }
 function mixedLineExplanationText(ev){
   if(!ev||ev.quality!=='ok')return'';
   const rec=naturalRecommendationText(ev.suggest||'');
   const mix=inferredStrategyMixText(ev);
   if(ev.action==='check'){
-    if(rec)return'この局面では、チェックでポットを抑えてショーダウン価値を残す考え方と、'+rec+'で弱いペアやドローから先に取る考え方があります。'+(mix?'頻度感は'+mix+'です。':'');
-    if(mix)return'この局面では、チェックで実現率を取りに行く考え方と、ベットで先にフォールドエクイティを取る考え方があります。頻度感は'+mix+'です。';
-    return'この局面では、チェックで次のカードを見る考え方と、小さくベットして主導権を取りに行く考え方があります。';
+    if(rec)return'チェックでポットを抑えるラインと、'+rec+'で弱いペアやドローから先に取るラインが混ざります。'+(mix?'頻度感は'+mix+'です。':'');
+    if(mix)return'チェックで実現率を取るラインと、ベットで先にフォールドエクイティを取るラインが混ざります。頻度感は'+mix+'です。';
+    return'チェックで次のカードを見るラインと、小さく打って主導権を取りに行くラインがあります。';
   }
   if(ev.action==='call'||ev.action==='fold'){
-    if(mix)return'この局面では、コールしてショーダウン価値を残す考え方と、フォールドして大きな損失を避ける考え方があります。頻度感は'+mix+'です。';
-    return'この局面では、コールで受ける考え方と、フォールドで損失を抑える考え方があります。相手のブラフ頻度とサイズで寄せます。';
+    if(mix)return'コールでショーダウン価値を残すラインと、フォールドで大きな損失を避けるラインが混ざります。頻度感は'+mix+'です。';
+    return'コールで受けるラインと、フォールドで損失を抑えるラインがあります。相手のブラフ頻度とサイズで寄せます。';
   }
   if(ev.action==='raise'||ev.action==='bet'||ev.action==='allin'){
-    if(rec)return'この局面では、今回のように打ってバリュー/プロテクションを取る考え方と、チェックでポットを抑える考え方があります。サイズ感は'+rec+'です。'+(mix?'頻度感は'+mix+'です。':'');
-    if(mix)return'この局面では、ベットで取りに行く考え方と、チェックでショーダウン価値を守る考え方があります。頻度感は'+mix+'です。';
-    return'この局面では、打って相手の弱いレンジから取る考え方と、チェックでポットを管理する考え方があります。';
+    if(rec)return'打ってバリュー/プロテクションを取るラインと、チェックでポットを抑えるラインが混ざります。サイズ感は'+rec+'です。'+(mix?'頻度感は'+mix+'です。':'');
+    if(mix)return'ベットで取りに行くラインと、チェックでショーダウン価値を守るラインが混ざります。頻度感は'+mix+'です。';
+    return'打って相手の弱いレンジから取るラインと、チェックでポットを管理するラインがあります。';
   }
   return'';
 }
