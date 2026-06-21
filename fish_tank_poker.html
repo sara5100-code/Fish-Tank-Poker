@@ -5182,11 +5182,54 @@ function boardTextureSizePlan(pot,profile,role,opts){
   return{pct,amt:Math.round(pot*pct/100),reason,source:'board_texture'};
 }
 
+// [Codex fix 2026-06-21] ターンカードを「誰に良いか」「続けるか止まるか」で読める判断軸にする。
+function turnCardMeaningProfile(profile,role,opts){
+  if(!profile||!profile.transition||profile.transition==='none')return null;
+  opts=opts||{}; role=role||{};
+  const t=profile.transition;
+  const isPfr=!!opts.isPfr;
+  const isNut=!!(role.isNut||role.role==='nutted');
+  const isStrong=!!(isNut||role.role==='strong');
+  let label='ターン変化カード',favors='neutral',pressure='medium',barrel='mixed',reason='ターンでボード構造が変わったため、前ストリートの評価を更新します。',advice='サイズと相手レンジを見て、続けるか止まるかを分けます。';
+  if(t==='blank'){
+    label='ブランク';
+    favors='range_preserved';pressure='low';barrel=isPfr?'continue':'mixed';
+    reason='ブランクは完成レンジを大きく増やさないため、フロップ時点のレンジ優位が残りやすいカードです。';
+    advice=isPfr?'フロップで主導権がある側は、バリューと良いドローで継続しやすいです。':'受け側は無理にリードせず、ショーダウン価値とドローを整理します。';
+  }else if(t==='overcard'){
+    label='オーバーカード';
+    favors=isPfr?'pfr':'neutral';pressure='medium';barrel=isPfr?'continue':'caution';
+    reason='オーバーカードはPFR側の高カードレンジに当たりやすく、受け側の小〜中ペアには嫌なカードです。';
+    advice=isPfr?'小〜中サイズで継続しやすいカードです。ただし相手のコールレンジが強い時は頻度を落とします。':'受け側から大きく打つには、強いトップペア以上か良いドローが必要です。';
+  }else if(t==='flush_complete_card'||t==='four_flush_card'){
+    label=t==='four_flush_card'?'4枚フラッシュカード':'フラッシュ完成カード';
+    favors=isNut?'hero':'draw_complete';pressure='high';barrel=isNut?'value':'slow_down';
+    reason='フラッシュが完成し、ワンペアや空振りの価値が下がります。Aハイフラッシュや強いブロッカーの有無が重要です。';
+    advice=isNut?'強いフラッシュ以上はバリューを残せます。非ナッツはサイズを抑えます。':'非ナッツのワンペアやエアは、チェックや小さめに寄せます。';
+  }else if(t==='straight_complete_card'){
+    label='ストレート完成カード';
+    favors='caller';pressure='high';barrel=isStrong?'value':'slow_down';
+    reason='ストレート完成カードは、受け側の連結ハンドやドロー完成を増やします。';
+    advice=isStrong?'強い完成役なら取れますが、相手の完成レンジを意識してサイズを選びます。':'ワンペア以下や空振りは、無理な2発目を減らします。';
+  }else if(t==='board_pair'){
+    label='ボードペア化';
+    favors=profile.pairClass==='high_pair'?'pfr':'caller';pressure='high';barrel=isNut?'value':'slow_down';
+    reason='ボードペア化でフルハウス/トリップスの比重が上がり、非ナッツの強さが下がります。';
+    advice=isNut?'フルハウス級ならバリューを残せます。':'ワンペア、ストレート、弱いフラッシュはポット管理を優先します。';
+  }else if(t==='texture_card'){
+    label='重くなるカード';
+    favors='neutral';pressure='medium_high';barrel=isStrong?'value':'mixed';
+    reason='フラッシュ/ストレートの可能性や強いドローが増え、ターン以降の相手レンジが濃くなります。';
+    advice='強いバリューと良いドローは続け、弱いワンペアや空振りは頻度とサイズを落とします。';
+  }
+  return{label,favors,pressure,barrel,reason,advice,transition:t};
+}
 // [Codex fix 2026-06-16] ターン/リバーの変化カードを、実際の評価重みに接続する。
 function boardTextureTransitionProfile(d,profile,role,opts){
   if(!d||!profile||!profile.transition||profile.transition==='none')return null;
   opts=opts||{};
   role=role||{};
+  const meaning=turnCardMeaningProfile(profile,role,opts);
   const lane=d.action==='check'?'check':d.action==='call'?'call':(d.action==='raise'||d.action==='bet'||d.action==='allin')?'bet':d.action;
   const pot=Math.max(1,d.pot||1);
   const basePot=d.toCall>0?Math.max(1,pot-(d.toCall||0)):pot;
@@ -5224,7 +5267,7 @@ function boardTextureTransitionProfile(d,profile,role,opts){
     policy='大きな構造変化が少ないカードなので、前ストリートのレンジ優位と手役を継続して見ます。';
   }
   if(!policy)return null;
-  return{street:d.street,transition:t,transitionLabel:profile.transitionLabel,axis,lane,sizePct,onePair,isNut,isStrong,verdict,severity,policy,suggest};
+  return{street:d.street,transition:t,transitionLabel:profile.transitionLabel,axis,lane,sizePct,onePair,isNut,isStrong,meaning,verdict,severity,policy,suggest};
 }
 function boardTextureTransitionProfileText(p){
   if(!p)return'';
@@ -5500,9 +5543,11 @@ function postflopBarrelPlanProfile(hr,d,role,texture,purposeProfile,rangeActionP
   const pot=Math.max(1,d.pot||1);
   const sizePct=Math.round((d.amount||0)/pot*100);
   const transition=texture.transition||'none';
+  const turnMeaning=turnCardMeaningProfile(texture,role,opts);
   const completed=transition==='flush_complete_card'||transition==='four_flush_card'||transition==='straight_complete_card'||transition==='board_pair';
   const blank=transition==='blank'||transition==='none';
-  const rangeGood=transition==='overcard'&&opts.isPfr||blank;
+  const rangeGood=transition==='overcard'&&opts.isPfr||blank||(turnMeaning&&turnMeaning.favors==='pfr');
+  const slowsDown=!!(turnMeaning&&turnMeaning.barrel==='slow_down');
   const isNut=!!(role.isNut||role.role==='nutted');
   const isStrong=!!(isNut||role.role==='strong');
   const strongOnePair=!!(role.pairTier&&(role.role==='strong'||role.role==='value'));
@@ -5516,7 +5561,7 @@ function postflopBarrelPlanProfile(hr,d,role,texture,purposeProfile,rangeActionP
       policy='フロップでコールされた後も、こちらに強い完成役があります。ターンでは下の完成役や強いワンペアからさらに取る理由があります。';
       suggest='推奨: 50〜75%pot中心。相手が広く払うなら大きめも候補';
       target='下の完成役、強いワンペア、強いドロー';
-    }else if(strongDraw&&!completed){
+    }else if(strongDraw&&!completed&&!slowsDown){
       severity='good';verdict='改善率を持った2発目';
       policy='強いドローは、ターンでもフォールドを取る価値と、コールされてもリバーで改善する価値があります。';
       suggest='推奨: 40〜70%pot。相手が降りないタイプなら頻度を落とします';
@@ -5526,25 +5571,25 @@ function postflopBarrelPlanProfile(hr,d,role,texture,purposeProfile,rangeActionP
       policy='ターンカードがこちらのレンジに悪くないため、小さめに続ける余地があります。ただし実ハンドの改善がない時は頻度を抑えます。';
       suggest='相手依存: 25〜50%potで低〜中頻度';
       target='フロップを一度コールした弱いペアや空振り';
-    }else if((weakMade||air)&&completed){
+    }else if((weakMade||air)&&(completed||slowsDown)){
       severity='bad';verdict='完成カードで無理な2発目';
-      policy='ターンでフラッシュ、ストレート、フルハウス絡みの完成レンジが増えています。弱いワンペアや空振りで大きく続けると、相手の強い継続レンジに払いやすくなります。';
+      policy=(turnMeaning&&turnMeaning.reason?turnMeaning.reason+' ':'')+'弱いワンペアや空振りで大きく続けると、相手の強い継続レンジに払いやすくなります。';
       suggest='推奨: チェック寄り。打つなら小さく、明確なブロッカーが必要';
       target='本来は降ろしたい手が少なく、相手の強い手が残りやすい';
-    }else if(strongOnePair&&completed&&sizePct>=55){
+    }else if(strongOnePair&&(completed||slowsDown)&&sizePct>=55){
       severity='border';verdict='ワンペアの2発目は慎重';
-      policy='強いワンペアでも、ターン完成カードでは相手のコールレンジが濃くなります。大きく続けるより、チェックや小さめでポットを管理します。';
+      policy=(turnMeaning&&turnMeaning.reason?turnMeaning.reason+' ':'')+'強いワンペアでも、相手のコールレンジが濃くなるターンでは、大きく続けるよりチェックや小さめでポットを管理します。';
       suggest='推奨: チェック〜40%pot寄り';
       target='下のワンペアと一部ドロー。ただし完成役に注意';
     }else{
       severity=sizePct>=75?'border':'good';verdict='継続理由のある2発目';
-      policy='フロップで作った主導権を、ターンでも相手のコールレンジとボード変化に合わせて使う場面です。';
+      policy=(turnMeaning&&turnMeaning.advice?turnMeaning.advice+' ':'')+'フロップで作った主導権を、ターンでも相手のコールレンジとボード変化に合わせて使う場面です。';
       suggest='推奨: 33〜60%potを中心に、相手が続ける手を先に決めます';
     }
   }else if(lane==='check'){
     if(completed&&!isStrong&&!strongDraw){
       severity='good';verdict='完成カードで止まる良いチェック';
-      policy='ターンで相手の完成レンジが増えたため、無理に2発目を打たずポットを管理する判断です。';
+      policy=(turnMeaning&&turnMeaning.reason?turnMeaning.reason+' ':'')+'無理に2発目を打たずポットを管理する判断です。';
       suggest='推奨: チェック継続。相手のサイズ次第でコール/フォールドを分けます';
     }else if(isStrong&&villainFlopCall){
       severity='border';verdict='強い手の取り逃し候補';
@@ -5556,12 +5601,12 @@ function postflopBarrelPlanProfile(hr,d,role,texture,purposeProfile,rangeActionP
       suggest='相手依存: bet/check の混合';
     }else{
       severity='good';verdict='無理に続けないチェック';
-      policy='フロップで打ったあとでも、ターンで目的が薄くなればチェックで実現率とポット管理を優先します。';
+      policy=(turnMeaning&&turnMeaning.advice?turnMeaning.advice+' ':'')+'フロップで打ったあとでも、ターンで目的が薄くなればチェックで実現率とポット管理を優先します。';
       suggest='推奨: チェックで次の判断へ';
     }
   }
   text='フロップで打ってコールされた後のターン判断です。'+policy;
-  return{axis:'ターンの継続ベット判断',lane,street:d.street,sizePct,transition,transitionLabel:texture.transitionLabel||'',villainFlopCall,rangeGood,completed,blank,severity,verdict,policy,suggest,target,text,purpose:purposeProfile?purposeProfile.purpose:'',rangeState:rangeActionProfile?rangeActionProfile.rangeState:''};
+  return{axis:'ターンの継続ベット判断',lane,street:d.street,sizePct,transition,transitionLabel:texture.transitionLabel||'',turnMeaning,villainFlopCall,rangeGood,completed,blank,severity,verdict,policy,suggest,target,text,purpose:purposeProfile?purposeProfile.purpose:'',rangeState:rangeActionProfile?rangeActionProfile.rangeState:''};
 }
 function postflopBarrelPlanProfileText(p){
   if(!p)return'';
@@ -12105,6 +12150,26 @@ function runFishTankRegressionTests(){
     const flushProf=boardTextureTransitionProfile(regressionDecision({street:'turn',action:'call',amount:70,pot:100,toCall:70}),flush,{role:'value',pairTier:'top_pair'},{isPfr:false});
     const pairProf=boardTextureTransitionProfile(regressionDecision({street:'turn',action:'bet',amount:70,pot:100,toCall:0}),pair,{role:'value',isVuln:true},{isPfr:true});
     return !!(flushProf&&flushProf.severity==='bad'&&flushProf.axis==='フラッシュ完成カード'&&pairProf&&pairProf.severity==='bad'&&pairProf.axis==='ボードペア化');
+  });
+
+  add('GTOターン意味: PFRに良いオーバーカードは小さめ2発目を残す',function(){
+    const tex=boardTextureProfile(regressionCards(['9h','6c','2d','Kd']),'turn',regressionCards(['9h','6c','2d']));
+    const prof=postflopBarrelPlanProfile(regressionHand({decisions:[
+      regressionDecision({street:'flop',action:'bet',amount:33,pot:100,toCall:0,playerName:'あなた',isHuman:true,playerIdx:0}),
+      regressionDecision({street:'flop',action:'call',amount:33,pot:133,toCall:33,playerName:'villain',isHuman:false,playerIdx:1}),
+      regressionDecision({street:'turn',action:'bet',amount:40,pot:166,toCall:0,playerName:'あなた',isHuman:true,playerIdx:0})
+    ]}),regressionDecision({street:'turn',action:'bet',amount:40,pot:166,toCall:0,playerName:'あなた',isHuman:true,playerIdx:0}),{role:'air'},tex,null,null,{isPfr:true});
+    return !!(prof&&prof.turnMeaning&&prof.turnMeaning.favors==='pfr'&&prof.rangeGood&&prof.severity!=='bad');
+  });
+
+  add('GTOターン意味: 完成カードでは弱い手のチェックを肯定する',function(){
+    const tex=boardTextureProfile(regressionCards(['Kh','7h','2c','4h']),'turn',regressionCards(['Kh','7h','2c']));
+    const prof=postflopBarrelPlanProfile(regressionHand({decisions:[
+      regressionDecision({street:'flop',action:'bet',amount:33,pot:100,toCall:0,playerName:'あなた',isHuman:true,playerIdx:0}),
+      regressionDecision({street:'flop',action:'call',amount:33,pot:133,toCall:33,playerName:'villain',isHuman:false,playerIdx:1}),
+      regressionDecision({street:'turn',action:'check',amount:0,pot:166,toCall:0,playerName:'あなた',isHuman:true,playerIdx:0})
+    ]}),regressionDecision({street:'turn',action:'check',amount:0,pot:166,toCall:0,playerName:'あなた',isHuman:true,playerIdx:0}),{role:'air'},tex,null,null,{isPfr:true});
+    return !!(prof&&prof.turnMeaning&&prof.turnMeaning.barrel==='slow_down'&&prof.severity==='good'&&/フラッシュ/.test(prof.policy));
   });
 
   add('GTOボード分類: 評価JSONとGTOスナップショットに保持する',function(){
