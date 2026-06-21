@@ -14154,21 +14154,22 @@ function showAnalysis(hr,fromHistory){
     if(pl.supportingAxes&&pl.supportingAxes.length)html+='<div style="font-size:9px;color:var(--dim);line-height:1.45;margin-top:5px">補足要因: '+pl.supportingAxes.join(' / ')+'</div>';
     html+='</div>';
   }
-  if(hr.scenarioQuality){
+  const showDevDiagnostics=document.body.classList.contains('codex-dev');
+  if(showDevDiagnostics&&hr.scenarioQuality){
     const sq=hr.scenarioQuality;
     html+='<div style="margin-top:9px;border-top:1px solid var(--border);padding-top:8px;text-align:left">';
     html+='<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px"><span style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:.08em">SCENARIO QUALITY</span><span style="font-size:13px;font-weight:900;color:'+(sq.ok?'var(--green)':'var(--orange)')+'">'+sq.grade+'</span></div>';
     html+='<div style="font-size:10px;color:var(--dim);line-height:1.45">'+trainingSpotQualityText(sq)+'</div>';
     html+='</div>';
   }
-  if(an.actualHandAudit){
+  if(showDevDiagnostics&&an.actualHandAudit){
     const aha=an.actualHandAudit;
     html+='<div style="margin-top:9px;border-top:1px solid var(--border);padding-top:8px;text-align:left">';
     html+='<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px"><span style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:.08em">HIDDEN HAND AUDIT</span><span style="font-size:13px;font-weight:900;color:'+(aha.status==='PASS'?'var(--green)':'var(--red)')+'">'+aha.status+'</span></div>';
     html+='<div style="font-size:10px;color:var(--dim);line-height:1.45">'+actualHandLeakAuditText(aha)+'</div>';
     html+='</div>';
   }
-  if(an.premiseAudit&&(an.premiseAudit.issues.length||an.premiseAudit.warnings.length)){
+  if(showDevDiagnostics&&an.premiseAudit&&(an.premiseAudit.issues.length||an.premiseAudit.warnings.length)){
     const pa=an.premiseAudit;
     html+='<div style="margin-top:9px;border-top:1px solid var(--border);padding-top:8px;text-align:left">';
     html+='<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px"><span style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:.08em">SOFTWARE PREMISE</span><span style="font-size:13px;font-weight:900;color:'+(pa.ok?'var(--green)':'var(--orange)')+'">'+pa.grade+'</span></div>';
