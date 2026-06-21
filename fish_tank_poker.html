@@ -12188,6 +12188,30 @@ function runFishTankRegressionTests(){
     return /チェック 57% \/ ベット 43%/.test(txt)&&txt.length<420;
   });
 
+  add('実地監査: 長すぎるレビュー文を検出する',function(){
+    const long='これは長すぎるレビューです。'.repeat(35);
+    const issues=auditIssuesForHand({players:[]},{evals:[{street:'turn',action:'bet',quality:'ok',coachComment:long}]});
+    return issues.some(function(i){return i.type==='review-too-long'&&i.severity==='medium';});
+  });
+
+  add('実地監査: ブラフ候補説明の長文化を検出する',function(){
+    const long='ブラフ候補として見ると、これは条件付きです。コールしてほしい相手と降ろしたい相手を整理します。'.repeat(12);
+    const issues=auditIssuesForHand({players:[]},{evals:[{
+      street:'flop',
+      action:'bet',
+      quality:'ok',
+      coachComment:long,
+      postflopBetPurposeProfile:{bluffCandidate:{kind:'条件不足のブラフ候補'}}
+    }]});
+    return issues.some(function(i){return i.type==='bluff-comment-too-long'&&i.severity==='medium';});
+  });
+
+  add('実地監査: レビュー文の同一語句重複を検出する',function(){
+    const txt='コールしてほしい相手を確認します。コールしてほしい相手は弱いペアです。コールしてほしい相手が少ないです。';
+    const issues=auditIssuesForHand({players:[]},{evals:[{street:'flop',action:'bet',quality:'ok',coachComment:txt}]});
+    return issues.some(function(i){return i.type==='review-duplicate-phrase'&&i.meta&&i.meta.phrase==='コールしてほしい相手';});
+  });
+
   add('トリップス監査: Aトリップスを弱いワンペア扱いしない',function(){
     const hr=regressionHand({
       heroHole:['As','Kd'],
@@ -13465,6 +13489,8 @@ function auditIssuesForHand(hr,an,label){
   if(premise&&premise.warnings&&premise.warnings.length)addAuditIssue(issues,'medium','premise-warning','プリフロップ文脈認識に警告があります。',premise.warnings);
   (an.evals||[]).forEach(function(e){
     const c=(e.comment||'').replace(/<[^>]+>/g,'');
+    // [Codex fix 2026-06-21] 実地検査では、評価の正誤だけでなく「読める説明か」も監査する。
+    const coach=(e.coachComment||coachReviewText(e)||'').replace(/<[^>]+>/g,'').replace(/\s+/g,' ').trim();
     const dec=e.deduction||0;
     const street=(e.street||'?').toUpperCase();
     const action=e.action||'?';
@@ -13493,6 +13519,18 @@ function auditIssuesForHand(hr,an,label){
     if(e.street==='river'&&e.action==='call'&&/(トップペア|ワンペア)/.test(c)&&/明確なコール/.test(c)&&!e.onePairProfile){
       addAuditIssue(issues,'medium','river-one-pair-missing-profile','リバーのワンペアコールに専用プロファイルが付いていません。完成ボード/ライブ$2/$5補正の監査対象です。',{comment:c});
     }
+    if(coach&&coach.length>420){
+      addAuditIssue(issues,'medium','review-too-long',street+' '+action+' のレビュー文が長く、初心者が要点を追いにくい可能性があります。',{length:coach.length,text:coach});
+    }
+    if(e.postflopBetPurposeProfile&&e.postflopBetPurposeProfile.bluffCandidate&&coach.length>360){
+      addAuditIssue(issues,'medium','bluff-comment-too-long',street+' '+action+' のブラフ候補説明が長く、目的・候補・サイズのどれを直すべきか曖昧になる可能性があります。',{length:coach.length,bluffCandidate:e.postflopBetPurposeProfile.bluffCandidate,text:coach});
+    }
+    ['コールしてほしい相手','降ろしたい相手','ブラフ候補として見ると','推奨:'].forEach(function(phrase){
+      const n=(coach.match(new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'g'))||[]).length;
+      if(n>=3){
+        addAuditIssue(issues,'low','review-duplicate-phrase',street+' '+action+' のレビュー文で「'+phrase+'」が繰り返されすぎています。',{phrase:phrase,count:n,text:coach});
+      }
+    });
   });
   return issues;
 }
@@ -13526,6 +13564,9 @@ function auditIssuePriorityWeight(issue){
     'large-deduction':80,
     'donk-check-weight':70,
     'river-one-pair-missing-profile':65,
+    'review-too-long':60,
+    'bluff-comment-too-long':58,
+    'review-duplicate-phrase':35,
     'raw-effective-gap':45
   }[issue&&issue.type]||30;
   return sev+type;
@@ -13544,6 +13585,9 @@ function auditRepairSuggestion(type){
     'large-deduction':'大減点の理由がユーザーに伝わるか確認。サイズ違い・ライン違い・局面違いを分けて説明する。',
     'donk-check-weight':'OOP側チェックを自然扱いする主導権/ドンク判定を見直す。',
     'river-one-pair-missing-profile':'リバーのワンペアコールには必ず専用プロファイルを付ける。',
+    'review-too-long':'レビュー文を結論・理由・推奨サイズの3点に圧縮する。詳しい軸は内部/監査側に残す。',
+    'bluff-comment-too-long':'ブラフ候補説明を「候補の質」「降ろす相手」「サイズ帯」の短い一文へ圧縮する。',
+    'review-duplicate-phrase':'同じ語句を複数のプロファイルから重ねて出している。最終整文で重複を1回にまとめる。',
     'raw-effective-gap':'Raw EQと実効EQの差が大きい局面で、Raw EQだけを根拠にした説明を避ける。'
   };
   return map[type]||'該当issueの発生ハンドを確認し、説明と減点が同じ判断軸を見ているか確認する。';
