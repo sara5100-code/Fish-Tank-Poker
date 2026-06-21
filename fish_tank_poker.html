@@ -12697,6 +12697,21 @@ function runFishTankRegressionTests(){
     return /複数のラインが成立します/.test(txt)&&/チェックで/.test(txt)&&/ベット/.test(txt)&&/頻度感/.test(txt)&&!/この局面では/.test(txt);
   });
 
+  add('コーチ文: リバーチェックの内部圧力ラベルを出さない',function(){
+    const txt=coachReviewText({
+      street:'river',
+      action:'check',
+      quality:'good',
+      comment:'チェック。',
+      liveCashRiverDecisionProfile:{
+        lane:'riverStrongCheck',
+        policy:'強い手は基本的にリバーでバリューを取りに行きますが、非ナッツや相手が打つレンジを持つ時はチェックも混ざります。',
+        risk:'チェック / 非ナッツ強手 / 相手圧力0回'
+      }
+    });
+    return /強い圧力はまだ入っていません/.test(txt)&&!/相手圧力0回|相手傾向=|チェックはこのままで問題ありません/.test(txt);
+  });
+
   add('リングリバー: 非ナッツで相手ベットへ大きくレイズしすぎない',function(){
     const hr=regressionHand({
       heroHole:['4c','2c'],
@@ -13384,7 +13399,21 @@ function riverLineNaturalText(label){
 function naturalRiskText(risk,actor,street){
   const txt=plainReviewText(risk);
   if(!txt)return'';
-  let m=txt.match(/(?:サイズ)?(\d+)%pot\s*\/\s*([^\/]+)\s*\/\s*相手圧力(\d+)回/);
+  let m=txt.match(/^チェック\s*\/\s*([^\/]+)\s*\/\s*相手圧力(\d+)回/);
+  if(m){
+    const hand=String(m[1]||'').trim();
+    const pressure=+m[2];
+    const handText=hand==='非ナッツ強手'
+      ?'こちらは強い手ですが、全体ナッツではなく、'
+      :hand==='ナッツ級'
+        ?'こちらはナッツ級で、'
+        :boardTextureNaturalText(hand,street);
+    const pressureText=pressure>0
+      ?'ここまで相手の圧力が'+pressure+'回入っています。'
+      :'相手から強い圧力はまだ入っていません。';
+    return handText+pressureText;
+  }
+  m=txt.match(/(?:サイズ)?(\d+)%pot\s*\/\s*([^\/]+)\s*\/\s*相手圧力(\d+)回/);
   if(m){
     const board=boardTextureNaturalText(m[2],street);
     const pressure=+m[3]>0?'ここまで相手の圧力は'+m[3]+'回入っています。':'ここまで相手の強い圧力は入っていません。';
@@ -13904,7 +13933,11 @@ function polishCoachReviewText(txt,ev){
     .replace(/許容できます。次に同じ場面が来たら、(.+?)も意識してください。/g,'許容範囲です。次は$1も候補にしてください。')
     .replace(/このボードは完成役や強いドローが残りやすいので、/g,'このボードでは完成役や強いドローを意識して、')
     .replace(/このボードは比較的落ち着いているので、/g,'ボードは比較的落ち着いているので、')
-    .replace(/見た目のエクイティより、相手の残っているレンジの強さを優先して見直したいです。/g,'手の強さだけでなく、相手に残る強いレンジを優先して見直します。');
+    .replace(/見た目のエクイティより、相手の残っているレンジの強さを優先して見直したいです。/g,'手の強さだけでなく、相手に残る強いレンジを優先して見直します。')
+    .replace(/チェックはこのままで問題ありません。SDVはチェックバック多め。/g,'ショーダウン価値を守るチェックバックが自然です。')
+    .replace(/チェックはこのままで問題ありません。/g,'')
+    .replace(/相手圧力0回/g,'相手から強い圧力はまだ入っていません')
+    .replace(/相手傾向=標準的/g,'');
   const raw=txt.match(/[^。]+。?/g)||[txt];
   const out=[];
   const seen=new Set();
