@@ -5362,6 +5362,98 @@ function boardTextureTransitionProfileText(p){
 
 // [Codex fix 2026-06-16] Range advantage / nut advantageを、単なる表示ではなく判断軸として保持する。
 // [Codex fix 2026-06-20] ポストフロップのベットを「何のために打つか」で評価する。
+// [Codex fix 2026-06-21] ブラフは「打てるサイズ」より先に、候補としての質を確認する。
+function postflopBluffCandidateProfile(hr,d,role,texture,rangeProfile,opts){
+  if(!hr||!d||d.street==='preflop'||d.street==='river')return null;
+  opts=opts||{}; role=role||{}; texture=texture||{}; rangeProfile=rangeProfile||{};
+  const lane=opts.lane||'';
+  const bluffLane=lane==='semiBluff'||lane==='weakDrawBluff'||lane==='airBluff'||lane==='rangeCbet';
+  if(!bluffLane)return null;
+  const human=hr.players?hr.players.find(function(p){return p.isHuman;}):null;
+  const hole=human&&human.holeCards?human.holeCards:[];
+  const board=hr.community?hr.community.slice(0,(d.street==='turn'?4:3)):[];
+  const boardHigh=board.reduce(function(m,c){return Math.max(m,RANK_VAL[c.rank]||0);},0);
+  const heroRanks=hole.map(function(c){return RANK_VAL[c.rank]||0;});
+  const suitCnt={};
+  board.forEach(function(c){suitCnt[c.suit]=(suitCnt[c.suit]||0)+1;});
+  const drawSuit=Object.keys(suitCnt).find(function(s){return suitCnt[s]>=2;})||'';
+  const hasNutFlushBlocker=!!(drawSuit&&hole.some(function(c){return c.suit===drawSuit&&c.rank==='A';}));
+  const hasHighFlushBlocker=!!(drawSuit&&hole.some(function(c){return c.suit===drawSuit&&(RANK_VAL[c.rank]||0)>=12;}));
+  const hasOvercardBlocker=heroRanks.some(function(v){return v>boardHigh&&v>=12;});
+  const blocker=hasNutFlushBlocker?'ナッツフラッシュブロッカー'
+    :hasHighFlushBlocker?'高いフラッシュブロッカー'
+    :hasOvercardBlocker?'高いオーバーカード'
+    :'明確なブロッカーなし';
+  const sizePct=opts.sizePct||Math.round((d.amount||0)/Math.max(1,d.pot||1)*100);
+  const strongDraw=!!opts.strongDraw;
+  const weakDraw=!!opts.weakDraw;
+  const air=!!opts.air;
+  const rangeHigh=!!opts.rangeHigh;
+  const multiway=!!opts.multiway;
+  const dynamic=!!opts.dynamic;
+  const staticDry=!!(texture.staticBoard);
+  const opponentType=opts.opponentType||null;
+  const callHeavy=!!(opponentType&&opponentType.bluffTighten);
+  let kind='条件不足のブラフ候補';
+  let severity='bad';
+  let target='相手の空振りや弱いAハイ';
+  let foldOut='こちらより少し強いが続けにくい手';
+  let frequency='低頻度';
+  let sizeBand='チェック優先';
+  let policy='降ろせる手、ブロッカー、コールされた時の保険が足りません。';
+  let suggest='推奨: チェック。ブラフは強いドローか良いブロッカーがある時に回します';
+  if(strongDraw){
+    kind='強いドローのセミブラフ候補';
+    severity=multiway&&sizePct>=65?'border':'good';
+    target='弱いペア、Aハイ、エクイティのある空振り';
+    foldOut='今は勝っているが強く続けにくいメイドハンド';
+    frequency=multiway?'中〜低頻度':'中〜高頻度';
+    sizeBand=multiway?'33〜50%pot中心':'33〜75%pot';
+    policy='今すぐ降ろす価値に加えて、コールされても改善する価値があります。';
+    suggest=severity==='good'?'推奨: セミブラフ候補。サイズは相手が降りる範囲とコール後の改善価値で選びます':'推奨: 候補ではあるが、マルチウェイや大きすぎるサイズでは頻度を落とします';
+  }else if(lane==='rangeCbet'&&rangeHigh&&staticDry&&!multiway&&sizePct<=40){
+    kind='レンジ優位の小さめブラフ候補';
+    severity='good';
+    target='広い空振り、弱いAハイ、バックドアだけの手';
+    foldOut='相手レンジの外れた部分';
+    frequency='中頻度';
+    sizeBand='25〜33%pot';
+    policy='こちらのレンジ優位を小さく広く使うブラフです。手札単体より、ボードと主導権で成立します。';
+    suggest='推奨: 小さく打つなら自然。大きくするとレンジCBの軽さとズレます';
+  }else if((hasNutFlushBlocker||hasHighFlushBlocker||hasOvercardBlocker)&&rangeHigh&&!multiway&&sizePct<=55&&!callHeavy){
+    kind='ブロッカー付きの低頻度ブラフ候補';
+    severity=weakDraw||air?'border':'good';
+    target='弱いペア、Aハイ、バックドアだけの手';
+    foldOut='こちらより少し強いが、強く続けにくい手';
+    frequency='低〜中頻度';
+    sizeBand='33〜50%pot';
+    policy='ブロッカーで相手の強い継続レンジを少し減らせます。ただし、相手が降りる前提が必要です。';
+    suggest='相手依存: 小〜中サイズで一部。コール多め相手にはチェック寄り';
+  }
+  if(callHeavy&&(air||weakDraw)&&severity!=='good'){
+    severity='bad';
+    frequency='かなり低頻度';
+    sizeBand='チェック優先';
+    policy='相手がコール多めなら、ブロッカーだけでは足りません。弱いブラフは捕まりやすくなります。';
+    suggest='推奨: チェック。打つなら強いドローか、後続で強く撃てる根拠が必要です';
+  }
+  if(multiway&&(air||weakDraw)&&severity!=='good'){
+    severity='bad';
+    frequency='かなり低頻度';
+    sizeBand='チェック優先';
+    policy='マルチウェイでは全員を降ろす必要があるため、弱いブラフ候補は大きく価値が落ちます。';
+    suggest='推奨: チェック。強いドロー以外のブラフ頻度を落とします';
+  }
+  if(dynamic&&(air||weakDraw)&&!hasNutFlushBlocker&&!hasHighFlushBlocker&&severity!=='good'){
+    severity='bad';
+    policy='重いボードでは相手の継続レンジが強く、ブロッカーのない弱いブラフは通りにくいです。';
+  }
+  return{
+    axis:'ブラフ候補',
+    kind,severity,target,foldOut,blocker,frequency,sizeBand,policy,suggest,
+    summary:'候補='+kind+' / ブロッカー='+blocker+' / 頻度='+frequency+' / サイズ='+sizeBand
+  };
+}
 function postflopBetPurposeProfile(hr,d,role,texture,rangeProfile,opts){
   if(!hr||!d||d.street==='preflop'||d.street==='river')return null;
   const betLike=d.action==='bet'||d.action==='raise'||d.action==='allin';
@@ -5443,11 +5535,19 @@ function postflopBetPurposeProfile(hr,d,role,texture,rangeProfile,opts){
     suggest='推奨: コール/フォールド寄り。レイズは強いバリューか強いドローに絞ります';
   }
   const targetPlan=postflopBetTargetPlan({lane,purpose,target,street,sizePct,recommendedPct,severity,strongOnePair,weakMade,strongDraw,weakDraw,air,rangeHigh,nutLow,dynamic,multiway,isPfr,facing},texture,role,rangeProfile);
+  const bluffCandidate=postflopBluffCandidateProfile(hr,d,role,texture,rangeProfile,{lane,sizePct,strongDraw,weakDraw,air,rangeHigh,dynamic,multiway,opponentType});
   if(targetPlan&&targetPlan.severity==='bad'){
     severity='bad';
     if(targetPlan.verdict)verdict=targetPlan.verdict;
     if(targetPlan.suggest)suggest=targetPlan.suggest;
   }else if(targetPlan&&targetPlan.severity==='border'&&severity==='good'){
+    severity='border';
+  }
+  if(bluffCandidate&&bluffCandidate.severity==='bad'){
+    severity='bad';
+    verdict=bluffCandidate.kind;
+    suggest=bluffCandidate.suggest||suggest;
+  }else if(bluffCandidate&&bluffCandidate.severity==='border'&&severity==='good'){
     severity='border';
   }
   if(opponentType&&opponentType.label&&opponentType.label!=='標準的'){
@@ -5462,8 +5562,8 @@ function postflopBetPurposeProfile(hr,d,role,texture,rangeProfile,opts){
       severity=severity==='good'?'good':'border';
     }
   }
-  risk=sizePct+'%pot / '+purpose+' / 対象='+target+(texture?(' / ボード='+texture.label):'')+(multiway?' / マルチウェイ':'')+(recommendedPct?(' / 目安='+recommendedPct+'%pot'):'')+(opponentType&&opponentType.label&&opponentType.label!=='標準的'?(' / 相手タイプ='+opponentType.label):'')+(targetPlan&&targetPlan.summary?(' / '+targetPlan.summary):'');
-  return{lane,purpose,target,street,sizePct,recommendedPct,axis:'ポストフロップのベット目的',severity,verdict,policy,risk,suggest,sizePlan,targetPlan,opponentType,strongMade,onePair,strongOnePair,weakMade,strongDraw,weakDraw,air,rangeHigh,nutLow,dynamic,multiway};
+  risk=sizePct+'%pot / '+purpose+' / 対象='+target+(texture?(' / ボード='+texture.label):'')+(multiway?' / マルチウェイ':'')+(recommendedPct?(' / 目安='+recommendedPct+'%pot'):'')+(opponentType&&opponentType.label&&opponentType.label!=='標準的'?(' / 相手タイプ='+opponentType.label):'')+(targetPlan&&targetPlan.summary?(' / '+targetPlan.summary):'')+(bluffCandidate&&bluffCandidate.summary?(' / '+bluffCandidate.summary):'');
+  return{lane,purpose,target,street,sizePct,recommendedPct,axis:'ポストフロップのベット目的',severity,verdict,policy,risk,suggest,sizePlan,targetPlan,bluffCandidate,opponentType,strongMade,onePair,strongOnePair,weakMade,strongDraw,weakDraw,air,rangeHigh,nutLow,dynamic,multiway};
 }
 function postflopBetPurposeProfileText(p){
   if(!p)return'';
@@ -12524,6 +12624,64 @@ function runFishTankRegressionTests(){
     return !!(p&&t&&p.lane==='semiBluff'&&t.severity==='good'&&/改善する価値/.test(coachReviewText(ev)+t.text)&&/Aハイ|弱いペア/.test(t.target));
   });
 
+  add('ポストフロップブラフ候補: 強いドローは改善価値込みで候補にする',function(){
+    const hr=regressionHand({
+      heroHole:['Ah','Qh'],
+      villainHole:['8c','8d'],
+      board:['Jh','7h','2s'],
+      decisions:[
+        regressionDecision({street:'flop',action:'bet',amount:50,pot:100,toCall:0,facingRaise:false,position:'BTN',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:500})
+      ],
+      pot:150
+    });
+    const ev=humanEval(analyzeHand(hr),function(e){return e.street==='flop'&&(e.action==='raise'||e.action==='bet');});
+    const b=ev&&ev.postflopBetPurposeProfile&&ev.postflopBetPurposeProfile.bluffCandidate;
+    return !!(b&&b.severity==='good'&&/強いドロー|セミブラフ/.test(b.kind+coachReviewText(ev))&&/改善/.test(b.policy));
+  });
+
+  add('ポストフロップブラフ候補: コール多め相手への空ブラフは候補不足にする',function(){
+    const players=[
+      regressionPlayer('あなた',true,['Qs','Js'],{chips:500}),
+      regressionPlayer('yohe',false,['7h','7d'],{chips:500})
+    ];
+    const hr=regressionHand({
+      players,
+      board:['Ad','9c','3s'],
+      decisions:[
+        regressionDecision({street:'preflop',action:'raise',amount:15,pot:7,toCall:0,facingRaise:false,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:500}),
+        regressionDecision({street:'preflop',action:'call',amount:10,pot:22,toCall:10,potOdds:10/32,facingRaise:true,position:'BB',playerName:'yohe',isHuman:false,playerIdx:1,playerChipsBefore:500}),
+        regressionDecision({street:'flop',action:'check',amount:0,pot:100,toCall:0,facingRaise:false,position:'BB',playerName:'yohe',isHuman:false,playerIdx:1,playerChipsBefore:490}),
+        regressionDecision({street:'flop',action:'bet',amount:70,pot:100,toCall:0,facingRaise:false,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:485})
+      ],
+      pot:170
+    });
+    const ev=humanEval(analyzeHand(hr),function(e){return e.street==='flop'&&(e.action==='raise'||e.action==='bet');});
+    const p=ev&&ev.postflopBetPurposeProfile;
+    const b=p&&p.bluffCandidate;
+    return !!(b&&b.severity==='bad'&&p.severity==='bad'&&/コール多め|チェック/.test(coachReviewText(ev)+b.policy+b.suggest));
+  });
+
+  add('ポストフロップブラフ候補: マルチウェイの弱いブラフは頻度を落とす',function(){
+    const players=[
+      regressionPlayer('あなた',true,['Qs','Js'],{chips:500}),
+      regressionPlayer('villain1',false,['7h','7d'],{chips:500}),
+      regressionPlayer('villain2',false,['6c','6d'],{chips:500})
+    ];
+    const hr=regressionHand({
+      players,
+      board:['Ad','9c','3s'],
+      decisions:[
+        regressionDecision({street:'flop',action:'check',amount:0,pot:100,toCall:0,facingRaise:false,position:'BB',playerName:'villain1',isHuman:false,playerIdx:1,playerChipsBefore:500}),
+        regressionDecision({street:'flop',action:'check',amount:0,pot:100,toCall:0,facingRaise:false,position:'MP',playerName:'villain2',isHuman:false,playerIdx:2,playerChipsBefore:500}),
+        regressionDecision({street:'flop',action:'bet',amount:50,pot:100,toCall:0,facingRaise:false,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:500})
+      ],
+      pot:150
+    });
+    const ev=humanEval(analyzeHand(hr),function(e){return e.street==='flop'&&(e.action==='raise'||e.action==='bet');});
+    const b=ev&&ev.postflopBetPurposeProfile&&ev.postflopBetPurposeProfile.bluffCandidate;
+    return !!(b&&b.severity==='bad'&&/マルチウェイ|頻度/.test(coachReviewText(ev)+b.policy+b.summary));
+  });
+
   add('ポストフロップベット対象: レンジCBは小さく広く打つ説明を持つ',function(){
     const hr=regressionHand({
       heroHole:['Kc','Qc'],
@@ -13946,7 +14104,11 @@ function naturalPostflopBetPurposeText(ev){
   const advice=naturalRecommendationText(p.suggest||'');
   const opponentNote=p.opponentType&&p.opponentType.postflopNote&&p.opponentType.label!=='標準的'?p.opponentType.postflopNote:'';
   const core=streetLead+'、このベットは'+purposeText+'で、コールしてほしい相手は「'+target+'」、降ろしたい相手は「'+foldOut+'」、今回のサイズは'+actual+'、目安は'+rec+'です。';
-  return [core,opponentNote,sizeNote,advice].filter(Boolean).join(' ');
+  const bluff=p.bluffCandidate||null;
+  const bluffNote=bluff
+    ?'ブラフ候補として見ると、これは「'+bluff.kind+'」です。'+bluff.policy+' 頻度は'+bluff.frequency+'、サイズは'+bluff.sizeBand+'が目安です。'
+    :'';
+  return [core,bluffNote,opponentNote,sizeNote,advice].filter(Boolean).join(' ');
 }
 // [Codex fix 2026-06-20] ベットされた側の説明を、必要勝率・勝っている想定・相手ブラフ量に整理する。
 function naturalFacingBetDecisionText(ev){
