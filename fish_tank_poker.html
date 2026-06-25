@@ -6354,8 +6354,9 @@ function handRole(holeCards,comm,evalResult){
         return{role:'strong',note:note+madeDraw.note,isNut:false,isVuln:tex.flushDraw||tex.straightDraw,madeClass:'two_pair',valueTier:'pocket_over_board_pair'};
       }else{
         // 55 on 8-8-3 型: ボードペアが上位 → 中程度のバリュー
-        note='ポケット'+pcktName+pcktName+' + ボード上位ペア('+bpName+')のツーペア。中程度のバリュー。サイズを抑えてポット管理。';
-        return{role:'value',note:note+madeDraw.note,isNut:false,isVuln:true,madeClass:'two_pair',valueTier:'pocket_under_board_pair'};
+        // [Codex fix 2026-06-25] 手役名はツーペアでも、実戦価値は下のポケットペア寄り。強いバリュー扱いにしない。
+        note='ポケット'+pcktName+pcktName+'はありますが、ボードの'+bpName+'ペアが上位です。実戦上は下のペア寄りで、強く取り切る手ではありません。';
+        return{role:'medium',note:note+madeDraw.note,isNut:false,isVuln:true,pairTier:'under_pair',madeClass:'two_pair',valueTier:'pocket_under_board_pair'};
       }
     }
     if(isBoardCompletedTP){
@@ -6858,6 +6859,7 @@ function harmonizeFinalEvaluationText(ev){
     c=c.replace(/境界フォールド — 降りても大きな問題はありませんが、/g,'フォールドは見直したい判断です。');
     c=c.replace(/若干のEV優位。/g,'表面上は少し足りそうに見えても、最終評価では慎重に扱います。');
     c=c.replace(/コールで問題ありません。/g,'コールは相手依存です。');
+    c=c.replace(/完全な正解ではなく/g,'完全な推奨ではなく');
   }
   if(ev.onePairProfile&&ev.onePairProfile.verdict==='bad'){
     c=c.replace(/EV優位（[^。]+）で明確なコールです。/g,'ワンペア監査後は、必要EQだけでは正当化しない受けすぎ候補です。');
