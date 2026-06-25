@@ -3798,7 +3798,12 @@ function actualHandTextLeakCount(hr,an){
       return [e.comment||'',e.suggest||'',e.strategyMix||'',e.axisWeightNote||'',e.phaseWeightNote||''].join(' ');
     }).join(' ')
   ].join(' ');
-  return vis.hiddenCodes.filter(function(code){return hay.indexOf(code)>=0;}).length;
+  // [Codex fix 2026-06-25] K5s/97s のようなハンドタイプ表記を、実カード 5s/7s の漏れと誤検知しない。
+  const cardTokenBoundary='A23456789TJQKcdhs';
+  return vis.hiddenCodes.filter(function(code){
+    const re=new RegExp('(^|[^'+cardTokenBoundary+'])'+code.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'($|[^'+cardTokenBoundary+'])');
+    return re.test(hay);
+  }).length;
 }
 function actualHandLeakAuditText(audit){
   if(!audit)return'';
@@ -4713,7 +4718,7 @@ class GameEngine{
     if(!ctx||!ctx.enabled||!ctx.focusId||ctx.focusId==='general')return;
     const targets=tournamentFocusTargetPositions(ctx.focusId);
     if(!targets||!targets.length)return;
-    if(Math.random()>0.78)return;
+    // [Codex fix 2026-06-25] テーマ別練習では、まず狙った席に座らせる。席が外れるとBB防衛などの出題前提が崩れる。
     const humanIdx=this.players.findIndex(p=>p.isHuman&&p.active);
     if(humanIdx<0)return;
     const activeN=this.activePlayers().length;
@@ -12491,11 +12496,25 @@ function runFishTankRegressionTests(){
     return issues.some(function(i){return i.severity==='critical'&&i.type==='hidden-hand-leak';});
   });
 
+  add('実ハンド混入監査: K5s表記を実カード5s漏れと誤検知しない',function(){
+    const hr=regressionHand({heroHole:['Kc','5c'],villainHole:['As','5s'],board:[]});
+    const safe={gradeLabel:'',primaryLesson:null,premiseAudit:{issues:[],warnings:[]},evals:[{comment:'K5sはバブルでは受けすぎ注意です。'}]};
+    const leak={gradeLabel:'',primaryLesson:null,premiseAudit:{issues:[],warnings:[]},evals:[{comment:'相手の 5s が見えている前提です。'}]};
+    return actualHandTextLeakCount(hr,safe)===0&&actualHandTextLeakCount(hr,leak)>0;
+  });
+
   add('監査抽出が肯定コメントと大減点の矛盾を拾う',function(){
     const hr=regressionHand({heroHole:['As','Kd'],villainHole:['Qh','Qs']});
     const an={score:70,grade:'C',evals:[{street:'river',action:'call',isHuman:true,quality:'bad',deduction:18,comment:'正解。合理的なコールです。'}],actualHandAudit:{status:'PASS'},premiseAudit:{issues:[],warnings:[]}};
     const issues=auditIssuesForHand(hr,an,'unit');
     return issues.some(function(i){return i.type==='comment-deduction-contradiction';});
+  });
+
+  add('監査抽出: AIレンジ違和感を文脈破綻と分ける',function(){
+    const hr=regressionHand({heroHole:['As','Kd'],villainHole:['Qh','Qs']});
+    const an={score:90,grade:'A',evals:[],actualHandAudit:{status:'PASS'},premiseAudit:{issues:[{text:'AI前提 villain[BB] 非公開ハンド: BB defend目安 上位50% -> 不自然'}],warnings:[]}};
+    const issues=auditIssuesForHand(hr,an,'unit');
+    return issues.some(function(i){return i.type==='ai-preflop-premise'&&i.severity==='medium';})&&!issues.some(function(i){return i.type==='premise-context';});
   });
 
   add('監査バッチ候補に再現用のmodeIdとsampleIndexを保持する',function(){
@@ -13485,7 +13504,13 @@ function auditIssuesForHand(hr,an,label){
   if(q&&(!q.ok||q.score<70))addAuditIssue(issues,'high','scenario-quality','フロップ練習シナリオの品質が低く、練習として成立しにくい可能性があります。',q);
   else if(q&&q.score<82)addAuditIssue(issues,'medium','scenario-quality','フロップ練習シナリオに軽い違和感があります。',q);
   const premise=an.premiseAudit||null;
-  if(premise&&premise.issues&&premise.issues.length)addAuditIssue(issues,'high','premise-context','プリフロップ文脈認識に問題があります。3BET/4BET、リンプ→アイソ、BBディフェンス等の名前付けを確認してください。',premise.issues);
+  if(premise&&premise.issues&&premise.issues.length){
+    // [Codex fix 2026-06-25] AIのレンジ違和感と、出題/文脈そのものの破綻を分ける。
+    const hardPremiseIssues=premise.issues.filter(function(x){return !/^AI前提/.test((x&&x.text)||'');});
+    const aiPremiseIssues=premise.issues.filter(function(x){return /^AI前提/.test((x&&x.text)||'');});
+    if(hardPremiseIssues.length)addAuditIssue(issues,'high','premise-context','プリフロップ文脈認識に問題があります。3BET/4BET、リンプ→アイソ、BBディフェンス等の名前付けを確認してください。',hardPremiseIssues);
+    if(aiPremiseIssues.length)addAuditIssue(issues,'medium','ai-preflop-premise','AIのプリフロップ参加レンジに違和感があります。出題前提の破綻ではなく、AIレンジ/サイズの調整候補です。',aiPremiseIssues);
+  }
   if(premise&&premise.warnings&&premise.warnings.length)addAuditIssue(issues,'medium','premise-warning','プリフロップ文脈認識に警告があります。',premise.warnings);
   (an.evals||[]).forEach(function(e){
     const c=(e.comment||'').replace(/<[^>]+>/g,'');
@@ -13556,6 +13581,7 @@ function auditIssuePriorityWeight(issue){
     'exception':170,
     'timeout':160,
     'premise-context':145,
+    'ai-preflop-premise':82,
     'comment-deduction-contradiction':130,
     'one-pair-call-contradiction':120,
     'ft-learning-contradiction':118,
@@ -13577,6 +13603,7 @@ function auditRepairSuggestion(type){
     'exception':'監査中の例外を先に潰す。自動プレーで落ちる局面は通常プレーでも壊れる可能性が高い。',
     'timeout':'アクション進行/オールイン自動ランアウトを確認。プレーが止まるスポット生成は練習価値を落とす。',
     'premise-context':'プリフロップの名前付けを修正。リンプ→アイソ、3BET→4BET、BBディフェンスを誤ると後続評価もずれる。',
+    'ai-preflop-premise':'AIのプリフロップレンジ/サイズを調整する。通常プレー中のAIリークは出題前提破綻とは分けて扱う。',
     'comment-deduction-contradiction':'コメント生成と減点結果の最終整合レイヤーを追加。「正当なら最初から正当」と書かせる。',
     'one-pair-call-contradiction':'リバーワンペアのコール/フォールド軸を優先確認。完成ボード・大サイズ・複数ストリート圧力を重く見る。',
     'ft-learning-contradiction':'FT学習テーマと最終品質判定を同期する。危険テーマが出る時は肯定コメントで正当化しない。',
