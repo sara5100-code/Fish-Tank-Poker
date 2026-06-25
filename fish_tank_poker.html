@@ -13601,7 +13601,10 @@ function auditIssuesForHand(hr,an,label){
       addAuditIssue(issues,'medium','donk-check-weight','OOPチェックが自然なドンク抑制局面なのに減点が残っています。',{deduction:dec,donkProfile:e.donkProfile});
     }
     if(e.rawEqPct!=null&&e.effectiveEqPct!=null&&Math.abs(e.rawEqPct-e.effectiveEqPct)>=35){
-      addAuditIssue(issues,'medium','raw-effective-gap',street+' '+action+' はRaw EQと実効EQの差が大きい局面です。Raw EQ偏重コメントになっていないか確認してください。',{rawEqPct:e.rawEqPct,effectiveEqPct:e.effectiveEqPct});
+      // [Codex fix 2026-06-25] 差が大きいだけでは監査対象にしない。生EQと実効EQの落差を本文で説明できていれば合格。
+      const gapText=(c+' '+coach+' '+(e.suggest||'')).replace(/\s+/g,' ');
+      const explainsGap=/生のエクイティ|Raw EQ|生EQ/.test(gapText)&&/実効エクイティ|実効EQ/.test(gapText)&&/必要|届かず|足り/.test(gapText);
+      if(!explainsGap)addAuditIssue(issues,'medium','raw-effective-gap',street+' '+action+' はRaw EQと実効EQの差が大きい局面です。Raw EQ偏重コメントになっていないか確認してください。',{rawEqPct:e.rawEqPct,effectiveEqPct:e.effectiveEqPct});
     }
     if(e.street==='river'&&e.action==='call'&&/(トップペア|ワンペア)/.test(c)&&/明確なコール/.test(c)&&!e.onePairProfile){
       addAuditIssue(issues,'medium','river-one-pair-missing-profile','リバーのワンペアコールに専用プロファイルが付いていません。完成ボード/ライブ$2/$5補正の監査対象です。',{comment:c});
