@@ -1560,8 +1560,8 @@ function tournamentAiRule(stackBB,pos,bubble,ri,handFrac,focusId){
   let openMult=1,openJamMult=1,reshoveMult=1,flatMult=1,bbDefMult=1;
   if(focusId==='bbante_steal'){openMult=1.12;bbDefMult=1.08;}
   else if(focusId==='reshove20'){openMult=(group==='ep'||group==='mp')?1.20:1.06;reshoveMult=1.18;flatMult=0.55;}
-  else if(focusId==='openjam14'){openJamMult=1.20;openMult=(group==='ep'||group==='mp')?0.72:0.96;}
-  else if(focusId==='bubble_call'){openMult=(group==='ep'||group==='mp')?1.12:1.04;flatMult=0.45;reshoveMult=0.92;bbDefMult=0.86;}
+  else if(focusId==='openjam14'){openJamMult=1.20;openMult=(group==='ep'||group==='mp')?0.72:0.96;flatMult=0.35;}
+  else if(focusId==='bubble_call'){openMult=(group==='ep'||group==='mp')?1.12:1.04;flatMult=0.30;reshoveMult=0.92;bbDefMult=0.86;}
   else if(focusId==='bb_defend'){bbDefMult=1.16;openMult=1.24;}
   return{
     group,tags,rule,
@@ -4286,7 +4286,9 @@ function aiTournamentPreflopDecision(player,game,handFrac,ri,pos,isRaisedPot,toC
   const bb=game.bigBlind||1;
   const stackBB=Math.max(1,Math.round(player.chips/bb));
   // [Codex fix 2026-06-05] 20BB reshove練習は周辺スタックのAIも通常flatへ戻さず、30BBまでは専用前提を保つ。
-  if(stackBB>25&&!(tctx.focusId==='reshove20'&&stackBB<=30))return null;
+  // [Codex fix 2026-06-25] テーマ付きT練習では27〜40BB程度でもリング用AIへ戻さず、ICM/アンティ文脈を保つ。
+  const keepTournamentAI=['bubble_call','ft_payjump','bbante_steal','bb_defend','openjam14','reshove20','hu_aggression'].includes(tctx.focusId);
+  if(stackBB>25&&!(keepTournamentAI&&stackBB<=40)&&!(tctx.focusId==='reshove20'&&stackBB<=30))return null;
   const bubble=tctx.phase==='バブル';
   const cover=stackCoverInfo(player,game.players,bb);
   const covered=cover.coverState==='covered'||cover.coverState==='mixed_covered';
@@ -4320,6 +4322,12 @@ function aiTournamentPreflopDecision(player,game,handFrac,ri,pos,isRaisedPot,toC
     // [Codex fix 2026-06-05] 20BB reshove練習では、非BBのAI前提もflatで濁さずreshove/foldに寄せる。
     if(tctx.focusId==='reshove20'&&pos!=='BB'){
       if(handFrac<=r.reshoveCap*jamAdj&&canJamByShape&&Math.random()<((tags.premium?0.94:r.reshoveFreq)*jamAdj)){
+        return{action:'allin'};
+      }
+      return{action:'fold'};
+    }
+    if(tctx.focusId==='openjam14'&&pos!=='BB'){
+      if(handFrac<=r.reshoveCap*jamAdj&&canJamByShape&&Math.random()<((tags.premium?0.92:r.reshoveFreq)*jamAdj)){
         return{action:'allin'};
       }
       return{action:'fold'};
@@ -4365,6 +4373,9 @@ function aiDecide(player,game,baseLevel){
     const handFrac=HAND_COMBO_FRAC[ht]||0.99; // コンボ累積比 0=最強側, 1=最弱側
     const pos=posLabel(player.seatIndex,game.dealerIndex,game.players.length);
     const isRaisedPot=game.currentBet>game.bigBlind;
+    const aiPfRaisesSoFar=game.currentHandDecisions.filter(d=>d.street==='preflop'&&(d.action==='raise'||d.action==='allin'));
+    const lastPfRaiseForAI=aiPfRaisesSoFar[aiPfRaisesSoFar.length-1]||null;
+    const openerPosForAI=lastPfRaiseForAI?(lastPfRaiseForAI.position||posLabel(lastPfRaiseForAI.playerIdx,game.dealerIndex,game.players.length)):null;
     const ri=aiRankInfo(holeCards);
     const tPreflop=aiTournamentPreflopDecision(player,game,handFrac,ri,pos,isRaisedPot,toCall,pot,prof);
     if(tPreflop)return tPreflop;
@@ -4378,7 +4389,9 @@ function aiDecide(player,game,baseLevel){
     const effOpenPct=baseOpenPct*prof.posAware+midOpenPct*(1-prof.posAware);
 
     // プロファイル調整: openWidthMult > 1.0 = ルーズ, < 1.0 = タイト
-    const adjOpenPct=Math.min(0.85, effOpenPct*prof.openWidthMult);
+    // [Codex fix 2026-06-25] AIのリングオープンも評価表の$2/$5ライブ上限へ寄せる。EP/MPの謎オープンを減らす。
+    const liveOpenCap=live25OpenPct(pos,game.players.length)+(prof.openWidthMult>1.05?0.02:0);
+    const adjOpenPct=Math.min(0.85, Math.min(effOpenPct*prof.openWidthMult,liveOpenCap));
 
     // ノイズ: コンボフラクションに直接加算 (±noise*3%)
     const noiseAdj=(Math.random()*2-1)*prof.noise*0.03;
@@ -4401,7 +4414,15 @@ function aiDecide(player,game,baseLevel){
       const eMDF=Math.min(0.85,mdf*prof.bbDefenseWidth);
       // handFrac<=defendPct のコンボで守る
       // [fix 2026-06-10] MDF=守る頻度そのもの。1-eMDFは方向が逆だったため修正。
-      const defendPct=eMDF*Math.sqrt(prof.openWidthMult);
+      let defendPct=eMDF*Math.sqrt(prof.openWidthMult);
+      // [Codex fix 2026-06-25] BB防衛はポットオッズだけでなく、オープナー位置と形状で上限をかける。
+      const earlyOpenAI=['UTG','UTG+1','MP','LJ'].includes(openerPosForAI);
+      const midOpenAI=['HJ','CO'].includes(openerPosForAI);
+      let liveDefCap=earlyOpenAI?0.40:midOpenAI?0.50:openerPosForAI==='BTN'?0.58:openerPosForAI==='SB'?0.70:0.48;
+      if(ri.suited)liveDefCap+=0.05;
+      if(ri.pair)liveDefCap+=0.05;
+      if(!ri.suited&&ri.hi===14&&ri.lo<=5&&earlyOpenAI)liveDefCap-=0.08;
+      defendPct=Math.min(defendPct,Math.max(0.18,liveDefCap));
       const threeBetPct=0.06; // 上位6%コンボ=3bet候補
       if(handFrac<=defendPct){
         if(handFrac<=threeBetPct&&Math.random()<0.50&&!prof.callBias){
@@ -4430,8 +4451,8 @@ function aiDecide(player,game,baseLevel){
 
     // ④ コール/3ベット/フォールド (レイズ済みポット)
     // コールレンジ: オープンレンジの約1.4倍 (コンボフラクションベース)
-    const pfRaises=game.currentHandDecisions.filter(d=>d.street==='preflop'&&(d.action==='raise'||d.action==='allin'));
-    const lastRaise=pfRaises[pfRaises.length-1]||null;
+    const pfRaises=aiPfRaisesSoFar;
+    const lastRaise=lastPfRaiseForAI;
     const callersSinceRaise=lastRaise?game.currentHandDecisions.filter(d=>d.street==='preflop'&&d.action==='call'&&d.playerIdx!==player.id).length:0;
     const isWheelAxs=ri.suited&&ri.hi===14&&ri.lo<=5;
     const isBigBroadway=ri.hi>=13&&ri.lo>=10;
@@ -4746,6 +4767,25 @@ class GameEngine{
       ctx._lastFocusHand=true;
     }else{
       human.holeCards=[this.deck.deal(),this.deck.deal()];
+    }
+    if(ctx.focusId==='bb_defend'){
+      // [Codex fix 2026-06-25] BB防衛練習では、Heroの前に自然なオープナーを作り、単なるBBチェック局面を減らす。
+      const activeN=this.activePlayers().length;
+      const preferred=['CO','BTN','HJ','MP','LJ','SB'];
+      const candidates=this.players.map((p,i)=>({p,i,pos:posLabel(i,this.dealerIndex,activeN)}))
+        .filter(x=>x.p&&x.p.active&&!x.p.isHuman&&preferred.includes(x.pos))
+        .sort((a,b)=>preferred.indexOf(a.pos)-preferred.indexOf(b.pos));
+      const opener=candidates[0];
+      if(opener&&opener.p.holeCards&&opener.p.holeCards.length>=2){
+        opener.p.holeCards.forEach(c=>this.deck.cards.push(c));
+        this.deck.shuffle();
+        const cap=Math.min(0.38,Math.max(0.22,live25OpenPct(opener.pos,activeN)+0.06));
+        const oHand=_dealRangeHand(this.deck.cards,cap,{role:'opener',pos:opener.pos});
+        if(oHand&&oHand.length>=2){
+          opener.p.holeCards=oHand;
+          ctx._lastBbDefendOpener=opener.pos;
+        }
+      }
     }
   }
   startHand(){
@@ -6805,6 +6845,25 @@ function onePairPressureProfileText(profile){
   if(!profile)return'';
   const lane={check:'チェック',call:'コール',bet:'ベット/レイズ'}[profile.lane]||profile.lane;
   return profile.street.toUpperCase()+' / '+lane+' / '+profile.verdict+'：'+profile.policy+' 注意: '+profile.risk;
+}
+
+function harmonizeFinalEvaluationText(ev){
+  if(!ev)return;
+  let c=ev.comment||'';
+  if((ev.quality==='bad'||(ev.deduction||0)>=10)&&c){
+    // [Codex fix 2026-06-25] 後段補正でbadになった後も、前段の「正解/明確コール/許容」が残る矛盾を消す。
+    c=c.replace(/^正解。?/,'');
+    c=c.replace(/EV優位（[^。]+）で明確なコールです。/g,'最終評価では、必要EQだけでは正当化しにくい判断です。');
+    c=c.replace(/明確なコールスポット。/g,'最終評価では、相手レンジと今後のプレッシャーを重く見る場面です。');
+    c=c.replace(/境界フォールド — 降りても大きな問題はありませんが、/g,'フォールドは見直したい判断です。');
+    c=c.replace(/若干のEV優位。/g,'表面上は少し足りそうに見えても、最終評価では慎重に扱います。');
+    c=c.replace(/コールで問題ありません。/g,'コールは相手依存です。');
+  }
+  if(ev.onePairProfile&&ev.onePairProfile.verdict==='bad'){
+    c=c.replace(/EV優位（[^。]+）で明確なコールです。/g,'ワンペア監査後は、必要EQだけでは正当化しない受けすぎ候補です。');
+    c=c.replace(/若干のEV優位。/g,'ワンペアとしては次ストリートの圧力まで見る必要があります。');
+  }
+  ev.comment=c.replace(/。。+/g,'。').replace(/\s+/g,' ').trim();
 }
 
 function postflopPositionState(hr,d){
@@ -9792,6 +9851,7 @@ function analyzeHand(hr){
     applyPostflopCallFuturePlanWeight(ev);
     applyBoardTextureTransitionWeight(ev);
     composeNaturalReview(ev,d,hr);
+    harmonizeFinalEvaluationText(ev);
     attachGtoTheorySnapshot(ev);
     ev.finalTableLearningPoint=tournamentFinalTableLearningPoint(ev);
     const scoredAfter=scoredDeduction(ev);
