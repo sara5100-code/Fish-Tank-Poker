@@ -4289,7 +4289,8 @@ function aiTournamentPreflopDecision(player,game,handFrac,ri,pos,isRaisedPot,toC
   // [Codex fix 2026-06-25] テーマ付きT練習では27〜40BB程度でもリング用AIへ戻さず、ICM/アンティ文脈を保つ。
   const keepTournamentAI=['bubble_call','ft_payjump','bbante_steal','bb_defend','openjam14','reshove20','hu_aggression'].includes(tctx.focusId);
   if(stackBB>25&&!(keepTournamentAI&&stackBB<=40)&&!(tctx.focusId==='reshove20'&&stackBB<=30))return null;
-  const bubble=tctx.phase==='バブル';
+  // [Codex fix 2026-06-26] AIの実行側も評価側と同じく、バブル/FTのチケット圧を文字列だけに依存せず扱う。
+  const bubble=tctx.phase==='バブル'||['bubble_call','ft_payjump'].includes(tctx.focusId);
   const cover=stackCoverInfo(player,game.players,bb);
   const covered=cover.coverState==='covered'||cover.coverState==='mixed_covered';
   const covering=cover.coverState==='covering'||cover.coverState==='mixed_covering';
@@ -4436,7 +4437,10 @@ function aiDecide(player,game,baseLevel){
 
     // ③ オープンレイズ (誰もレイズしていない)
     if(!isRaisedPot){
-      if(handFrac<=effOpenPctN){
+      // [Codex fix 2026-06-26] 通常AIはプリフロップ表でoutのハンドをプロフィール補正だけで開かない。
+      const openChartForAI=preflopChartLookup('open',ht,pos,game.players.length,{});
+      const openMixOk=openChartForAI.status==='pure'||(openChartForAI.status==='mix'&&Math.random()<(prof.openWidthMult>1.4?0.55:0.34));
+      if(handFrac<=effOpenPctN&&openMixOk){
         const mult=2.3+Math.random()*0.5;
         const amt=Math.round(Math.min(bb*mult*prof.betSizeMult,chips));
         return{action:'raise',amount:Math.max(amt,Math.round(bb*2.3))};
@@ -7649,6 +7653,12 @@ function evalBet(d,hr,human,nOpponents){
     }else if(betPct>ideal.pct*1.6&&betPct>100)sizeNote=' サイズ'+betAmt+'T'+'（'+betPct+'%pot）はオーバーベット。強いハンドなら有効な場合も。';
     else if(betPct>ideal.pct*1.4)sizeNote=' サイズ'+betAmt+'T'+'（'+betPct+'%pot）はやや大きめ（推奨:'+ideal.pct+'%pot）。';
     else sizeNote=' サイズ'+betAmt+'T'+'（'+betPct+'%pot）。';
+  }
+  if(isRiver&&sc.quality==='bad'&&(role.role==='medium'||(role.madeClass==='two_pair'&&role.valueTier!=='top_two_pair'))&&textureSizePlanB&&betAmt>0&&pot>0){
+    // [Codex fix 2026-06-26] チェック寄りでも、推奨小サイズに合ったリバー薄ベットは大ミス扱いにしない。
+    const alignedTarget=textureSizePlanB&&textureSizePlanB.pct?textureSizePlanB.pct:ideal.pct;
+    const alignedSmallBet=Math.abs(betPct-alignedTarget)<=10&&betPct<=45&&betProb>=0.20;
+    if(alignedSmallBet)sc={...sc,quality:'ok',deduction:Math.min(sc.deduction||0,8),evLoss:'low'};
   }
 
   // 3バレル文脈のテキスト
@@ -13573,7 +13583,11 @@ function auditIssuesForHand(hr,an,label){
     if(hardPremiseIssues.length)addAuditIssue(issues,'high','premise-context','プリフロップ文脈認識に問題があります。3BET/4BET、リンプ→アイソ、BBディフェンス等の名前付けを確認してください。',hardPremiseIssues);
     if(aiPremiseIssues.length)addAuditIssue(issues,'medium','ai-preflop-premise','AIのプリフロップ参加レンジに違和感があります。出題前提の破綻ではなく、AIレンジ/サイズの調整候補です。',aiPremiseIssues);
   }
-  if(premise&&premise.warnings&&premise.warnings.length)addAuditIssue(issues,'medium','premise-warning','プリフロップ文脈認識に警告があります。',premise.warnings);
+  if(premise&&premise.warnings&&premise.warnings.length){
+    // [Codex fix 2026-06-26] 混合候補だけのAI境界スポットは監査ノイズにしない。明確なbad警告だけ確認候補に上げる。
+    const hardWarnings=premise.warnings.filter(function(x){return x&&x.profile&&x.profile.severity==='bad';});
+    if(hardWarnings.length)addAuditIssue(issues,'medium','premise-warning','プリフロップ文脈認識に警告があります。',hardWarnings);
+  }
   (an.evals||[]).forEach(function(e){
     const c=(e.comment||'').replace(/<[^>]+>/g,'');
     // [Codex fix 2026-06-21] 実地検査では、評価の正誤だけでなく「読める説明か」も監査する。
