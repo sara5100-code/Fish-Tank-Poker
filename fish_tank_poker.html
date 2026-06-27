@@ -1563,6 +1563,7 @@ function tournamentAiRule(stackBB,pos,bubble,ri,handFrac,focusId){
   else if(focusId==='openjam14'){openJamMult=1.20;openMult=(group==='ep'||group==='mp')?0.72:0.96;flatMult=0.35;}
   else if(focusId==='bubble_call'){openMult=(group==='ep'||group==='mp')?1.12:1.04;flatMult=0.30;reshoveMult=0.92;bbDefMult=0.86;}
   else if(focusId==='bb_defend'){bbDefMult=1.16;openMult=1.24;}
+  else if(focusId==='hu_aggression'){openMult=1.55;flatMult=1.45;bbDefMult=1.18;}
   return{
     group,tags,rule,
     openCap:Math.max(0.04,((rule.open[group]||0.12)*icm+openBoost)*openMult),
@@ -4306,6 +4307,18 @@ function aiTournamentPreflopDecision(player,game,handFrac,ri,pos,isRaisedPot,toC
   if(!isRaisedPot&&pos!=='BB'){
     // [Codex fix 2026-05-28] BB defense drills should face standard opens, not AI jams before hero.
     const suppressOpenJam=tctx.focusId==='bb_defend';
+    // [Codex fix 2026-06-27] HU攻防練習ではSB/BTNの即フォールドで終わる手を減らす。
+    // HUはレンジが広いこと自体を学ぶモードなので、弱めでもリンプ/小さめオープンを多めに残す。
+    if(tctx.focusId==='hu_aggression'&&pos==='SB'){
+      const target=Math.round(Math.min(bb*r.openSize,player.chips+player.currentBet));
+      if(handFrac<=Math.max(r.openCap*1.35,0.72)){
+        if(handFrac<=Math.max(r.openCap*0.92,0.48)&&Math.random()<0.68){
+          return aiSizedAction(target,player.chips,player.currentBet);
+        }
+        return{action:'call'};
+      }
+      return{action:'call'};
+    }
     // [Codex fix 2026-06-27] BBディフェンス練習では、Hero BBに必ずオープンが届くよう、後ろ寄りAIの標準オープンを優先する。
     if(tctx.focusId==='bb_defend'){
       const bbOpenPos=['MP','LJ','HJ','CO','BTN','SB'].includes(pos);
@@ -4787,7 +4800,7 @@ class GameEngine{
   _applyTournamentFocusHoleCards(){
     const ctx=this.tournamentContext;
     if(!ctx||!ctx.enabled||!ctx.focusId||ctx.focusId==='general')return;
-    if(Math.random()>0.72)return;
+    if(ctx.focusId!=='hu_aggression'&&Math.random()>0.72)return;
     const human=this.players.find(p=>p.isHuman&&p.active);
     if(!human||!human.holeCards||human.holeCards.length<2)return;
     const pos=posLabel(this.players.indexOf(human),this.dealerIndex,this.activePlayers().length);
@@ -4819,6 +4832,22 @@ class GameEngine{
         if(oHand&&oHand.length>=2){
           opener.p.holeCards=oHand;
           ctx._lastBbDefendOpener=opener.pos;
+        }
+      }
+    }
+    if(ctx.focusId==='hu_aggression'&&pos==='BB'){
+      // [Codex fix 2026-06-27] HU攻防では相手SBにもHUらしい参加候補を持たせる。
+      // 72o級の強制リンプではなく、広いが最低限プレイアブルなレンジでBB判断を作る。
+      const activeN=this.activePlayers().length;
+      const sbOpp=this.players.map((p,i)=>({p,i,pos:posLabel(i,this.dealerIndex,activeN)}))
+        .find(x=>x.p&&x.p.active&&!x.p.isHuman&&x.pos==='SB');
+      if(sbOpp&&sbOpp.p.holeCards&&sbOpp.p.holeCards.length>=2){
+        sbOpp.p.holeCards.forEach(c=>this.deck.cards.push(c));
+        this.deck.shuffle();
+        const sbHand=drawTournamentFocusHand(this.deck.cards,ctx.focusId,'SB',ctx.stackBB||Math.round(this.startingChips/this.bb));
+        if(sbHand&&sbHand.length>=2){
+          sbOpp.p.holeCards=sbHand;
+          ctx._lastHuOpponentHand=true;
         }
       }
     }
@@ -11067,6 +11096,30 @@ function runFishTankRegressionTests(){
     });
     const ev=humanEval(analyzeHand(hr),e=>e.action==='call');
     return !!(ev&&ev.headsUpProfile&&ev.headsUpProfile.lane==='bbDefend'&&ev.headsUpProfile.severity==='good'&&ev.quality!=='bad');
+  });
+
+  add('HU攻防生成: SB即フォールドで練習を終わらせない',function(){
+    if(typeof GameEngine!=='function'||typeof aiDecide!=='function')return true;
+    const ctx=applyTournamentFocus(cloneTournamentPreset('heads_up'),'hu_aggression');
+    for(let i=0;i<20;i++){
+      const g=new GameEngine({numPlayers:2,sb:1000,bb:2000,startingChips:50000,aiLevel:'hard',tournamentContext:ctx});
+      g.startHand();
+      let guard=0;
+      while(g.street!=='showdown'&&!g.isHumanTurn()&&guard++<20){
+        const idx=g.actionIdx;
+        if(idx<0){g._check();continue;}
+        const p=g.players[idx];
+        if(!p||p.folded||p.allIn||!p.active){
+          g.actorsRemaining=g.actorsRemaining.filter(x=>x!==idx);
+          g.actionIdx=g.actorsRemaining[0]??-1;
+          continue;
+        }
+        const d=aiDecide(p,g,'hard');
+        g.processAction(idx,d.action,d.amount||0);
+      }
+      if(!g.isHumanTurn())return false;
+    }
+    return true;
   });
 
   add('相手の実ハンドを変えても評価が変わらない',function(){
