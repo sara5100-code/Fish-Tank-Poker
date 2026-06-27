@@ -4340,6 +4340,13 @@ function aiTournamentPreflopDecision(player,game,handFrac,ri,pos,isRaisedPot,toC
       if(handFrac<=r.bbDefendCap*callAdj&&toCall<player.chips)return{action:'call'};
       return{action:'fold'};
     }
+    // [Codex fix 2026-06-27] バブル/FT付近の非BBは、広いフラットで事故るよりreshove/foldを優先する。
+    if(bubble&&pos!=='BB'){
+      if(handFrac<=r.reshoveCap*jamAdj&&canJamByShape&&Math.random()<((tags.premium?0.92:r.reshoveFreq)*jamAdj)){
+        return{action:'allin'};
+      }
+      return{action:'fold'};
+    }
     if(stackBB<=20){
       if(handFrac<=r.reshoveCap*jamAdj&&canJamByShape&&Math.random()<((tags.premium?0.92:r.reshoveFreq)*jamAdj)){
         return{action:'allin'};
@@ -4424,6 +4431,9 @@ function aiDecide(player,game,baseLevel){
       if(ri.pair)liveDefCap+=0.05;
       if(!ri.suited&&ri.hi===14&&ri.lo<=5&&earlyOpenAI)liveDefCap-=0.08;
       defendPct=Math.min(defendPct,Math.max(0.18,liveDefCap));
+      // [Codex fix 2026-06-27] BBも「ポットオッズだけ」でレンジ表外のオフスートを守らない。
+      const bbDefChartForAI=preflopChartLookup('flat',ht,pos,game.players.length,{openerPos:openerPosForAI});
+      if(bbDefChartForAI.status==='out')return{action:'fold'};
       const threeBetPct=0.06; // 上位6%コンボ=3bet候補
       if(handFrac<=defendPct){
         if(handFrac<=threeBetPct&&Math.random()<0.50&&!prof.callBias){
@@ -4489,6 +4499,9 @@ function aiDecide(player,game,baseLevel){
     if((handFrac<=threeBetPctAi||isWheelAxs)&&(Math.random()<(isWheelAxs?wheelAxs3betFreq:0.58))&&!prof.callBias){
       return aiSizedAction(threeBetTarget,chips,currentBet);
     }
+    // [Codex fix 2026-06-27] 非BBフラットもレンジ表外なら、ルースAI補正だけでコールさせない。
+    const flatChartForAI=preflopChartLookup('flat',ht,pos,game.players.length,{openerPos:openerPosForAI});
+    if(flatChartForAI.status==='out')return{action:'fold'};
     if(handFrac<=coldCap+noiseAdj){
       const callPo=toCall/(pot+toCall);
       const realizedPenalty=(pos==='UTG'||pos==='UTG+1'||pos==='MP')?0.08:(callersSinceRaise>0?0.06:0.03);
@@ -9706,7 +9719,8 @@ function analyzeHand(hr){
       ev.postflopCallFuturePlanProfile=ev.boardTextureProfile?postflopCallFuturePlanProfile(hr,d,opRole,ev.boardTextureProfile,ev.postflopDefensePlanProfile,{isOOP:defensePosState.isOOP,nOpponents:streetOpps}):null;
       // [Codex fix 2026-06-12] トリップス/クアッズ等の強い完成役をワンペア監査へ流さない。
       // Aトリップスを「弱いワンペア」と説明するような誤分類をここで遮断する。
-      ev.onePairProfile=opEval&&opEval.cat===1?onePairPressureProfile(hr,d,opRole,opComm.length>=3?boardTex(opComm):null,streetOpps):null;
+      const onePairLikeForPressure=opEval&&(opEval.cat===1||(opRole&&opRole.valueTier==='board_completed_top_pair'));
+      ev.onePairProfile=onePairLikeForPressure?onePairPressureProfile(hr,d,opRole,opComm.length>=3?boardTex(opComm):null,streetOpps):null;
     }
     if(!(hr.tournamentContext&&hr.tournamentContext.enabled)){
       const lcCommLen={flop:3,turn:4,river:5}[d.street]||0;
@@ -13595,7 +13609,11 @@ function auditIssuesForHand(hr,an,label){
     const dec=e.deduction||0;
     const street=(e.street||'?').toUpperCase();
     const action=e.action||'?';
-    if(e.quality==='bad'&&dec>=25)addAuditIssue(issues,'high','large-deduction',street+' '+action+' に大きな減点があります。妥当な重みか確認対象です。',{deduction:dec,comment:c});
+    // [Codex fix 2026-06-27] 大減点そのものではなく、大減点なのに理由が薄いケースだけ拾う。
+    const clearLargeDeductionReason=/必要勝率|実効エクイティ|EVを逃|ワンペア監査|FTポストフロップ|ベット目的|サイズ|圧力|レンジ|フォールドが勝ち/.test(c+' '+coach);
+    if(e.quality==='bad'&&dec>=25&&(!clearLargeDeductionReason||coach.length<70)){
+      addAuditIssue(issues,'high','large-deduction',street+' '+action+' に大きな減点があります。理由の説明量が足りるか確認対象です。',{deduction:dec,comment:c,coachComment:coach});
+    }
     if(/正解|明確なコール|合理的|許容範囲/.test(c)&&(e.quality==='bad'||dec>=10)){
       addAuditIssue(issues,'high','comment-deduction-contradiction',street+' '+action+' はコメントが肯定的なのに減点が大きく、説明と採点が矛盾しています。',{deduction:dec,quality:e.quality,comment:c});
     }
@@ -14340,7 +14358,9 @@ function naturalRiverBetDesignText(ev){
       'リバーの'+(ev.action==='check'?'チェック':'判断')+'です。',
       tendency,
       d.warning||p.policy,
-      '打つなら、コールしてほしい相手は「'+d.target+'」、サイズ帯は'+d.sizeBand+'です。'
+      ev.action==='check'
+        ?'薄いバリューやブラフの条件が足りないので、ショーダウン価値を守るか、無理なブラフを作らない判断です。'
+        :'ベットするなら、相手にコールしてほしい手と降ろしたい手が十分に残るかを先に確認します。'
     ].filter(Boolean).join(' ');
   }
   return'';
