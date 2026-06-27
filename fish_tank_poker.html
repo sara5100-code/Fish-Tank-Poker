@@ -3593,6 +3593,8 @@ function preflopPremiseAudit(hr){
     if(!profile)return;
     const target=p.isHuman&&generatedPremise?'出題前提':(p.isHuman?'プレイヤー操作':'AI前提');
     const item={street:d.street,player:p.isHuman?'あなた':p.name,position:pos,action:d.action,amount:d.amount,target,profile,text:target+' '+(p.isHuman?'あなた':p.name)+'['+pos+'] '+rangeProfileTextForVisibility(profile,!p.isHuman)};
+    // [Codex fix 2026-06-27] BBディフェンス練習のAIオープナーは、Heroに防衛判断を出すための前提なので通常AIリーク扱いしない。
+    if(tctx&&tctx.focusId==='bb_defend'&&!p.isHuman&&profile.lane==='open'&&(d.action==='raise'||d.action==='allin'))return;
     if(generatedPremise&&p.isHuman&&d.action==='call'&&d.facingRaise&&pos!=='BB'){
       const before=hr.decisions.slice(0,hr.decisions.indexOf(d));
       const firstAgg=before.find(function(x){return x.street==='preflop'&&(x.action==='raise'||x.action==='allin');});
@@ -4304,6 +4306,15 @@ function aiTournamentPreflopDecision(player,game,handFrac,ri,pos,isRaisedPot,toC
   if(!isRaisedPot&&pos!=='BB'){
     // [Codex fix 2026-05-28] BB defense drills should face standard opens, not AI jams before hero.
     const suppressOpenJam=tctx.focusId==='bb_defend';
+    // [Codex fix 2026-06-27] BBディフェンス練習では、Hero BBに必ずオープンが届くよう、後ろ寄りAIの標準オープンを優先する。
+    if(tctx.focusId==='bb_defend'){
+      const bbOpenPos=['MP','LJ','HJ','CO','BTN','SB'].includes(pos);
+      if(bbOpenPos&&handFrac<=Math.max(r.openCap*1.35,0.24)){
+        const target=Math.round(Math.min(bb*r.openSize,player.chips+player.currentBet));
+        return aiSizedAction(target,player.chips,player.currentBet);
+      }
+      return{action:'fold'};
+    }
     if(!suppressOpenJam&&handFrac<=r.openJamCap*jamAdj&&canJamByShape&&Math.random()<r.jamFreq*jamAdj){
       return{action:'allin'};
     }
@@ -4456,7 +4467,7 @@ function aiDecide(player,game,baseLevel){
         return{action:'raise',amount:Math.max(amt,Math.round(bb*2.3))};
       }
       // SBのみ稀にリンプ (レンジのすぐ外側)
-      if(pos==='SB'&&handFrac<=effOpenPctN*1.15&&Math.random()<0.18){
+      if(pos==='SB'&&openChartForAI.status!=='out'&&handFrac<=effOpenPctN*1.15&&Math.random()<0.18){
         if(toCall>=chips)return{action:'call'};
         return{action:'call'};
       }
@@ -4481,14 +4492,18 @@ function aiDecide(player,game,baseLevel){
     const threeBetTarget=Math.round(Math.min(game.currentBet*(callersSinceRaise?4.0:3.1)*prof.betSizeMult,chips+currentBet));
 
     if(isPremium){
+      const premium3BetChartForAI=preflopChartLookup('3bet',ht,pos,game.players.length,{openerPos:openerPosForAI});
+      const premium3BetOk=handFrac<=0.025||premium3BetChartForAI.status!=='out';
       const premiumRaiseFreq=handFrac<=0.025?0.96:(prof.callBias?0.78:0.90);
-      if(Math.random()<premiumRaiseFreq)return aiSizedAction(threeBetTarget,chips,currentBet);
+      if(premium3BetOk&&Math.random()<premiumRaiseFreq)return aiSizedAction(threeBetTarget,chips,currentBet);
       if(toCall<chips)return{action:'call'};
       return{action:'call'};
     }
     if(pos==='SB'){
-      if(isWheelAxs&&Math.random()<0.42&&!prof.callBias)return aiSizedAction(squeezeTarget,chips,currentBet);
-      if((isBigBroadway||isPlayableSuited)&&handFrac<=0.18&&Math.random()<0.28&&!prof.callBias)return aiSizedAction(squeezeTarget,chips,currentBet);
+      const sbSqueezeChart=preflopChartLookup('3bet',ht,pos,game.players.length,{openerPos:openerPosForAI});
+      const sbSqueezeOk=sbSqueezeChart.status!=='out';
+      if(sbSqueezeOk&&isWheelAxs&&Math.random()<0.42&&!prof.callBias)return aiSizedAction(squeezeTarget,chips,currentBet);
+      if(sbSqueezeOk&&(isBigBroadway||isPlayableSuited)&&handFrac<=0.18&&Math.random()<0.28&&!prof.callBias)return aiSizedAction(squeezeTarget,chips,currentBet);
       if(handFrac<=coldCap&&ri.suited&&callersSinceRaise===0&&Math.random()<0.18){
         if(toCall>=chips)return{action:'call'};
         return{action:'call'};
@@ -4496,7 +4511,9 @@ function aiDecide(player,game,baseLevel){
       return{action:'fold'};
     }
     const wheelAxs3betFreq=aiPfMode==='gto'?0.48:0.28;
-    if((handFrac<=threeBetPctAi||isWheelAxs)&&(Math.random()<(isWheelAxs?wheelAxs3betFreq:0.58))&&!prof.callBias){
+    const threeBetChartForAI=preflopChartLookup('3bet',ht,pos,game.players.length,{openerPos:openerPosForAI});
+    const threeBetChartOk=threeBetChartForAI.status!=='out'||(aiPfMode==='gto'&&isWheelAxs);
+    if(threeBetChartOk&&(handFrac<=threeBetPctAi||isWheelAxs)&&(Math.random()<(isWheelAxs?wheelAxs3betFreq:0.58))&&!prof.callBias){
       return aiSizedAction(threeBetTarget,chips,currentBet);
     }
     // [Codex fix 2026-06-27] 非BBフラットもレンジ表外なら、ルースAI補正だけでコールさせない。
@@ -4796,8 +4813,9 @@ class GameEngine{
       if(opener&&opener.p.holeCards&&opener.p.holeCards.length>=2){
         opener.p.holeCards.forEach(c=>this.deck.cards.push(c));
         this.deck.shuffle();
-        const cap=Math.min(0.38,Math.max(0.22,live25OpenPct(opener.pos,activeN)+0.06));
-        const oHand=_dealRangeHand(this.deck.cards,cap,{role:'opener',pos:opener.pos});
+        // [Codex fix 2026-06-27] BB防衛練習では、オープナーがミックスで降りる手ではなく純粋オープン域を持つようにする。
+        const cap=0.50;
+        const oHand=_dealRangeHand(this.deck.cards,cap,{role:'openerPure',pos:opener.pos,totalP:activeN,strict:true});
         if(oHand&&oHand.length>=2){
           opener.p.holeCards=oHand;
           ctx._lastBbDefendOpener=opener.pos;
@@ -6877,6 +6895,9 @@ function harmonizeFinalEvaluationText(ev){
     c=c.replace(/若干のEV優位。/g,'表面上は少し足りそうに見えても、最終評価では慎重に扱います。');
     c=c.replace(/コールで問題ありません。/g,'コールは相手依存です。');
     c=c.replace(/完全な正解ではなく/g,'完全な推奨ではなく');
+    c=c.replace(/ベットは合理的な選択です。/g,'理論上は混ざりますが、この局面とサイズでは見直したいベットです。');
+    c=c.replace(/ベットは合理的な選択。/g,'理論上は混ざりますが、この局面とサイズでは見直したいベットです。');
+    c=c.replace(/どちらも許容範囲です。/g,'最終評価では、相手レンジとサイズを重く見て慎重に扱います。');
   }
   if(ev.onePairProfile&&ev.onePairProfile.verdict==='bad'){
     c=c.replace(/EV優位（[^。]+）で明確なコールです。/g,'ワンペア監査後は、必要EQだけでは正当化しない受けすぎ候補です。');
@@ -13610,8 +13631,8 @@ function auditIssuesForHand(hr,an,label){
     const street=(e.street||'?').toUpperCase();
     const action=e.action||'?';
     // [Codex fix 2026-06-27] 大減点そのものではなく、大減点なのに理由が薄いケースだけ拾う。
-    const clearLargeDeductionReason=/必要勝率|実効エクイティ|EVを逃|ワンペア監査|FTポストフロップ|ベット目的|サイズ|圧力|レンジ|フォールドが勝ち/.test(c+' '+coach);
-    if(e.quality==='bad'&&dec>=25&&(!clearLargeDeductionReason||coach.length<70)){
+    const clearLargeDeductionReason=/必要勝率|実効エクイティ|EVを逃|大幅EV損失|期待値損失|ワンペア監査|FTポストフロップ|ベット目的|サイズ|圧力|レンジ|フォールドが勝ち/.test(c+' '+coach);
+    if(e.quality==='bad'&&dec>=25&&(!clearLargeDeductionReason||(coach.length<70&&c.length<180))){
       addAuditIssue(issues,'high','large-deduction',street+' '+action+' に大きな減点があります。理由の説明量が足りるか確認対象です。',{deduction:dec,comment:c,coachComment:coach});
     }
     if(/正解|明確なコール|合理的|許容範囲/.test(c)&&(e.quality==='bad'||dec>=10)){
@@ -13638,7 +13659,7 @@ function auditIssuesForHand(hr,an,label){
       const explainsGap=/生のエクイティ|Raw EQ|生EQ/.test(gapText)&&/実効エクイティ|実効EQ/.test(gapText)&&/必要|届かず|足り/.test(gapText);
       if(!explainsGap)addAuditIssue(issues,'medium','raw-effective-gap',street+' '+action+' はRaw EQと実効EQの差が大きい局面です。Raw EQ偏重コメントになっていないか確認してください。',{rawEqPct:e.rawEqPct,effectiveEqPct:e.effectiveEqPct});
     }
-    if(e.street==='river'&&e.action==='call'&&/(トップペア|ワンペア)/.test(c)&&/明確なコール/.test(c)&&!e.onePairProfile){
+    if(e.street==='river'&&e.action==='call'&&/(トップペア|ワンペア)/.test(c)&&!/ツーペア|トリップス|フルハウス|クアッズ|フォーカード/.test(c)&&/明確なコール/.test(c)&&!e.onePairProfile){
       addAuditIssue(issues,'medium','river-one-pair-missing-profile','リバーのワンペアコールに専用プロファイルが付いていません。完成ボード/ライブ$2/$5補正の監査対象です。',{comment:c});
     }
     if(coach&&coach.length>420){
@@ -16073,6 +16094,12 @@ function _scenarioHandAllowed(c1,c2,maxFrac,ctx){
     if(suited&&hi>=12)return true;
     return hi===14&&lo>=12;
   }
+  if(ctx.role==='openerPure'){
+    const pos=ctx.pos||'CO';
+    const totalP=ctx.totalP||6;
+    const chart=preflopChartLookup('open',ht,pos,totalP,{});
+    return chart.status==='pure';
+  }
   return true;
 }
 function _dealRangeHand(deckCards,maxFrac,ctx){
@@ -16093,6 +16120,7 @@ function _dealRangeHand(deckCards,maxFrac,ctx){
       }
     }
   }
+  if(ctx&&ctx.strict)return[];
   if(deckCards.length>=2)return[deckCards.splice(0,1)[0],deckCards.splice(0,1)[0]];
   return[];
 }
