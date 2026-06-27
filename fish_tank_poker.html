@@ -251,17 +251,19 @@ body.codex-dev .dev-btn{display:inline-flex;}
   .hud-btns{gap:4px;flex-shrink:0;}
   .hud-btn{padding:5px 7px;font-size:11px;border-radius:7px;min-width:0;}
   #main-area{overflow:visible;flex:none;}
-  #table-wrap{flex:none;padding:14px 4px 0;overflow:hidden;}
-  #table-container{aspect-ratio:1.42/1;width:min(100%,480px);max-width:100%;}
+  #table-wrap{flex:none;padding:14px 8px 0;overflow:hidden;}
+  /* [Codex fix 2026-06-28] スマホ幅では外周席が画面端を押し広げないよう、テーブルに左右の逃げを作る。 */
+  #table-container{aspect-ratio:1.42/1;width:min(calc(100% - 28px),480px);max-width:100%;margin-inline:auto;}
   #human-area{position:sticky;bottom:0;z-index:70;padding:7px 10px 10px;width:100%;border-radius:12px 12px 0 0;}
   #human-cards .card.big{width:44px;height:64px;font-size:16px;}
   #action-area{gap:6px;}
   #info-row{min-height:14px;}
   #to-call-label{font-size:11px;white-space:normal;line-height:1.25;}
+  #action-area,#size-row,#quick-btns-row,#quick-btns,#main-btns{min-width:0;max-width:100%;}
   #size-row{gap:7px;}
-  #raise-slider{min-height:24px;}
+  #raise-slider{width:0;min-width:0;min-height:24px;flex:1 1 0;}
   #quick-btns-row{width:100%;}
-  #quick-btns{display:grid;grid-template-columns:repeat(auto-fit,minmax(58px,1fr));gap:6px;width:100%;}
+  #quick-btns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;width:100%;}
   .qbtn{padding:9px 6px;font-size:11px;border-radius:9px;text-align:center;}
   #main-btns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;}
   .action-btn{padding:12px 6px;font-size:12px;min-height:42px;}
@@ -299,6 +301,7 @@ body.codex-dev .dev-btn{display:inline-flex;}
   #hud .hud-title{max-width:96px;font-size:11px;}
   #hud-info{font-size:10px;min-width:40px;}
   .hud-btn{padding:5px 6px;font-size:10px;}
+  #table-container{width:min(calc(100% - 34px),480px);}
   .seat{width:54px;}
   .seat-info{padding:2px 3px;}
   .seat-name{font-size:8px;}.seat-chips{font-size:9px;}
@@ -306,7 +309,7 @@ body.codex-dev .dev-btn{display:inline-flex;}
   .card.big{width:28px;height:42px;font-size:12px;}
   .c-card{width:30px;height:44px;font-size:13px;}
   #human-cards .card.big{width:36px;height:54px;font-size:14px;}
-  #quick-btns{grid-template-columns:repeat(auto-fit,minmax(52px,1fr));gap:5px;}
+  #quick-btns{grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;}
   .qbtn{font-size:10px;padding:8px 4px;}
   .action-btn{padding:10px 4px;font-size:11px;min-height:40px;}
   #raise-amount{width:48px;}
@@ -492,7 +495,9 @@ body.codex-dev .dev-btn{display:inline-flex;}
 <script>
 'use strict';
 // [Codex fix 2026-06-21] 通常ユーザーには開発用HUDを見せず、検証時だけURLパラメータで出す。
-if(new URLSearchParams(location.search).has('codex_dev')){
+// [Codex fix 2026-06-28] codex_dev=0 を通常ユーザー表示として扱い、開発ボタンの誤表示を防ぐ。
+const CODEX_DEV_PARAM=new URLSearchParams(location.search).get('codex_dev');
+if(CODEX_DEV_PARAM==='1'||CODEX_DEV_PARAM==='true'){
   document.body.classList.add('codex-dev');
 }
 const RANKS=['2','3','4','5','6','7','8','9','T','J','Q','K','A'];
