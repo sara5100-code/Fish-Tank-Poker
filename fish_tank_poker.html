@@ -213,6 +213,12 @@ body.codex-dev .dev-btn{display:inline-flex;}
 .analysis-secondary-block>summary::-webkit-details-marker{display:none;}
 .analysis-secondary-block>summary::after{content:'開く';font-size:10px;color:var(--accent);letter-spacing:0;flex:0 0 auto;}
 .analysis-secondary-block[open]>summary::after{content:'閉じる';color:var(--dim);}
+.analysis-street-block{border-bottom:1px solid var(--border);padding-bottom:4px;margin:10px 0 6px;}
+.analysis-street-block>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:6px;padding:4px 0;}
+.analysis-street-block>summary::-webkit-details-marker{display:none;}
+.analysis-street-block>summary::after{content:'開く';margin-left:auto;font-size:10px;color:var(--accent);}
+.analysis-street-block[open]>summary::after{content:'閉じる';color:var(--dim);}
+.analysis-street-block[open]{border-bottom:none;}
 .decision-row{display:flex;gap:8px;align-items:flex-start;padding:8px;border-radius:8px;margin-bottom:5px;background:var(--panel2);font-size:11px;border:1px solid var(--border);}
 .dr-street{font-weight:700;color:var(--dim);min-width:48px;text-transform:uppercase;}
 .dr-action{font-weight:700;min-width:90px;}
@@ -15164,11 +15170,13 @@ function showAnalysis(hr,fromHistory){
       const stScore=Math.max(0,Math.min(100,100-stDed));
       const stGrade=scoreGrade(stScore);
       const gc=gradeCol[stGrade]||'var(--dim)';
-      html+='<div style="display:flex;align-items:center;gap:6px;margin:10px 0 4px;padding-bottom:4px;border-bottom:1px solid var(--border)">';
+      const stHasIssue=evs.some(function(e){return e.quality!=='good'||(e.deduction||0)>0;});
+      html+='<details class="analysis-street-block" data-issue="'+(stHasIssue?'1':'0')+'">';
+      html+='<summary>';
       html+='<span style="font-size:10px;font-weight:800;color:var(--dim);letter-spacing:.1em">'+stLbl[st]+'</span>';
       html+='<span style="font-size:15px;font-weight:900;color:'+gc+';background:var(--panel2);border:1px solid '+gc+';border-radius:5px;padding:0 7px;line-height:1.6">'+stGrade+'</span>';
       html+='<span style="font-size:10px;color:var(--dim)">'+stScore+'pt</span>';
-      html+='</div>';
+      html+='</summary>';
       for(const ev of evs){
         const actLabel=actionText(ev);
         const poStr=ev.potOdds>0?' <span style="color:var(--dim)">(PO '+Math.round(ev.potOdds*100)+'%)</span>':'';
@@ -15196,6 +15204,7 @@ function showAnalysis(hr,fromHistory){
         const detailHTML=compactReviewDetailsHTML(ev,decisionMeta(ev)+poStr+tLessonHTML+ftLessonHTML+tRangeHTML+tProfileHTML+(ev.suggest?'<div style="margin-top:4px;color:var(--gold);font-size:10px;font-weight:600">推奨詳細: '+ev.suggest+'</div>':'')+'<div style="margin-top:5px;color:var(--dim);font-size:10px;line-height:1.5">'+plainReviewText(ev.comment)+'</div>');
         html+='<div class="decision-row '+ev.quality+'"><div class="dr-action '+ev.quality+'">'+actLabel+'</div><div>'+coachHTML+detailHTML+'</div></div>';
       }
+      html+='</details>';
     }
     html+='</div>';
   }
@@ -15209,6 +15218,10 @@ function showAnalysis(hr,fromHistory){
   // [Codex fix 2026-06-28] スマホでは主テーマと判断分析を先に読ませ、スキル棚卸は必要時に開く。
   document.querySelectorAll('.analysis-secondary-block').forEach(function(el){
     el.open=!window.matchMedia('(max-width:600px)').matches;
+  });
+  document.querySelectorAll('.analysis-street-block').forEach(function(el,idx){
+    const mobile=window.matchMedia('(max-width:600px)').matches;
+    el.open=!mobile||idx===0||el.dataset.issue==='1';
   });
   $('analysis-modal').classList.add('open');
   // 履歴から開いた場合: 「履歴に戻る」のみ。通常ゲームでは「次のハンドへ」のみ表示
