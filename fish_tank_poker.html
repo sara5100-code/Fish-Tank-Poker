@@ -208,6 +208,11 @@ body.codex-dev .dev-btn{display:inline-flex;}
 .analysis-sub{font-size:12px;color:var(--dim);margin-bottom:18px;}
 .analysis-section{margin-bottom:18px;}
 .analysis-section h3{font-size:13px;font-weight:700;color:var(--accent);margin-bottom:7px;padding-bottom:3px;border-bottom:1px solid var(--border);}
+.analysis-secondary-block{margin-top:9px;border-top:1px solid var(--border);padding-top:8px;}
+.analysis-secondary-block>summary{list-style:none;cursor:pointer;font-size:10px;font-weight:800;color:var(--dim);letter-spacing:.04em;margin-bottom:5px;display:flex;align-items:center;justify-content:space-between;gap:8px;background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:7px 9px;}
+.analysis-secondary-block>summary::-webkit-details-marker{display:none;}
+.analysis-secondary-block>summary::after{content:'開く';font-size:10px;color:var(--accent);letter-spacing:0;flex:0 0 auto;}
+.analysis-secondary-block[open]>summary::after{content:'閉じる';color:var(--dim);}
 .decision-row{display:flex;gap:8px;align-items:flex-start;padding:8px;border-radius:8px;margin-bottom:5px;background:var(--panel2);font-size:11px;border:1px solid var(--border);}
 .dr-street{font-weight:700;color:var(--dim);min-width:48px;text-transform:uppercase;}
 .dr-action{font-weight:700;min-width:90px;}
@@ -14968,8 +14973,8 @@ function showAnalysis(hr,fromHistory){
   html+='<div style="margin-top:6px;font-size:11px;color:var(--dim);text-align:center">総合: <strong style="color:var(--text)">'+an.grade+'</strong> — '+an.gradeLabel+'</div>';
   if(an.tournamentScores&&an.tournamentScores.length){
     const tcGradeCol={'S':'#d4a820','A':'#22a46c','B':'#3d6cf0','C':'#d87020','D':'#e04848','F':'#9333ea'};
-    html+='<div style="margin-top:9px;border-top:1px solid var(--border);padding-top:8px">';
-    html+='<div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:.08em;margin-bottom:5px">TOURNAMENT SKILLS</div>';
+    html+='<details class="analysis-secondary-block">';
+    html+='<summary>スキル別スコア（トーナメント）</summary>';
     html+='<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px">';
     for(const ts of an.tournamentScores){
       const col=tcGradeCol[ts.grade]||'var(--dim)';
@@ -14978,12 +14983,12 @@ function showAnalysis(hr,fromHistory){
       html+='<div style="font-size:10px;color:var(--dim);margin-top:2px">'+ts.score+'pt / '+ts.note+'</div>';
       html+='</div>';
     }
-    html+='</div></div>';
+    html+='</div></details>';
   }
   if(an.liveCashScores&&an.liveCashScores.length){
     const rcGradeCol={'S':'#d4a820','A':'#22a46c','B':'#3d6cf0','C':'#d87020','D':'#e04848','F':'#9333ea'};
-    html+='<div style="margin-top:9px;border-top:1px solid var(--border);padding-top:8px">';
-    html+='<div style="font-size:9px;font-weight:800;color:var(--dim);letter-spacing:.08em;margin-bottom:5px">RING CASH SKILLS</div>';
+    html+='<details class="analysis-secondary-block">';
+    html+='<summary>スキル別スコア（リング）</summary>';
     html+='<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px">';
     for(const rs of an.liveCashScores){
       const col=rcGradeCol[rs.grade]||'var(--dim)';
@@ -14992,7 +14997,7 @@ function showAnalysis(hr,fromHistory){
       html+='<div style="font-size:10px;color:var(--dim);margin-top:2px">'+rs.score+'pt / '+rs.note+'</div>';
       html+='</div>';
     }
-    html+='</div></div>';
+    html+='</div></details>';
   }
   if(an.primaryLesson){
     const pl=an.primaryLesson;
@@ -15201,6 +15206,10 @@ function showAnalysis(hr,fromHistory){
     +'<button onclick="copyWallReviewPrompt()" style="background:var(--gold);color:#fff;border:1px solid var(--gold);border-radius:8px;padding:7px 18px;font-size:11px;font-weight:800;cursor:pointer;font-family:inherit">壁打ち用プロンプト</button>'
     +'</div>';
   $('analysis-content').innerHTML=html;
+  // [Codex fix 2026-06-28] スマホでは主テーマと判断分析を先に読ませ、スキル棚卸は必要時に開く。
+  document.querySelectorAll('.analysis-secondary-block').forEach(function(el){
+    el.open=!window.matchMedia('(max-width:600px)').matches;
+  });
   $('analysis-modal').classList.add('open');
   // 履歴から開いた場合: 「履歴に戻る」のみ。通常ゲームでは「次のハンドへ」のみ表示
   $('close-only').style.display=fromHistory?'':'none';
