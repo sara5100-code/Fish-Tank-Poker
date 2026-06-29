@@ -219,6 +219,12 @@ body.codex-dev .dev-btn{display:inline-flex;}
 .analysis-street-block>summary::after{content:'開く';margin-left:auto;font-size:10px;color:var(--accent);}
 .analysis-street-block[open]>summary::after{content:'閉じる';color:var(--dim);}
 .analysis-street-block[open]{border-bottom:none;}
+.coach-more{margin-top:6px;}
+.coach-more>summary{list-style:none;cursor:pointer;color:var(--accent);font-size:11px;font-weight:800;margin-top:4px;}
+.coach-more>summary::-webkit-details-marker{display:none;}
+.coach-more>summary::after{content:'補足を開く';}
+.coach-more[open]>summary::after{content:'補足を閉じる';color:var(--dim);}
+.coach-more-body{margin-top:5px;color:var(--text);}
 .decision-row{display:flex;gap:8px;align-items:flex-start;padding:8px;border-radius:8px;margin-bottom:5px;background:var(--panel2);font-size:11px;border:1px solid var(--border);}
 .dr-street{font-weight:700;color:var(--dim);min-width:48px;text-transform:uppercase;}
 .dr-action{font-weight:700;min-width:90px;}
@@ -14942,6 +14948,30 @@ function compactReviewDetailsHTML(ev,metaHTML){
   // 詳細データを開かないと理由が分からない状態を避けるため、レビュー画面では非表示にする。
   return '';
 }
+function escapeHTML(s){
+  return String(s||'').replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});
+}
+function splitCoachReviewForMobile(txt){
+  txt=String(txt||'').trim();
+  if(txt.length<=230)return{lead:txt,extra:''};
+  const marks=['。','！','？','縲・'];
+  let hits=[];
+  for(const m of marks){
+    let pos=-1;
+    while((pos=txt.indexOf(m,pos+1))>=0)hits.push(pos+m.length);
+  }
+  hits=[...new Set(hits)].sort(function(a,b){return a-b;});
+  let cut=hits.find(function(p,i){return i>=1&&p>=90&&p<=240;})||hits.find(function(p){return p>=140;})||220;
+  cut=Math.min(cut,Math.max(120,txt.length-60));
+  return{lead:txt.slice(0,cut).trim(),extra:txt.slice(cut).trim()};
+}
+function coachReviewHTML(ev){
+  const txt=coachReviewText(ev);
+  const parts=splitCoachReviewForMobile(txt);
+  if(!parts.extra)return escapeHTML(parts.lead);
+  return '<span class="coach-lead">'+escapeHTML(parts.lead)+'</span>'
+    +'<details class="coach-more"><summary></summary><div class="coach-more-body">'+escapeHTML(parts.extra)+'</div></details>';
+}
 function showAnalysis(hr,fromHistory){
   _analysisFromHistory=!!fromHistory;
   const an=analyzeHand(hr);
@@ -15200,7 +15230,7 @@ function showAnalysis(hr,fromHistory){
         }
         const tRangeHTML=ev.tournamentRangeHint?'<div style="margin-top:5px;padding:5px 8px;border:1px dashed var(--border);background:var(--panel);border-radius:6px;color:var(--dim);font-size:10px;line-height:1.5"><strong style="color:var(--text)">Tレンジ目安:</strong> '+ev.tournamentRangeHint+'</div>':'';
         const tProfileHTML=ev.tournamentRangeProfile?'<div style="margin-top:5px;padding:5px 8px;border:1px solid rgba(61,108,240,.18);background:rgba(61,108,240,.06);border-radius:6px;color:var(--text);font-size:10px;line-height:1.5"><strong style="color:var(--accent)">Tレンジ判定:</strong> '+tournamentRangeProfileText(ev.tournamentRangeProfile)+'</div>':'';
-        const coachHTML='<div class="coach-review" style="font-size:12px;line-height:1.75;color:var(--text)">'+coachReviewText(ev)+'</div>';
+        const coachHTML='<div class="coach-review" style="font-size:12px;line-height:1.75;color:var(--text)">'+coachReviewHTML(ev)+'</div>';
         const detailHTML=compactReviewDetailsHTML(ev,decisionMeta(ev)+poStr+tLessonHTML+ftLessonHTML+tRangeHTML+tProfileHTML+(ev.suggest?'<div style="margin-top:4px;color:var(--gold);font-size:10px;font-weight:600">推奨詳細: '+ev.suggest+'</div>':'')+'<div style="margin-top:5px;color:var(--dim);font-size:10px;line-height:1.5">'+plainReviewText(ev.comment)+'</div>');
         html+='<div class="decision-row '+ev.quality+'"><div class="dr-action '+ev.quality+'">'+actLabel+'</div><div>'+coachHTML+detailHTML+'</div></div>';
       }
@@ -15222,6 +15252,9 @@ function showAnalysis(hr,fromHistory){
   document.querySelectorAll('.analysis-street-block').forEach(function(el,idx){
     const mobile=window.matchMedia('(max-width:600px)').matches;
     el.open=!mobile||idx===0||el.dataset.issue==='1';
+  });
+  document.querySelectorAll('.coach-more').forEach(function(el){
+    el.open=!window.matchMedia('(max-width:600px)').matches;
   });
   $('analysis-modal').classList.add('open');
   // 履歴から開いた場合: 「履歴に戻る」のみ。通常ゲームでは「次のハンドへ」のみ表示
