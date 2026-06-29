@@ -14287,22 +14287,29 @@ function naturalCoachVerdict(ev){
   if(ev.quality==='good')return a+'で問題ありません。';
   return'複数のラインが成立します。';
 }
+// [Codex fix 2026-06-29] 混合戦略の比率を本文内で埋もれさせず、短い一文として残す。
+function coachMixRatioSentence(ev){
+  const mix=inferredStrategyMixText(ev);
+  if(!mix)return'';
+  return'頻度感は'+mix+'です。';
+}
 function mixedLineExplanationText(ev){
   if(!ev||ev.quality!=='ok')return'';
   const rec=naturalRecommendationText(ev.suggest||'');
   const mix=inferredStrategyMixText(ev);
+  const ratio=coachMixRatioSentence(ev);
   if(ev.action==='check'){
-    if(rec)return'チェックでポットを抑えるラインと、'+rec+'で弱いペアやドローから先に取るラインが混ざります。'+(mix?'頻度感は'+mix+'です。':'');
-    if(mix)return'チェックで実現率を取るラインと、ベットで先にフォールドエクイティを取るラインが混ざります。頻度感は'+mix+'です。';
+    if(rec)return'チェックでポットを抑えるラインと、'+rec+'で先に取りに行くラインが混ざります。'+ratio;
+    if(mix)return'チェックで実現率を取るラインと、ベットで先にフォールドエクイティを取るラインが混ざります。'+ratio;
     return'チェックで次のカードを見るラインと、小さく打って主導権を取りに行くラインがあります。';
   }
   if(ev.action==='call'||ev.action==='fold'){
-    if(mix)return'コールでショーダウン価値を残すラインと、フォールドで大きな損失を避けるラインが混ざります。頻度感は'+mix+'です。';
+    if(mix)return'コールでショーダウン価値を残すラインと、フォールドで大きな損失を避けるラインが混ざります。'+ratio;
     return'コールで受けるラインと、フォールドで損失を抑えるラインがあります。相手のブラフ頻度とサイズで寄せます。';
   }
   if(ev.action==='raise'||ev.action==='bet'||ev.action==='allin'){
-    if(rec)return'打ってバリュー/プロテクションを取るラインと、チェックでポットを抑えるラインが混ざります。サイズ感は'+rec+'です。'+(mix?'頻度感は'+mix+'です。':'');
-    if(mix)return'ベットで取りに行くラインと、チェックでショーダウン価値を守るラインが混ざります。頻度感は'+mix+'です。';
+    if(rec)return'打ってバリューやプロテクションを取るラインと、チェックでポットを抑えるラインが混ざります。サイズ感は'+rec+'です。'+ratio;
+    if(mix)return'ベットで取りに行くラインと、チェックでショーダウン価値を守るラインが混ざります。'+ratio;
     return'打って相手の弱いレンジから取るラインと、チェックでポットを管理するラインがあります。';
   }
   return'';
@@ -14743,6 +14750,8 @@ function polishCoachReviewText(txt,ev){
     .replace(/許容できます。次に同じ場面が来たら、(.+?)も意識してください。/g,'許容範囲です。次は$1も候補にしてください。')
     .replace(/このボードは完成役や強いドローが残りやすいので、/g,'このボードでは完成役や強いドローを意識して、')
     .replace(/このボードは比較的落ち着いているので、/g,'ボードは比較的落ち着いているので、')
+    .replace(/完成寄りボードです。/g,'完成役が多いボードです。')
+    .replace(/動的または完成寄りボード/g,'完成役が多い、または次のカードで強弱が大きく変わるボード')
     .replace(/見た目のエクイティより、相手の残っているレンジの強さを優先して見直したいです。/g,'手の強さだけでなく、相手に残る強いレンジを優先して見直します。')
     .replace(/チェックはこのままで問題ありません。SDVはチェックバック多め。/g,'ショーダウン価値を守るチェックバックが自然です。')
     .replace(/チェックはこのままで問題ありません。/g,'')
@@ -14778,6 +14787,7 @@ function polishCoachReviewText(txt,ev){
   let joined=visible.join('');
   if(ev&&ev.street==='river'){
     joined=joined.replace(/強いドローが残りやすい/g,'完成役やブラフ候補が残りやすい');
+    joined=joined.replace(/フラッシュドロー|ストレートドロー/g,function(x){return x.replace('ドロー','の空振り候補');});
   }
   return joined.replace(/。。+/g,'。').trim();
 }
