@@ -836,7 +836,21 @@ function tournamentFinalTableRangeProfile(ctx,d,holeCards,stackBB,pos,stackRole,
 }
 function tournamentFinalTableRangeProfileText(p){
   if(!p)return'';
-  return p.handType+' 上位'+p.handPercent+'%: '+p.label+'目安 上位'+p.capPercent+'% -> '+p.verdict+' / '+p.role+' vs '+p.opponent+' / '+p.risk;
+  const laneText={
+    open:'先に参加する判断',
+    openJam:'先にオールインする判断',
+    reshove:'押し返す判断',
+    callOff:'オールインを受ける判断',
+    bbDefend:'BBで守る判断',
+    flat:'レイズにコールする判断'
+  }[p.lane]||'参加判断';
+  const verdictText=p.severity==='good'
+    ?'レンジ内です'
+    :p.severity==='border'
+      ?'境界です'
+      :'レンジ外寄りです';
+  const roleText=(p.role||'このスタック')+'として、'+(p.opponent||'相手')+'とぶつかる場面です。';
+  return roleText+p.handType+'は'+laneText+'では'+verdictText+'。目安レンジは上位'+p.capPercent+'%までで、この手は上位'+p.handPercent+'%です。'+p.risk;
 }
 // [Codex fix 2026-06-05] FTのポストフロップは、chipEVの手役評価にICM・カバー関係・SPRを重ねて受けすぎ/打ちすぎを検出する。
 function tournamentFinalTablePostflopProfile(ctx,d,role,tex,stackBB,pos,ftProfile,nOpponents){
@@ -14298,6 +14312,20 @@ function mixedLineExplanationText(ev){
   const rec=naturalRecommendationText(ev.suggest||'');
   const mix=inferredStrategyMixText(ev);
   const ratio=coachMixRatioSentence(ev);
+  if(ev.street==='preflop'){
+    if(ev.action==='raise'||ev.action==='allin'){
+      if(rec)return'参加して主導権を取るラインと、フォールドして無理なポットを避けるラインが混ざります。サイズは'+rec+ratio;
+      return'参加して主導権を取るラインと、フォールドして次のスポットを待つラインが混ざります。'+ratio;
+    }
+    if(ev.action==='call'||ev.action==='fold'){
+      if(mix)return'コールで価格を使うライン、フォールドでドミネートを避けるライン、時々押し返すラインを分けます。'+ratio;
+      return'コールで価格を使うラインと、フォールドで難しいポストフロップを避けるラインがあります。';
+    }
+    if(ev.action==='check'){
+      if(mix)return'チェックでフロップを見るラインと、レイズで主導権を取りに行くラインが混ざります。'+ratio;
+      return'チェックでフロップを見るラインと、レイズで主導権を取りに行くラインがあります。';
+    }
+  }
   if(ev.action==='check'){
     if(rec)return'チェックでポットを抑えるラインと、'+rec+'で先に取りに行くラインが混ざります。'+ratio;
     if(mix)return'チェックで実現率を取るラインと、ベットで先にフォールドエクイティを取るラインが混ざります。'+ratio;
@@ -14811,8 +14839,8 @@ function coachReviewText(ev){
     reason=p.policy;
   }else if(ev.finalTableRangeProfile){
     const p=ev.finalTableRangeProfile;
-    scene='FTのプリフロップです。'+(p.role||'今のスタック')+'で、'+(p.opponent||'相手')+'とぶつかる形です。';
-    reason=p.severity==='bad'?'この立場では受けるレンジをかなり絞りたいところです。':tournamentFinalTableRangeProfileText(p);
+    scene='FTのフロップ前です。';
+    reason=tournamentFinalTableRangeProfileText(p)+(p.severity==='bad'?' この立場では受けるレンジをかなり絞りたいところです。':'');
   }else if(ev.finalTableProfile){
     const p=ev.finalTableProfile;
     scene='FTで、'+(p.stackRole||'このスタック')+'として動く場面です。';
