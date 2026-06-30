@@ -850,7 +850,14 @@ function tournamentFinalTableRangeProfileText(p){
       ?'境界です'
       :'レンジ外寄りです';
   const roleText=(p.role||'このスタック')+'として、'+(p.opponent||'相手')+'とぶつかる場面です。';
-  return roleText+p.handType+'は'+laneText+'では'+verdictText+'。目安レンジは上位'+p.capPercent+'%までで、この手は上位'+p.handPercent+'%です。'+p.risk;
+  let riskText=p.risk||'';
+  if(p.lane==='bbDefend')riskText='BBは価格が良いので守れますが、ヒット後に弱いワンペアで払いすぎないことが条件です。';
+  else if(p.lane==='flat')riskText='BB以外のコールは、ポジションと後続の押し返しで苦しくなりやすいです。';
+  else if(p.lane==='callOff')riskText='受ける側は、負けた時の順位落ちが大きいのでレンジをかなり絞ります。';
+  else if(riskText==='FTでは下限オープンと非BBフラットを混同しない')riskText='先に入るならレイズで主導権を取り、レイズを受けるコールとは別物として考えます。';
+  else if(/フォールドエクイティ/.test(riskText))riskText='押し返す時は、相手を降ろせる余地がどれだけ残っているかを重く見ます。';
+  else if(/受け側はレンジを強く絞る/.test(riskText))riskText='受ける側は、負けた時の順位落ちが大きいのでレンジをかなり絞ります。';
+  return roleText+p.handType+'は'+laneText+'では'+verdictText+'。目安レンジは上位'+p.capPercent+'%までで、この手は上位'+p.handPercent+'%です。'+riskText;
 }
 // [Codex fix 2026-06-05] FTのポストフロップは、chipEVの手役評価にICM・カバー関係・SPRを重ねて受けすぎ/打ちすぎを検出する。
 function tournamentFinalTablePostflopProfile(ctx,d,role,tex,stackBB,pos,ftProfile,nOpponents){
@@ -1472,8 +1479,22 @@ function tournamentMiddleProfile(ctx,d,stackBB,pos,holeCards){
 }
 function tournamentMiddleProfileText(profile){
   if(!profile)return'';
-  const hand=profile.handType?' / '+profile.handType+' 上位'+profile.handPercent+'%':'';
-  return profile.band+' / '+profile.lane+hand+' / 危険: '+profile.risk+' / 方針: '+profile.policy+' / open目安: '+profile.targetOpen+(profile.deepAxes?' / 5軸: '+profile.deepAxes.join(' | '):'');
+  const hand=profile.handType?profile.handType+'（上位'+profile.handPercent+'%目安）':'この手';
+  const bandText=profile.stackBB?('有効'+Math.round(profile.stackBB)+'BB前後'):(profile.band||'中盤');
+  let laneText='参加判断';
+  if(profile.lane==='bbDefend')laneText='BBでレイズを受ける場面';
+  else if(profile.lane==='flat')laneText='BB以外でレイズにコールする場面';
+  else if(profile.lane==='reshove')laneText='レイズに押し返す場面';
+  else if(profile.lane==='openJam')laneText='先にオールインを混ぜる場面';
+  else if(profile.lane==='open')laneText='自分からオープンする場面';
+  else if(profile.lane==='vsRaiseFold')laneText='レイズを受けて続けるか降りるかの場面';
+  let point='';
+  if(profile.lane==='bbDefend')point='BBはアンティ込みで価格が良いので広く守れます。ただし当たった後に弱いワンペアで払いすぎないことが条件です。';
+  else if(profile.lane==='flat')point='この深さでBB以外からコールすると、後ろから押し返されやすく、フロップ後もSPRが浅くなります。コールよりフォールドか3ベットオールイン寄りに整理します。';
+  else if(profile.lane==='reshove')point='コールで受け身に残るより、フォールドエクイティを使って押し返せるかを先に見ます。';
+  else if(profile.lane==='openJam')point='小さく開くより、先にオールインして後ろのプレイヤーへ最大圧をかける候補があります。';
+  else point='オープンするなら小さめで十分です。大きくしすぎると、3ベットオールインを受けた時に苦しくなります。';
+  return bandText+'、'+laneText+'です。'+hand+'。'+point+' 目安サイズは'+profile.targetOpen+'です。';
 }
 // [Codex fix 2026-05-27] Tモードのリザルトで「なぜその軸で見るのか」を初心者向けに説明する。
 function tournamentResultLesson(ctx,d,stackBB,pos){
@@ -14313,13 +14334,24 @@ function mixedLineExplanationText(ev){
   const mix=inferredStrategyMixText(ev);
   const ratio=coachMixRatioSentence(ev);
   if(ev.street==='preflop'){
+    const lane=(ev.middleProfile&&ev.middleProfile.lane)||(ev.finalTableRangeProfile&&ev.finalTableRangeProfile.lane)||(ev.liveCashSpotProfile&&ev.liveCashSpotProfile.lane)||'';
+    const openSide=lane==='open'||lane==='openJam'||lane==='sbOpen'||lane==='openFold';
+    const defendSide=lane==='bbDefend'||lane==='callOff'||lane==='flat'||lane==='vsRaiseFold';
     if(ev.action==='raise'||ev.action==='allin'){
       if(rec)return'参加して主導権を取るラインと、フォールドして無理なポットを避けるラインが混ざります。サイズは'+rec+ratio;
       return'参加して主導権を取るラインと、フォールドして次のスポットを待つラインが混ざります。'+ratio;
     }
     if(ev.action==='call'||ev.action==='fold'){
-      if(mix)return'コールで価格を使うライン、フォールドでドミネートを避けるライン、時々押し返すラインを分けます。'+ratio;
-      return'コールで価格を使うラインと、フォールドで難しいポストフロップを避けるラインがあります。';
+      if(openSide){
+        if(mix)return'オープンして主導権を取るラインと、フォールドして次のスポットを待つラインが混ざります。'+ratio;
+        return'オープンするラインと、フォールドして次のスポットを待つラインがあります。';
+      }
+      if(defendSide){
+        if(mix)return'コールで価格を使うライン、フォールドでドミネートを避けるライン、時々押し返すラインを分けます。'+ratio;
+        return'コールで価格を使うラインと、フォールドで難しいポストフロップを避けるラインがあります。';
+      }
+      if(mix)return'続けるラインと、フォールドして次のスポットを待つラインが混ざります。'+ratio;
+      return'続けるラインと、フォールドするラインがあります。';
     }
     if(ev.action==='check'){
       if(mix)return'チェックでフロップを見るラインと、レイズで主導権を取りに行くラインが混ざります。'+ratio;
@@ -14336,7 +14368,10 @@ function mixedLineExplanationText(ev){
     return'コールで受けるラインと、フォールドで損失を抑えるラインがあります。相手のブラフ頻度とサイズで寄せます。';
   }
   if(ev.action==='raise'||ev.action==='bet'||ev.action==='allin'){
-    if(rec)return'打ってバリューやプロテクションを取るラインと、チェックでポットを抑えるラインが混ざります。サイズ感は'+rec+'です。'+ratio;
+    if(rec){
+      if(/^check|^チェック/i.test(rec))return'打って取りに行くラインと、チェックでポットを抑えるラインが混ざります。'+rec+'。'+ratio;
+      return'打ってバリューやプロテクションを取るラインと、チェックでポットを抑えるラインが混ざります。サイズ感は'+rec+'です。'+ratio;
+    }
     if(mix)return'ベットで取りに行くラインと、チェックでショーダウン価値を守るラインが混ざります。'+ratio;
     return'打って相手の弱いレンジから取るラインと、チェックでポットを管理するラインがあります。';
   }
@@ -14520,6 +14555,14 @@ function inferredStrategyMixText(ev){
     else if(ev.action==='call')b='フォールド';
     else if(ev.action==='fold')b='コール';
     return a+' '+ev.freqPct+'% / '+b+' '+Math.max(0,100-ev.freqPct)+'%';
+  }
+  if(ev.street==='preflop'){
+    const lane=(ev.middleProfile&&ev.middleProfile.lane)||(ev.finalTableRangeProfile&&ev.finalTableRangeProfile.lane)||(ev.liveCashSpotProfile&&ev.liveCashSpotProfile.lane)||'';
+    if(ev.action==='raise')return'レイズ 50% / フォールド 50%';
+    if(ev.action==='allin')return'オールイン 50% / フォールド 50%';
+    if(ev.action==='fold'&&(lane==='open'||lane==='openJam'||lane==='openFold'))return'レイズ 50% / フォールド 50%';
+    if(ev.action==='call'||ev.action==='fold')return'コール 50% / フォールド 50%';
+    if(ev.action==='check')return'チェック 50% / レイズ 50%';
   }
   if(ev.action==='call'||ev.action==='fold')return'コール 50% / フォールド 50%';
   if(ev.action==='check'||ev.action==='raise'||ev.action==='bet')return'チェック 50% / ベット 50%';
@@ -14761,7 +14804,11 @@ function recommendationClose(action,quality,rec,hasSuggest){
     else if(!/(です|ます|する|しない|絞る|混ぜる|選ぶ)$/.test(phrase))phrase+='を検討してください';
     return action+'は少し危ない選択です。'+phrase+'。'+(rest?rest+'。':'');
   }
-  if(quality==='good')return action+'はこのままで問題ありません。'+(hasSuggest?rec+'':'');
+  if(quality==='good'){
+    if(!hasSuggest)return action+'はこのままで問題ありません。';
+    if(/^(このライン|このまま|継続|コール可|チェックで|フォールドで|レイズで|ベットで)/.test(rec))return rec;
+    return'次も'+rec;
+  }
   return action+'は許容できます。次に同じ場面が来たら、'+rec+'も意識してください。';
 }
 // [Codex fix 2026-06-18] 評価軸ごとの文章を最後に整え、重複と硬いメタ表現を減らす。
@@ -14783,8 +14830,15 @@ function polishCoachReviewText(txt,ev){
     .replace(/見た目のエクイティより、相手の残っているレンジの強さを優先して見直したいです。/g,'手の強さだけでなく、相手に残る強いレンジを優先して見直します。')
     .replace(/チェックはこのままで問題ありません。SDVはチェックバック多め。/g,'ショーダウン価値を守るチェックバックが自然です。')
     .replace(/チェックはこのままで問題ありません。/g,'')
+    .replace(/フォールドで問題ありません。([^。]+。)*?フォールドはこのままで問題ありません。/g,function(m){return m.replace(/フォールドはこのままで問題ありません。/,'');})
     .replace(/相手圧力0回/g,'相手から強い圧力はまだ入っていません')
     .replace(/相手傾向=標準的/g,'');
+  if(ev&&ev.street==='preflop'){
+    const lane=(ev.middleProfile&&ev.middleProfile.lane)||(ev.finalTableRangeProfile&&ev.finalTableRangeProfile.lane)||(ev.liveCashSpotProfile&&ev.liveCashSpotProfile.lane)||'';
+    if(lane==='open'||lane==='openJam'||lane==='openFold'){
+      txt=txt.replace(/次はコール検討/g,'次は参加検討').replace(/コールはかなり低頻度/g,'コールではなく、参加するならレイズ寄り');
+    }
+  }
   const raw=txt.match(/[^。]+。?/g)||[txt];
   const out=[];
   const seen=new Set();
@@ -14863,8 +14917,8 @@ function coachReviewText(ev){
   }else if(ev.middleProfile&&ev.street==='preflop'){
     // [Claude fix 2026-06-07] プリフロップ限定: 中盤帯のopen/reshove/flatはPF専用
     const p=ev.middleProfile;
-    scene='中盤の'+p.band+'です。';
-    reason=p.policy+' '+naturalRiskText(p.risk);
+    scene=tournamentMiddleProfileText(p);
+    reason='';
   }else if(ev.earlyProfile&&ev.street==='preflop'){
     // [Claude fix 2026-06-07] プリフロップ限定: 序盤参加判断はPF専用
     const p=ev.earlyProfile;
