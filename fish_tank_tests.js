@@ -16,6 +16,14 @@
  */
 const fs = require('fs'), vm = require('vm'), path = require('path');
 
+function makeSeededRandom(seed) {
+  let s = seed >>> 0;
+  return function () {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+}
+
 function pickHtml() {
   if (process.argv[2]) return process.argv[2];
   for (const f of ['fish_tank_poker_fixed.html', 'fish_tank_poker.html']) {
@@ -23,6 +31,22 @@ function pickHtml() {
     if (fs.existsSync(p)) return p;
   }
   throw new Error('HTMLが見つかりません。引数でパスを指定してください。');
+}
+
+function htmlTailIsClosed(html) {
+  return /<\/script>\s*<\/body>\s*<\/html>\s*$/i.test(String(html || '').trim());
+}
+
+function runHtmlIntegrityChecks(htmlPath) {
+  const html = fs.readFileSync(htmlPath, 'utf8');
+  let pass = 0, fail = 0; const fails = [];
+  const ok = (n, c, e) => { if (c) pass++; else { fail++; fails.push(n + (e ? '  [' + e + ']' : '')); } };
+  ok('HTML tail: script/body/html closed', htmlTailIsClosed(html));
+  const broken = html.replace(/<\/script>\s*<\/body>\s*<\/html>\s*$/i, '');
+  ok('HTML tail: missing-copy guard', !htmlTailIsClosed(broken));
+  console.log(`\n[HTML integrity] ${pass} pass / ${fail} fail`);
+  fails.forEach(f => console.log('  FAIL:', f));
+  return fail === 0;
 }
 
 function loadSandbox(htmlPath) {
@@ -48,8 +72,10 @@ function loadSandbox(htmlPath) {
       return anyNode;
     }
   });
+  const seededMath = Object.create(Math);
+  seededMath.random = makeSeededRandom(0x5f3759df);
   const sb = {
-    console, Math, Date, JSON, Array, Object, String, Number, Boolean, Set, Map, RegExp, Symbol,
+    console, Math: seededMath, Date, JSON, Array, Object, String, Number, Boolean, Set, Map, RegExp, Symbol,
     parseInt, parseFloat, isNaN, setTimeout: () => {}, clearTimeout: () => {}, setInterval: () => {},
     clearInterval: () => {}, requestAnimationFrame: () => {},
     URLSearchParams: class { constructor() {} has() { return false; } get() { return null; } },
@@ -69,8 +95,11 @@ function patchFastEquity(s) {
   s.estimateEquity = function (hc, board, nOpp) {
     const deck = new Deck();
     const known = new Set([...hc, ...board].map(c => c.toString()));
+    let seed = 0xc0ffee ^ ((nOpp || 0) << 16);
+    [...known].sort().join('').split('').forEach(ch => { seed = ((seed * 31) ^ ch.charCodeAt(0)) >>> 0; });
+    const rand = makeSeededRandom(seed);
     const rem = deck.cards.filter(c => !known.has(c.toString()));
-    if (board.length >= 5 && nOpp === 1) {
+    if (board.length >= 5) {
       const my = HandEval.evaluate([...hc, ...board]).score; let sc = 0, tot = 0;
       for (let i = 0; i < rem.length; i++) for (let j = i + 1; j < rem.length; j++) {
         const os = HandEval.evaluate([rem[i], rem[j], ...board]).score; sc += my > os ? 1 : (my === os ? 0.5 : 0); tot++;
@@ -79,7 +108,7 @@ function patchFastEquity(s) {
     }
     let sc = 0; const iter = 300;
     for (let i = 0; i < iter; i++) {
-      for (let k = rem.length - 1; k > 0; k--) { const r = (Math.random() * (k + 1)) | 0; const t = rem[k]; rem[k] = rem[r]; rem[r] = t; }
+      for (let k = rem.length - 1; k > 0; k--) { const r = (rand() * (k + 1)) | 0; const t = rem[k]; rem[k] = rem[r]; rem[r] = t; }
       let p = 0; const b = [...board]; while (b.length < 5) b.push(rem[p++]);
       const my = HandEval.evaluate([...hc, ...b]).score; let lose = false, tie = false;
       for (let o = 0; o < nOpp; o++) { const c1 = rem[p++], c2 = rem[p++]; if (!c1 || !c2) continue; const os = HandEval.evaluate([c1, c2, ...b]).score; if (os > my) { lose = true; break; } if (os === my) tie = true; }
@@ -235,12 +264,17 @@ function runPreflopModeChecks(s) {
   if (typeof s.liveCashRangeProfile !== 'function') { console.log('[プリフロップモード検証] スキップ'); return true; }
   const { liveCashRangeProfile, regressionCards: Cs, setRangeMode } = s;
   const players = Array.from({ length: 6 }, (_, i) => ({ active: true, isHuman: i === 0 }));
+  const players9 = Array.from({ length: 9 }, (_, i) => ({ active: true, isHuman: i === 0 }));
   function prof(hc, pos, act, caller) {
     const dec = [{ street: 'preflop', action: 'raise', position: 'CO', isHuman: false, playerIdx: 5 }];
     if (caller) dec.push({ street: 'preflop', action: 'call', position: 'HJ', isHuman: false, playerIdx: 4 });
     const d = { street: 'preflop', action: act, facingRaise: true, toCall: 15, position: pos, isHuman: true, playerIdx: 0, pfActionBetLevel: 2 };
     dec.push(d);
     return liveCashRangeProfile({ players, decisions: dec, community: [] }, d, Cs(hc), pos);
+  }
+  function open9(hc, pos) {
+    const d = { street: 'preflop', action: 'raise', facingRaise: false, toCall: 0, position: pos, isHuman: true, playerIdx: 0, pot: 15 };
+    return liveCashRangeProfile({ players: players9, decisions: [d], community: [] }, d, Cs(hc), pos);
   }
   const cap = (mode, hc, pos, act, caller) => { setRangeMode(mode); const p = prof(hc, pos, act, caller); return p ? p.capPercent : null; };
   let pass = 0, fail = 0; const fails = [];
@@ -259,6 +293,23 @@ function runPreflopModeChecks(s) {
     ok('オープン: Live > GTO (CO)', sp('live', { toCall: 0 }, false, false, 'CO') > sp('gto', { toCall: 0 }, false, false, 'CO'));
     ok('3bet: Live > GTO (BTN)', sp('live', { toCall: 15 }, true, false, 'BTN') > sp('gto', { toCall: 15 }, true, false, 'BTN'));
   }
+  setRangeMode('live');
+  const expectOpen = (pos, hc, want, label) => {
+    const p = open9(hc, pos);
+    ok(label, want.includes(p && p.severity), p && ('severity=' + p.severity + ' verdict=' + p.verdict));
+  };
+  expectOpen('UTG', ['Kh', 'Td'], ['bad'], '9max UTG KTo open: out');
+  expectOpen('UTG', ['Ah', 'Td'], ['bad'], '9max UTG ATo open: out');
+  expectOpen('UTG', ['5h', '5d'], ['bad'], '9max UTG 55 open: out');
+  expectOpen('UTG', ['Qh', 'Jh'], ['border'], '9max UTG QJs open: mix only');
+  expectOpen('UTG+1', ['Kh', 'Td'], ['bad'], '9max UTG+1 KTo open: out');
+  expectOpen('UTG+1', ['Ah', 'Td'], ['bad'], '9max UTG+1 ATo open: out');
+  expectOpen('UTG+1', ['5h', '5d'], ['bad'], '9max UTG+1 55 open: out');
+  expectOpen('UTG+1', ['Qh', 'Jh'], ['border'], '9max UTG+1 QJs open: mix only');
+  expectOpen('MP', ['Kh', 'Td'], ['bad'], '9max MP KTo open: out');
+  expectOpen('MP', ['Ah', 'Td'], ['bad'], '9max MP ATo open: out');
+  expectOpen('MP', ['5h', '5d'], ['border'], '9max MP 55 open: mix only');
+  expectOpen('MP', ['Qh', 'Jh'], ['good'], '9max MP QJs open: chart in');
   setRangeMode('live');
   console.log(`\n[プリフロップモード検証] ${pass} pass / ${fail} fail`);
   fails.forEach(x => console.log('  FAIL:', x));
@@ -299,8 +350,8 @@ function runAiPreflopModeChecks(s) {
 (function main() {
   const htmlPath = pickHtml();
   console.log('target:', htmlPath);
+  let allOk = runHtmlIntegrityChecks(htmlPath);
   const s = loadSandbox(htmlPath);
-  let allOk = true;
   const realEquity = s.estimateEquity; // run theory checks at full fidelity
   if (!process.env.SKIP_REGRESSION) {
     if (process.env.FAST) patchFastEquity(s);

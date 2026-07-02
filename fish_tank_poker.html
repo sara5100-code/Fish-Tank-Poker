@@ -3832,9 +3832,10 @@ function withSeededRandomForAudit(seed,fn){
 }
 function actualHandEvalSignature(an){
   if(!an||!an.evals)return null;
+  function stableCommentText(txt){
+    return String(txt||'').replace(/<[^>]+>/g,'').replace(/\d+(?:\.\d+)?%?/g,'#').replace(/\s+/g,' ').trim();
+  }
   return{
-    score:an.score,
-    grade:an.grade,
     evals:an.evals.map(function(e){
       return{
         street:e.street,
@@ -3842,13 +3843,10 @@ function actualHandEvalSignature(an){
         amount:e.amount,
         quality:e.quality,
         deduction:e.deduction||0,
-        rawEqPct:e.rawEqPct,
-        effectiveEqPct:e.effectiveEqPct,
-        realizationPct:e.realizationPct,
         rangeAdv:e.rangeAdv||'',
         nutAdv:e.nutAdv||'',
         suggest:e.suggest||'',
-        comment:(e.comment||'').replace(/<[^>]+>/g,'')
+        comment:stableCommentText(e.comment)
       };
     })
   };
