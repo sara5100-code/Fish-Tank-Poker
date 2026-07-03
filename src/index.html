@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fish Tank Poker</title>
+<!-- FISH_TANK_INLINE_STYLE -->
+</head>
+<body>
+
+<div id="setup-screen" class="screen active">
+  <div class="setup-card">
+    <h1>🐟 Fish Tank Poker</h1>
+    <div class="sub">Escape the Tank. Think Like a Shark.</div>
+    <div class="form-row"><label>ゲームモード</label>
+      <select id="cfg-mode">
+        <option value="normal">🃏 リングゲーム</option>
+        <option value="scenario">🎯 フロップトレーニング</option>
+        <option value="tournament">🏆 トーナメント局面別</option>
+      </select>
+    </div>
+    <div id="cfg-tournament-wrap" class="hidden">
+      <div class="form-row"><label>トーナメント局面</label>
+        <select id="cfg-tournament-preset">
+          <option value="bbante_basic">BBアンティ基礎（8人 / 25BB）</option>
+          <option value="early">序盤戦（8人 / 40BB）</option>
+          <option value="middle">中盤ショート化（8人 / 20BB）</option>
+          <option value="bubble">バブル・チケット目前（9人 / 14BB）</option>
+          <option value="final_table">FT・ペイジャンプ（6人 / 22BB）</option>
+          <option value="heads_up">HU・最終決戦（2人 / 25BB）</option>
+        </select>
+      </div>
+      <div class="form-row"><label>練習テーマ</label>
+        <select id="cfg-tournament-focus">
+          <option value="general">総合練習</option>
+          <option value="bbante_steal">BBアンティ基礎・スチール</option>
+          <option value="reshove20">20BB reshove練習</option>
+          <option value="openjam14">14BB open jam練習</option>
+          <option value="bubble_call">バブル薄コール回避</option>
+          <option value="bb_defend">BBディフェンス練習</option>
+          <option value="ft_payjump">FTペイジャンプ</option>
+          <option value="hu_aggression">HU攻防</option>
+        </select>
+      </div>
+      <div id="cfg-tournament-note" class="mode-note"></div>
+    </div>
+    <div class="form-row"><label>プレイヤー数</label>
+      <select id="cfg-players">
+        <option value="2">2人 (ヘッズアップ)</option><option value="3">3人</option>
+        <option value="4">4人</option><option value="5">5人</option>
+        <option value="6" selected>6人</option><option value="7">7人</option>
+        <option value="8">8人</option><option value="9">9人</option>
+      </select>
+    </div>
+    <div class="blind-row">
+      <div class="form-row"><label>SB</label>
+        <select id="cfg-sb"><option value="1">1</option><option value="2" selected>2</option><option value="5">5</option><option value="10">10</option><option value="25">25</option><option value="50">50</option><option value="100">100</option><option value="200">200</option><option value="500">500</option></select>
+      </div>
+      <div class="form-row"><label>BB</label>
+        <select id="cfg-bb"><option value="2">2</option><option value="5" selected>5</option><option value="10">10</option><option value="20">20</option><option value="50">50</option><option value="100">100</option><option value="200">200</option><option value="400">400</option><option value="1000">1000</option></select>
+      </div>
+    </div>
+    <div class="form-row"><label>スタック</label>
+      <select id="cfg-stack"><option value="14">14 BB</option><option value="20">20 BB</option><option value="25">25 BB</option><option value="40">40 BB</option><option value="50">50 BB</option><option value="100" selected>100 BB</option><option value="200">200 BB</option></select>
+    </div>
+    <div class="form-row"><label>AI難易度</label>
+      <select id="cfg-ai"><option value="easy">Loose</option><option value="medium" selected>Standard</option><option value="hard">Tough</option></select>
+    </div>
+    <div class="form-row"><label>レンジ判定</label>
+      <select id="cfg-range-mode"><option value="live" selected>ライブ$2/$5（ブラフ不足を加味）</option><option value="gto">GTO（均衡・EV基準）</option></select>
+    </div>
+    <button class="btn-primary" id="btn-start">ゲーム開始</button>
+  </div>
+</div>
+
+<div id="game-screen" class="screen">
+  <div id="hud">
+    <div class="hud-title">🐟 Fish Tank Poker</div>
+    <div id="hud-info">Hand #1 | SB 2 / BB 5</div>
+    <div class="hud-btns">
+      <button class="hud-btn" data-tab="history">履歴</button>
+      <button class="hud-btn" data-tab="trends">傾向</button>
+      <button class="hud-btn dev-btn" id="btn-reanalyze">再評価</button>
+      <button class="hud-btn dev-btn" id="btn-regression">検査</button>
+      <button class="hud-btn dev-btn" id="btn-audit-batch">監査</button>
+      <button class="hud-btn" id="btn-quit">終了</button>
+    </div>
+  </div>
+  <div id="main-area">
+    <div id="table-wrap">
+      <div id="scenario-banner"></div>
+      <div id="table-container">
+        <div id="table-felt"></div>
+        <div id="center-area">
+          <div id="pot-display">Pot: 0</div>
+          <div id="community-cards"></div>
+          <div id="stage-label">PRE-FLOP</div>
+        </div>
+        <div id="seats-container"></div>
+      </div>
+      <div id="human-area">
+        <div id="human-cards-row">
+          <div id="human-cards"></div>
+          <div id="human-hand-name"></div>
+        </div>
+        <div id="action-area">
+          <!-- 行1: コール情報 -->
+          <div id="info-row">
+            <div id="to-call-label"></div>
+          </div>
+          <!-- 行2: レイズサイズスライダー + 金額 -->
+          <div id="size-row">
+            <input type="range" id="raise-slider" min="0" max="100" value="50">
+            <input type="text" id="raise-amount" value="0" readonly>
+          </div>
+          <!-- 行3: クイックサイズボタン (中央・大きめ) -->
+          <div id="quick-btns-row">
+            <div id="quick-btns"></div>
+          </div>
+          <!-- 行4: メインアクションボタン (等幅) -->
+          <div id="main-btns">
+            <button class="action-btn" id="btn-fold">フォールド</button>
+            <button class="action-btn" id="btn-check">チェック</button>
+            <button class="action-btn" id="btn-call">コール</button>
+            <button class="action-btn" id="btn-raise">レイズ</button>
+          </div>
+          <!-- 行5: オールイン (セカンダリ) -->
+          <button id="btn-allin">オールイン</button>
+        </div>
+      </div>
+    </div>
+    <div id="side-panel">
+      <div id="side-tabs">
+        <div class="side-tab active" data-tab="history">履歴</div>
+        <div class="side-tab" data-tab="trends">傾向</div>
+        <div class="side-tab" data-tab="glossary">用語</div>
+      </div>
+      <div id="side-content">
+        <div id="tab-history"><p style="color:var(--dim);font-size:11px;">ハンドが終わると表示されます</p></div>
+        <div id="tab-trends" class="hidden">
+          <div id="trends-content"></div>
+          <div style="margin-top:8px;text-align:right"><button id="btn-reset-stats" style="font-size:9px;padding:3px 8px;background:none;border:1px solid var(--border);border-radius:5px;color:var(--dim);cursor:pointer;font-family:inherit">統計リセット</button></div>
+        </div>
+        <div id="tab-glossary" class="hidden"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="analysis-modal">
+  <div id="analysis-box">
+    <h2 id="analysis-title">ハンドレビュー</h2>
+    <div class="analysis-sub" id="analysis-sub"></div>
+    <div id="analysis-content"></div>
+    <div style="display:flex;gap:8px;margin-top:14px">
+      <button id="close-only" style="flex:1;padding:12px;background:var(--panel2);border:1px solid var(--border);border-radius:12px;color:var(--dim);font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">← 履歴に戻る</button>
+      <button class="close-analysis" id="close-analysis" style="flex:2">次のハンドへ →</button>
+    </div>
+  </div>
+</div>
+<div id="sheet-overlay">
+  <div id="bottom-sheet">
+    <div id="sheet-handle"></div>
+    <div id="sheet-top">
+      <div id="sheet-tabs-row">
+        <div class="stab active" data-stab="history">履歴</div>
+        <div class="stab" data-stab="trends">傾向</div>
+        <div class="stab" data-stab="glossary">用語</div>
+      </div>
+      <button id="sheet-close-btn">✕</button>
+    </div>
+    <div id="sheet-body">
+      <div id="stab-history"><p style="color:var(--dim);font-size:11px">ハンドが終わると表示されます</p></div>
+      <div id="stab-trends" class="hidden">
+        <div id="stab-trends-content"></div>
+        <div style="margin-top:8px;text-align:right"><button id="btn-reset-stats2" style="font-size:9px;padding:3px 8px;background:none;border:1px solid var(--border);border-radius:5px;color:var(--dim);cursor:pointer;font-family:inherit">統計リセット</button></div>
+      </div>
+      <div id="stab-glossary" class="hidden"></div>
+    </div>
+  </div>
+</div>
+<div id="toast-container"></div>
+
+<!-- FISH_TANK_INLINE_SCRIPT -->
+</body>
+</html>
