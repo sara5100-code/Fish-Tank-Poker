@@ -15,11 +15,13 @@ const OUT_HTML = path.join(ROOT, 'fish_tank_poker.html');
 const SRC_INDEX = path.join(SRC, 'index.html');
 const SRC_STYLE = path.join(SRC, 'styles.css');
 const SRC_APP = path.join(SRC, 'app.js');
+const SRC_TOURNAMENT_PROFILES = path.join(SRC, 'tournament_profiles.js');
 const SRC_LIVE_CASH_PROFILES = path.join(SRC, 'live_cash_profiles.js');
 const SRC_REVIEW_TEXT = path.join(SRC, 'review_text.js');
 
 const STYLE_TOKEN = '<!-- FISH_TANK_INLINE_STYLE -->';
 const SCRIPT_TOKEN = '<!-- FISH_TANK_INLINE_SCRIPT -->';
+const TOURNAMENT_PROFILES_TOKEN = '// FISH_TANK_TOURNAMENT_PROFILES_MODULE';
 const LIVE_CASH_PROFILES_TOKEN = '// FISH_TANK_LIVE_CASH_PROFILES_MODULE';
 const REVIEW_TEXT_TOKEN = '// FISH_TANK_REVIEW_TEXT_MODULE';
 
@@ -32,14 +34,15 @@ function writeUtf8(file, text) {
   fs.writeFileSync(file, text, 'utf8');
 }
 
-function inlineModule(app, token, file, normalizeEol = true) {
+function inlineModule(app, token, file, normalizeEol = true, keepBoundaryEol = false) {
   if (!app.includes(token)) return app;
   const eol = app.includes('\r\n') ? '\r\n' : '\n';
-  const moduleText = normalizeEol
+  let moduleText = normalizeEol
     ? readUtf8(file).replace(/\r\n|\r|\n/g, eol).replace(/\s*$/u, eol)
     : readUtf8(file).replace(/\s*$/u, '');
+  if (!normalizeEol && keepBoundaryEol) moduleText += eol;
   const escapedToken = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const pattern = normalizeEol ? escapedToken + '\\r?\\n?' : escapedToken;
+  const pattern = normalizeEol || keepBoundaryEol ? escapedToken + '\\r?\\n?' : escapedToken;
   return app.replace(new RegExp(pattern), () => moduleText);
 }
 
@@ -68,6 +71,7 @@ function buildHtml() {
   const eol = shell.includes('\r\n') ? '\r\n' : '\n';
   const style = readUtf8(SRC_STYLE);
   let app = readUtf8(SRC_APP);
+  app = inlineModule(app, TOURNAMENT_PROFILES_TOKEN, SRC_TOURNAMENT_PROFILES, false, true);
   app = inlineModule(app, LIVE_CASH_PROFILES_TOKEN, SRC_LIVE_CASH_PROFILES);
   app = inlineModule(app, REVIEW_TEXT_TOKEN, SRC_REVIEW_TEXT, false);
   if (!shell.includes(STYLE_TOKEN)) throw new Error(`src/index.html に ${STYLE_TOKEN} がありません`);
