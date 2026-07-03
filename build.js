@@ -15,12 +15,14 @@ const OUT_HTML = path.join(ROOT, 'fish_tank_poker.html');
 const SRC_INDEX = path.join(SRC, 'index.html');
 const SRC_STYLE = path.join(SRC, 'styles.css');
 const SRC_APP = path.join(SRC, 'app.js');
+const SRC_GTO_POSTFLOP_PROFILES = path.join(SRC, 'gto_postflop_profiles.js');
 const SRC_TOURNAMENT_PROFILES = path.join(SRC, 'tournament_profiles.js');
 const SRC_LIVE_CASH_PROFILES = path.join(SRC, 'live_cash_profiles.js');
 const SRC_REVIEW_TEXT = path.join(SRC, 'review_text.js');
 
 const STYLE_TOKEN = '<!-- FISH_TANK_INLINE_STYLE -->';
 const SCRIPT_TOKEN = '<!-- FISH_TANK_INLINE_SCRIPT -->';
+const GTO_POSTFLOP_PROFILES_TOKEN = '// FISH_TANK_GTO_POSTFLOP_PROFILES_MODULE';
 const TOURNAMENT_PROFILES_TOKEN = '// FISH_TANK_TOURNAMENT_PROFILES_MODULE';
 const LIVE_CASH_PROFILES_TOKEN = '// FISH_TANK_LIVE_CASH_PROFILES_MODULE';
 const REVIEW_TEXT_TOKEN = '// FISH_TANK_REVIEW_TEXT_MODULE';
@@ -71,6 +73,7 @@ function buildHtml() {
   const eol = shell.includes('\r\n') ? '\r\n' : '\n';
   const style = readUtf8(SRC_STYLE);
   let app = readUtf8(SRC_APP);
+  app = inlineModule(app, GTO_POSTFLOP_PROFILES_TOKEN, SRC_GTO_POSTFLOP_PROFILES);
   app = inlineModule(app, TOURNAMENT_PROFILES_TOKEN, SRC_TOURNAMENT_PROFILES, false, true);
   app = inlineModule(app, LIVE_CASH_PROFILES_TOKEN, SRC_LIVE_CASH_PROFILES);
   app = inlineModule(app, REVIEW_TEXT_TOKEN, SRC_REVIEW_TEXT, false);
