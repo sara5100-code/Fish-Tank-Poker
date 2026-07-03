@@ -15,9 +15,11 @@ const OUT_HTML = path.join(ROOT, 'fish_tank_poker.html');
 const SRC_INDEX = path.join(SRC, 'index.html');
 const SRC_STYLE = path.join(SRC, 'styles.css');
 const SRC_APP = path.join(SRC, 'app.js');
+const SRC_REVIEW_TEXT = path.join(SRC, 'review_text.js');
 
 const STYLE_TOKEN = '<!-- FISH_TANK_INLINE_STYLE -->';
 const SCRIPT_TOKEN = '<!-- FISH_TANK_INLINE_SCRIPT -->';
+const REVIEW_TEXT_TOKEN = '// FISH_TANK_REVIEW_TEXT_MODULE';
 
 function readUtf8(file) {
   return fs.readFileSync(file, 'utf8');
@@ -52,7 +54,11 @@ function buildHtml() {
   const shell = readUtf8(SRC_INDEX);
   const eol = shell.includes('\r\n') ? '\r\n' : '\n';
   const style = readUtf8(SRC_STYLE);
-  const app = readUtf8(SRC_APP);
+  let app = readUtf8(SRC_APP);
+  if (app.includes(REVIEW_TEXT_TOKEN)) {
+    const reviewText = readUtf8(SRC_REVIEW_TEXT);
+    app = app.replace(REVIEW_TEXT_TOKEN, () => reviewText.replace(/\s*$/u, ''));
+  }
   if (!shell.includes(STYLE_TOKEN)) throw new Error(`src/index.html に ${STYLE_TOKEN} がありません`);
   if (!shell.includes(SCRIPT_TOKEN)) throw new Error(`src/index.html に ${SCRIPT_TOKEN} がありません`);
   const html = shell

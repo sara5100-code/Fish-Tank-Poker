@@ -147,3 +147,9 @@ SKIP_REGRESSION=1 node ...         # 理論検証のみ
 - この段階では評価ロジック・UI・ゲーム挙動は変更せず、巨大な単一HTMLを安全に扱うための保守性基盤だけを追加した。
 - `node build.js --init` で現在のHTMLから `src/` を初期化し、`node build.js --check` で再生成結果が現在の `fish_tank_poker.html` と完全一致することを確認できる。
 - 今後の Phase 1 では、`src/app.js` 内を評価エンジン、AI、レビュー文生成、UI、テストデータなどに段階的に分ける。
+
+## 2026-07-03 Phase 1: レビュー文生成層の切り出し
+
+- `src/app.js` から、レビュー表示文の最終生成・整文・HTML化を担うブロックを `src/review_text.js` に分離した。
+- `build.js` に `// FISH_TANK_REVIEW_TEXT_MODULE` 差し込みを追加し、ビルド時に元の位置へ戻すことで、配布HTMLの完全一致を維持した。
+- 評価ロジック・採点・UI挙動は変更せず、今後の「口語レビュー品質改善」を安全に行うための編集範囲を明確にした。
