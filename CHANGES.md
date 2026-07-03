@@ -153,3 +153,10 @@ SKIP_REGRESSION=1 node ...         # 理論検証のみ
 - `src/app.js` から、レビュー表示文の最終生成・整文・HTML化を担うブロックを `src/review_text.js` に分離した。
 - `build.js` に `// FISH_TANK_REVIEW_TEXT_MODULE` 差し込みを追加し、ビルド時に元の位置へ戻すことで、配布HTMLの完全一致を維持した。
 - 評価ロジック・採点・UI挙動は変更せず、今後の「口語レビュー品質改善」を安全に行うための編集範囲を明確にした。
+
+## 2026-07-03 Phase 1: リングゲーム評価プロファイルの切り出し
+
+- `src/app.js` から、ライブ$2/$5リング評価のプロファイル群を `src/live_cash_profiles.js` に分離した。
+- 対象は参加レンジ、場面文脈、SPR、主導権、3BET/4BET、マルチウェイ、リバー金額判断、相手傾向補正。
+- `build.js` に `// FISH_TANK_LIVE_CASH_PROFILES_MODULE` 差し込みを追加し、配布HTMLの完全一致を維持した。
+- 評価内容は変更せず、今後リングゲーム評価軸を深掘りする時の編集範囲を狭くした。
