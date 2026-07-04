@@ -188,3 +188,10 @@ SKIP_REGRESSION=1 node ...         # 理論検証のみ
 - 対象は169手順位、コンボ累積比、`handType`/`handRank`/`handDesc`、ライブ$2/$5のポジション別オープン幅、`preflopSizePlan`。
 - `build.js` に `// FISH_TANK_PREFLOP_CORE_MODULE` 差し込みを追加し、配布HTMLの完全一致を維持した。
 - 評価内容は変更せず、今後プリフロップレンジ表やサイズ基準を強化する時の編集範囲を狭くした。
+
+## 2026-07-04 Phase 1: プリフロップ文脈ヘルパーの切り出し
+
+- `src/app.js` の `analyzeHand` 内から、プリフロップ文脈ヘルパーを `src/preflop_context_helpers.js` に分離した。
+- 対象は `handCat`、`preflopLineContext`、SBコールドコール頻度、4BET/5BET検出、ライブ$2/$5の3BET幅補助。
+- `build.js` に `// FISH_TANK_PREFLOP_CONTEXT_HELPERS_MODULE` 差し込みを追加し、配布HTMLの完全一致を維持した。
+- 評価内容は変更せず、次にプリフロップ評価本文を整理するための足場を作った。
