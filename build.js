@@ -15,6 +15,7 @@ const OUT_HTML = path.join(ROOT, 'fish_tank_poker.html');
 const SRC_INDEX = path.join(SRC, 'index.html');
 const SRC_STYLE = path.join(SRC, 'styles.css');
 const SRC_APP = path.join(SRC, 'app.js');
+const SRC_PREFLOP_CORE = path.join(SRC, 'preflop_core.js');
 const SRC_EVALUATION_WEIGHTS = path.join(SRC, 'evaluation_weights.js');
 const SRC_GTO_POSTFLOP_PROFILES = path.join(SRC, 'gto_postflop_profiles.js');
 const SRC_TOURNAMENT_PROFILES = path.join(SRC, 'tournament_profiles.js');
@@ -23,6 +24,7 @@ const SRC_REVIEW_TEXT = path.join(SRC, 'review_text.js');
 
 const STYLE_TOKEN = '<!-- FISH_TANK_INLINE_STYLE -->';
 const SCRIPT_TOKEN = '<!-- FISH_TANK_INLINE_SCRIPT -->';
+const PREFLOP_CORE_TOKEN = '// FISH_TANK_PREFLOP_CORE_MODULE';
 const EVALUATION_WEIGHTS_TOKEN = '  // FISH_TANK_EVALUATION_WEIGHTS_MODULE';
 const GTO_POSTFLOP_PROFILES_TOKEN = '// FISH_TANK_GTO_POSTFLOP_PROFILES_MODULE';
 const TOURNAMENT_PROFILES_TOKEN = '// FISH_TANK_TOURNAMENT_PROFILES_MODULE';
@@ -75,6 +77,7 @@ function buildHtml() {
   const eol = shell.includes('\r\n') ? '\r\n' : '\n';
   const style = readUtf8(SRC_STYLE);
   let app = readUtf8(SRC_APP);
+  app = inlineModule(app, PREFLOP_CORE_TOKEN, SRC_PREFLOP_CORE);
   app = inlineModule(app, EVALUATION_WEIGHTS_TOKEN, SRC_EVALUATION_WEIGHTS, true, true);
   app = inlineModule(app, GTO_POSTFLOP_PROFILES_TOKEN, SRC_GTO_POSTFLOP_PROFILES);
   app = inlineModule(app, TOURNAMENT_PROFILES_TOKEN, SRC_TOURNAMENT_PROFILES, false, true);
