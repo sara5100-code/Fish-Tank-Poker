@@ -195,3 +195,10 @@ SKIP_REGRESSION=1 node ...         # 理論検証のみ
 - 対象は `handCat`、`preflopLineContext`、SBコールドコール頻度、4BET/5BET検出、ライブ$2/$5の3BET幅補助。
 - `build.js` に `// FISH_TANK_PREFLOP_CONTEXT_HELPERS_MODULE` 差し込みを追加し、配布HTMLの完全一致を維持した。
 - 評価内容は変更せず、次にプリフロップ評価本文を整理するための足場を作った。
+
+## 2026-07-05 Phase 1: プリフロップ評価本体の切り出し
+
+- `src/app.js` の `analyzeHand` 内から、プリフロップ評価本体を `src/preflop_evaluation.js` に分離した。
+- 対象はプリフロップの `fold` / `call` / `raise` / `all-in` 判定ブロック。
+- `build.js` に `// FISH_TANK_PREFLOP_EVALUATION_MODULE` 差し込みを追加し、配布HTMLの完全一致を維持した。
+- 評価内容は変更せず、次にプリフロップレンジ表や口語説明を強化するための編集範囲を明確にした。
