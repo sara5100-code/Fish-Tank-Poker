@@ -209,3 +209,10 @@ SKIP_REGRESSION=1 node ...         # 理論検証のみ
 - 対象は未参加フォールド、対レイズフォールド、4BET/5BET対応フォールド、SBフォールド、リンプポットフォールド。
 - `build.js` で `src/preflop_evaluation.js` 内の `// FISH_TANK_PREFLOP_EVAL_FOLD_MODULE` を差し込むようにした。
 - 評価内容は変更せず、foldだけのレンジ表・説明文を後から磨ける状態にした。
+
+## 2026-07-06 Phase 1: プリフロップcall評価の切り出し
+
+- `src/preflop_evaluation.js` から、プリフロップの `call` 評価を `src/preflop_eval_call.js` に分離した。
+- 対象は4BET/5BETコール、BBディフェンス、オープンリンプ、SBコールドコール、非BBフラット。
+- `build.js` で `src/preflop_evaluation.js` 内の `// FISH_TANK_PREFLOP_EVAL_CALL_MODULE` を差し込むようにした。
+- 評価内容は変更せず、BBディフェンスや非BBフラットの改善範囲を狭くした。
