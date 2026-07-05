@@ -202,3 +202,10 @@ SKIP_REGRESSION=1 node ...         # 理論検証のみ
 - 対象はプリフロップの `fold` / `call` / `raise` / `all-in` 判定ブロック。
 - `build.js` に `// FISH_TANK_PREFLOP_EVALUATION_MODULE` 差し込みを追加し、配布HTMLの完全一致を維持した。
 - 評価内容は変更せず、次にプリフロップレンジ表や口語説明を強化するための編集範囲を明確にした。
+
+## 2026-07-05 Phase 1: プリフロップfold評価の切り出し
+
+- `src/preflop_evaluation.js` から、プリフロップの `fold` 評価を `src/preflop_eval_fold.js` に分離した。
+- 対象は未参加フォールド、対レイズフォールド、4BET/5BET対応フォールド、SBフォールド、リンプポットフォールド。
+- `build.js` で `src/preflop_evaluation.js` 内の `// FISH_TANK_PREFLOP_EVAL_FOLD_MODULE` を差し込むようにした。
+- 評価内容は変更せず、foldだけのレンジ表・説明文を後から磨ける状態にした。
