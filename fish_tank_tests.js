@@ -262,7 +262,7 @@ function runModeChecks(s) {
 
 function runPreflopModeChecks(s) {
   if (typeof s.liveCashRangeProfile !== 'function') { console.log('[プリフロップモード検証] スキップ'); return true; }
-  const { liveCashRangeProfile, regressionCards: Cs, setRangeMode } = s;
+  const { liveCashRangeProfile, preflopChartLookup, regressionCards: Cs, setRangeMode } = s;
   const players = Array.from({ length: 6 }, (_, i) => ({ active: true, isHuman: i === 0 }));
   const players9 = Array.from({ length: 9 }, (_, i) => ({ active: true, isHuman: i === 0 }));
   function prof(hc, pos, act, caller) {
@@ -310,6 +310,16 @@ function runPreflopModeChecks(s) {
   expectOpen('MP', ['Ah', 'Td'], ['bad'], '9max MP ATo open: out');
   expectOpen('MP', ['5h', '5d'], ['border'], '9max MP 55 open: mix only');
   expectOpen('MP', ['Qh', 'Jh'], ['good'], '9max MP QJs open: chart in');
+  if (typeof preflopChartLookup === 'function') {
+    const chart = (kind, ht, stackBB) => preflopChartLookup(kind, ht, 'BTN', 6, { stackBB, openerPos: 'CO' });
+    ok('vs3bet 100BB QQ: continue pure', chart('vs3bet', 'QQ', 100).status === 'pure');
+    ok('vs3bet 100BB AJo: fold out', chart('vs3bet', 'AJo', 100).status === 'out');
+    ok('vs3bet 50BB TT: mixed continue', chart('vs3bet', 'TT', 50).status === 'mix');
+    ok('vs4bet 100BB AA: continue pure', chart('vs4bet', 'AA', 100).status === 'pure');
+    ok('vs4bet 100BB QQ: mixed continue', chart('vs4bet', 'QQ', 100).status === 'mix');
+    ok('vs4bet 100BB JJ: fold out', chart('vs4bet', 'JJ', 100).status === 'out');
+    ok('vs4bet 20BB QQ: shallow continue pure', chart('vs4bet', 'QQ', 20).status === 'pure');
+  }
   setRangeMode('live');
   console.log(`\n[プリフロップモード検証] ${pass} pass / ${fail} fail`);
   fails.forEach(x => console.log('  FAIL:', x));

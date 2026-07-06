@@ -1763,6 +1763,18 @@ const PREFLOP_RANGE_CHARTS={
     value:{pure:'QQ+,AKs,AKo',mix:'JJ,TT,AQs,AQo'},
     polar:{pure:'QQ+,AKs,AKo,A5s-A4s',mix:'JJ,TT,AQs,AQo,A3s-A2s,KQs,KJs,QJs,JTs,T9s'},
     blindVsSteal:{pure:'TT+,AQs+,AKo,A5s-A2s,KQs',mix:'99-77,AJs-ATs,KJs-KTs,QJs,JTs,T9s,AQo,KQo'}
+  },
+  vs3bet:{
+    deep100:{pure:'QQ+,AKs,AKo,AQs,JJ',mix:'TT-99,AQo,AJs,KQs'},
+    mid50:{pure:'QQ+,AKs,AKo',mix:'JJ,TT,AQs,AQo'},
+    short20:{pure:'JJ+,AKs,AKo,AQs',mix:'TT,99,AQo,AJs,KQs'},
+    push14:{pure:'TT+,AQs+,AKo',mix:'99-77,AJs-ATs,KQs,AQo'}
+  },
+  vs4bet:{
+    deep100:{pure:'KK+,AKs',mix:'QQ,AKo'},
+    mid50:{pure:'KK+,AKs,AKo',mix:'QQ'},
+    short20:{pure:'QQ+,AKs,AKo',mix:'JJ,AQs'},
+    push14:{pure:'JJ+,AKs,AKo,AQs',mix:'TT,AQo,AJs,KQs'}
   }
 };
 function preflopRangeTokens(str){
@@ -1815,6 +1827,13 @@ function preflopPositionBucket(pos,totalP){
   if(pos==='BTN')return'BTN';
   return'MP';
 }
+function preflopStackBucket(stackBB){
+  const bb=Number(stackBB)||100;
+  if(bb<=16)return'push14';
+  if(bb<=25)return'short20';
+  if(bb<=65)return'mid50';
+  return'deep100';
+}
 function preflopChartLookup(kind,ht,pos,totalP,opts){
   opts=opts||{};
   let chart=null,label='';
@@ -1839,17 +1858,25 @@ function preflopChartLookup(kind,ht,pos,totalP,opts){
     const blind=['SB','BB'].includes(pos);
     chart=PREFLOP_RANGE_CHARTS.threeBet[(blind&&steal)?'blindVsSteal':(opts.polar?'polar':'value')];
     label=(blind&&steal)?'blind vs steal 3bet':opts.polar?'polar 3bet':'value 3bet';
+  }else if(kind==='vs3bet'){
+    const stackBucket=preflopStackBucket(opts.stackBB);
+    chart=PREFLOP_RANGE_CHARTS.vs3bet[stackBucket];
+    label=stackBucket+' vs 3bet';
+  }else if(kind==='vs4bet'){
+    const stackBucket=preflopStackBucket(opts.stackBB);
+    chart=PREFLOP_RANGE_CHARTS.vs4bet[stackBucket];
+    label=stackBucket+' vs 4bet';
   }
   if(!chart)return{bucket:'',label:'',status:'out',mix:'Fold 100%',pure:false,mixCandidate:false};
   const pure=preflopRangeMatch(chart.pure,ht);
   const mixCandidate=!pure&&preflopRangeMatch(chart.mix,ht);
   let status=pure?'pure':mixCandidate?'mix':'out';
-  let actionJP=kind==='open'?'Open':kind==='threeBet'?'3bet':(pos==='BB'?'Call/defend':'Call');
+  let actionJP=kind==='open'?'Open':kind==='threeBet'?'3bet':kind==='vs3bet'?'Call/4bet':kind==='vs4bet'?'Call/5bet':(pos==='BB'?'Call/defend':'Call');
   let mix=status==='pure'
     ?(actionJP+' 75-100% / 別ライン 0-25%')
     :status==='mix'
       ?(actionJP+' 20-60% / Foldまたは別ライン 40-80%')
-      :(kind==='flat'?'Fold 75-100% / Call 0-25%':kind==='threeBet'?'Fold/Call 75-100% / 3bet 0-25%':'Fold 75-100% / Open 0-25%');
+      :(kind==='flat'?'Fold 75-100% / Call 0-25%':kind==='threeBet'?'Fold/Call 75-100% / 3bet 0-25%':(kind==='vs3bet'||kind==='vs4bet')?'Fold 75-100% / Continue 0-25%':'Fold 75-100% / Open 0-25%');
   return{bucket:label,label,status,mix,pure,mixCandidate,pureRange:chart.pure,mixRange:chart.mix};
 }
 // [Codex fix 2026-06-04] 序盤は「深いから何でも参加」ではなく、ドミネートリスクと実現率で参加レンジを健全化する。

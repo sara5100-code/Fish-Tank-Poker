@@ -223,3 +223,10 @@ SKIP_REGRESSION=1 node ...         # 理論検証のみ
 - 対象はオープン、ISO、3BET、5BET/オールイン、サイズ評価。
 - `build.js` で `src/preflop_evaluation.js` 内の `// FISH_TANK_PREFLOP_EVAL_RAISE_MODULE` を差し込むようにした。
 - 評価内容は変更せず、プリフロップの fold / call / raise を別々に磨ける状態にした。
+
+## 2026-07-06 Phase 5: プリフロップ継続レンジ表の追加
+
+- `PREFLOP_RANGE_CHARTS` に `vs3bet` と `vs4bet` を追加し、100BB / 50BB / 20BB / 14BB のスタック帯別に継続レンジを持たせた。
+- `preflopChartLookup()` から `vs3bet` / `vs4bet` を参照できるようにし、混合頻度表示も `Call/4bet`、`Call/5bet` として返すようにした。
+- 代表ハンドとして、100BB vs3bet の QQ/AJo/TT、100BB vs4bet の AA/QQ/JJ、20BB vs4bet の QQ をテストに追加した。
+- これにより、3BET後・4BET後の判断を「最初のハンド順位」ではなく、現在のアクション文脈とスタック帯で評価する土台を作った。
