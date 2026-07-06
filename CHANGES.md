@@ -216,3 +216,10 @@ SKIP_REGRESSION=1 node ...         # 理論検証のみ
 - 対象は4BET/5BETコール、BBディフェンス、オープンリンプ、SBコールドコール、非BBフラット。
 - `build.js` で `src/preflop_evaluation.js` 内の `// FISH_TANK_PREFLOP_EVAL_CALL_MODULE` を差し込むようにした。
 - 評価内容は変更せず、BBディフェンスや非BBフラットの改善範囲を狭くした。
+
+## 2026-07-06 Phase 1: プリフロップraise/all-in評価の切り出し
+
+- `src/preflop_evaluation.js` から、プリフロップの `raise` / `all-in` 評価を `src/preflop_eval_raise.js` に分離した。
+- 対象はオープン、ISO、3BET、5BET/オールイン、サイズ評価。
+- `build.js` で `src/preflop_evaluation.js` 内の `// FISH_TANK_PREFLOP_EVAL_RAISE_MODULE` を差し込むようにした。
+- 評価内容は変更せず、プリフロップの fold / call / raise を別々に磨ける状態にした。

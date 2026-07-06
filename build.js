@@ -20,6 +20,7 @@ const SRC_PREFLOP_CONTEXT_HELPERS = path.join(SRC, 'preflop_context_helpers.js')
 const SRC_PREFLOP_EVALUATION = path.join(SRC, 'preflop_evaluation.js');
 const SRC_PREFLOP_EVAL_FOLD = path.join(SRC, 'preflop_eval_fold.js');
 const SRC_PREFLOP_EVAL_CALL = path.join(SRC, 'preflop_eval_call.js');
+const SRC_PREFLOP_EVAL_RAISE = path.join(SRC, 'preflop_eval_raise.js');
 const SRC_EVALUATION_WEIGHTS = path.join(SRC, 'evaluation_weights.js');
 const SRC_GTO_POSTFLOP_PROFILES = path.join(SRC, 'gto_postflop_profiles.js');
 const SRC_TOURNAMENT_PROFILES = path.join(SRC, 'tournament_profiles.js');
@@ -33,6 +34,7 @@ const PREFLOP_CONTEXT_HELPERS_TOKEN = '  // FISH_TANK_PREFLOP_CONTEXT_HELPERS_MO
 const PREFLOP_EVALUATION_TOKEN = '    // FISH_TANK_PREFLOP_EVALUATION_MODULE';
 const PREFLOP_EVAL_FOLD_TOKEN = '      // FISH_TANK_PREFLOP_EVAL_FOLD_MODULE';
 const PREFLOP_EVAL_CALL_TOKEN = '      // FISH_TANK_PREFLOP_EVAL_CALL_MODULE';
+const PREFLOP_EVAL_RAISE_TOKEN = '      // FISH_TANK_PREFLOP_EVAL_RAISE_MODULE';
 const EVALUATION_WEIGHTS_TOKEN = '  // FISH_TANK_EVALUATION_WEIGHTS_MODULE';
 const GTO_POSTFLOP_PROFILES_TOKEN = '// FISH_TANK_GTO_POSTFLOP_PROFILES_MODULE';
 const TOURNAMENT_PROFILES_TOKEN = '// FISH_TANK_TOURNAMENT_PROFILES_MODULE';
@@ -88,6 +90,7 @@ function buildHtml() {
   let preflopEvaluation = readUtf8(SRC_PREFLOP_EVALUATION);
   preflopEvaluation = inlineModule(preflopEvaluation, PREFLOP_EVAL_FOLD_TOKEN, SRC_PREFLOP_EVAL_FOLD);
   preflopEvaluation = inlineModule(preflopEvaluation, PREFLOP_EVAL_CALL_TOKEN, SRC_PREFLOP_EVAL_CALL);
+  preflopEvaluation = inlineModule(preflopEvaluation, PREFLOP_EVAL_RAISE_TOKEN, SRC_PREFLOP_EVAL_RAISE);
   app = inlineModule(app, PREFLOP_CORE_TOKEN, SRC_PREFLOP_CORE);
   app = inlineModule(app, PREFLOP_CONTEXT_HELPERS_TOKEN, SRC_PREFLOP_CONTEXT_HELPERS);
   app = app.replace(PREFLOP_EVALUATION_TOKEN, () => preflopEvaluation.replace(/\s*$/u, ''));
