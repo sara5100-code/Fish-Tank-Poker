@@ -4,29 +4,31 @@
           // [Codex fix 2026-05-28] This is not a cold call: hero already 3bet and is now facing a 4bet/4bet jam.
           const hcat4c=handCat(c1,c2);
           const isPair4c=c1.rank===c2.rank;
-          const live4bCallNote='これはコールドコールではなく、自分の3BET後に相手の4BET'+(fourBetCallCtx.jamLike?' jam':'')+'を受けた局面です。海外ライブ$2/$5では4BETレンジはQQ+/AK寄りでブラフ不足になりやすく、必要EQだけでなく実効EQとインプライドなしを重く見ます。';
-          if(hRank<=2){
+          const stackBB4c=Math.max(1,Math.round((d.playerChipsBefore||human.chips||((hr.bigBlind||5)*100))/(hr.bigBlind||5)));
+          const vs4betChart=preflopChartLookup('vs4bet',ht,pos,hr.players.length||6,{stackBB:stackBB4c,openerPos:openerPosForChart});
+          const live4bCallNote='これはコールドコールではなく、自分の3BET後に相手の4BET'+(fourBetCallCtx.jamLike?' jam':'')+'を受けた局面です。参照レンジでは '+vs4betChart.mix+'。海外ライブ$2/$5では4BETレンジはQQ+/AK寄りでブラフ不足になりやすく、必要EQだけでなく実効EQとインプライドなしを重く見ます。';
+          if(vs4betChart.status==='pure'){
             ev.quality='good';ev.deduction=0;
-            ev.comment='正解。'+hd+'（'+rankStr+'）で4BET'+(fourBetCallCtx.jamLike?' jam':'')+'にコール。AA/KKは基本的にスタックオフ候補です。'+live4bCallNote;
+            ev.comment='正解。'+hd+'（'+rankStr+'）で4BET'+(fourBetCallCtx.jamLike?' jam':'')+'にコール。'+Math.round(stackBB4c)+'BB帯の継続レンジ内で、基本的にスタックオフ候補です。'+live4bCallNote;
             ev.suggest='推奨: コール/5BET jam';
-            ev.strategyMix='Fold 0% / Call 45% / 5bet jam 55%';
-          }else if(hRank<=6){
+            ev.strategyMix=vs4betChart.mix;
+          }else if(vs4betChart.status==='mix'){
             const ded=hRank<=3?4:8;
             ev.quality=ded>=8?'ok':'good';ev.deduction=ded;score-=ded;
-            ev.comment='境界。'+hd+'（'+rankStr+'）で4BET'+(fourBetCallCtx.jamLike?' jam':'')+'にコール。QQ/AK級は相手の4BET頻度とカバー関係次第で継続できますが、ライブ$2/$5ではフォールドも混ざります。'+live4bCallNote;
+            ev.comment='境界。'+hd+'（'+rankStr+'）で4BET'+(fourBetCallCtx.jamLike?' jam':'')+'にコール。'+Math.round(stackBB4c)+'BB帯では混合レンジで、相手の4BET頻度とカバー関係次第です。ライブ$2/$5ではフォールドも混ざります。'+live4bCallNote;
             ev.suggest='相手がタイトならフォールド寄り。ルースならコール/5BET jam';
-            ev.strategyMix='Fold 25-45% / Call 35-55% / 5bet jam 10-25%';
+            ev.strategyMix=vs4betChart.mix;
           }else if(isPair4c&&hRank>=13&&hRank<=35){
             ev.quality='bad';ev.deduction=18;score-=18;
             ev.comment='【大きなミス】'+hd+'（'+rankStr+'）で4BET'+(fourBetCallCtx.jamLike?' jam':'')+'にコール。ミドル/小ポケットはセットマインのインプライドが消え、QQ+/AK寄りレンジに対して実効EQが足りません。'+live4bCallNote;
             ev.suggest='推奨: フォールド';
-            ev.strategyMix='Fold 90-98% / Call 2-10% / 5bet 0%';
+            ev.strategyMix=vs4betChart.mix;
           }else{
             const ded=hcat4c==='premium_offsuit'||hcat4c==='premium_suited'?12:20;
             ev.quality='bad';ev.deduction=ded;score-=ded;
             ev.comment='【ミス】'+hd+'（'+rankStr+'）で4BET'+(fourBetCallCtx.jamLike?' jam':'')+'にコール。3BET前のハンド価値と、4BETを受けた後の継続価値は別物です。'+live4bCallNote;
             ev.suggest='推奨: フォールド。続けるなら一部5BET jam候補だけに絞る';
-            ev.strategyMix='Fold 80-95% / Call 0-10% / 5bet jam 0-10%';
+            ev.strategyMix=vs4betChart.mix;
           }
         }else if(pos==='BB'){
           // COオープン+BTNフラット等、既にコーラーが入っているか確認

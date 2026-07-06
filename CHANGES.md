@@ -230,3 +230,9 @@ SKIP_REGRESSION=1 node ...         # 理論検証のみ
 - `preflopChartLookup()` から `vs3bet` / `vs4bet` を参照できるようにし、混合頻度表示も `Call/4bet`、`Call/5bet` として返すようにした。
 - 代表ハンドとして、100BB vs3bet の QQ/AJo/TT、100BB vs4bet の AA/QQ/JJ、20BB vs4bet の QQ をテストに追加した。
 - これにより、3BET後・4BET後の判断を「最初のハンド順位」ではなく、現在のアクション文脈とスタック帯で評価する土台を作った。
+
+## 2026-07-06 Phase 5: vs4BET表をレビュー評価へ接続
+
+- 4BETコール評価で `preflopChartLookup('vs4bet', ...)` を参照し、スタック帯別の継続レンジと混合頻度をコメント・`strategyMix` に反映するようにした。
+- 5BET/オールイン評価でも同じ `vs4bet` 表を参照し、100BB級のJJなどを「強いから押し返す」ではなくレンジ外寄りとして扱うようにした。
+- 回帰テストに、QQの4BETコール文言が参照レンジを出すこと、100BB相当のJJ 5BETがレンジ外寄りになることを追加した。

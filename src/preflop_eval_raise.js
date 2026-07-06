@@ -73,22 +73,25 @@
         const isLowSuitedStealOpen=!is3bet&&!isISO&&d.action==='raise'&&suited&&Math.max(RANK_VAL[c1.rank],RANK_VAL[c2.rank])<=7&&Math.abs(RANK_VAL[c1.rank]-RANK_VAL[c2.rank])<=3&&['CO','BTN','SB'].includes(pos);
         if(is5bet){
           // [Codex fix 2026-05-28] After hero 3bets and faces a 4bet, another raise is a 5bet, not a fresh 3bet.
-          if(hRank<=2){
+          const stackBB5b=Math.max(1,Math.round((d.playerChipsBefore||human.chips||((hr.bigBlind||5)*100))/(hr.bigBlind||5)));
+          const vs4betRaiseChart=preflopChartLookup('vs4bet',ht,pos,hr.players.length||6,{stackBB:stackBB5b,openerPos});
+          const vs4betNote=' '+Math.round(stackBB5b)+'BB帯のvs4BET参照レンジでは '+vs4betRaiseChart.mix+'。';
+          if(vs4betRaiseChart.status==='pure'){
             ev.quality='good';ev.deduction=0;
-            ev.comment='正解。'+hd+'（'+rankStr+'）の5BET/オールイン。自分の3BET後に4BETを受けた局面で、AA/KKは基本的にスタックオフ候補です。';
+            ev.comment='正解。'+hd+'（'+rankStr+'）の5BET/オールイン。自分の3BET後に4BETを受けた局面で、継続レンジ内の強いハンドです。'+vs4betNote;
             ev.suggest='推奨: 5BET jam / コール';
-            ev.strategyMix='Fold 0% / Call 35% / 5bet jam 65%';
-          }else if(hRank<=6){
+            ev.strategyMix=vs4betRaiseChart.mix;
+          }else if(vs4betRaiseChart.status==='mix'){
             const ded=hRank<=3?4:10;
             ev.quality=ded>=10?'bad':'ok';ev.deduction=ded;score-=ded;
-            ev.comment='境界。'+hd+'（'+rankStr+'）の5BET。4BETレンジがQQ+/AK寄りの相手には慎重に。QQ/AK級は相手の4BET頻度が高い時だけ強く継続します。';
+            ev.comment='境界。'+hd+'（'+rankStr+'）の5BET。4BETレンジがQQ+/AK寄りの相手には慎重に。相手の4BET頻度が高い時だけ強く継続します。'+vs4betNote;
             ev.suggest='相手がタイトならコール/フォールド寄り。5BET jamは相手依存';
-            ev.strategyMix='Fold 20-45% / Call 35-55% / 5bet jam 10-25%';
+            ev.strategyMix=vs4betRaiseChart.mix;
           }else{
             ev.quality='bad';ev.deduction=18;score-=18;
-            ev.comment='【ミス】'+hd+'（'+rankStr+'）の5BET。3BETへの4BETはライブ$2/$5ではかなり強く、広い3BETレンジの感覚で押し返すと大きなEV損失になりやすいです。';
+            ev.comment='【ミス】'+hd+'（'+rankStr+'）の5BET。3BETへの4BETはライブ$2/$5ではかなり強く、広い3BETレンジの感覚で押し返すと大きなEV損失になりやすいです。'+vs4betNote;
             ev.suggest='推奨: フォールド';
-            ev.strategyMix='Fold 85-98% / Call 0-10% / 5bet jam 0-5%';
+            ev.strategyMix=vs4betRaiseChart.mix;
           }
         }else if(isBtnLatePair3bet){
           ev.quality='good';

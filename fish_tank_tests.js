@@ -216,6 +216,17 @@ function runModeChecks(s) {
   ok('GTO river: 実効EQ > Live(割引が弱い)', R.effectiveEqPct > liveRiverEff, 'gto=' + R.effectiveEqPct + ' live=' + liveRiverEff);
   // 整合性: GTOで実効EQが必要勝率を上回る強ワンペアコールは quality を bad にしない(本文「コール寄り」と一致)
   ok('GTO river: quality≠bad(本文コール寄りと整合)', R.quality !== 'bad', 'quality=' + R.quality + ' effEQ=' + R.effectiveEqPct);
+  // [回帰ガード] 4BET/5BET後は手札順位だけでなく、vs4bet表のスタック帯別継続レンジを本文・mixに反映する。
+  const fourBetHand = (heroHole, finalAction) => regressionHand({ heroHole, villainHole: ['Ah', 'Kh'], board: [], pot: 400, decisions: [
+    D({ street: 'preflop', action: 'raise', amount: 15, pot: 7, toCall: 0, facingRaise: false, position: 'CO', playerName: 'v', isHuman: false, playerIdx: 1, playerChipsBefore: 500 }),
+    D({ street: 'preflop', action: 'raise', amount: 45, pot: 22, toCall: 15, facingRaise: true, position: 'BTN', playerName: 'あなた', isHuman: true, playerIdx: 0, playerChipsBefore: 500 }),
+    D({ street: 'preflop', action: 'raise', amount: 150, pot: 67, toCall: 105, facingRaise: true, position: 'CO', playerName: 'v', isHuman: false, playerIdx: 1, playerChipsBefore: 485 }),
+    D({ street: 'preflop', action: finalAction, amount: finalAction === 'call' ? 105 : 500, pot: 217, toCall: 105, potOdds: 105 / 322, facingRaise: true, position: 'BTN', playerName: 'あなた', isHuman: true, playerIdx: 0, playerChipsBefore: 455, pfRaiseCountBefore: 3 })
+  ] });
+  const QQ4c = he(analyzeHand(fourBetHand(['Qh', 'Qs'], 'call')), e => e.street === 'preflop' && e.action === 'call');
+  const JJ5b = he(analyzeHand(fourBetHand(['Jh', 'Js'], 'raise')), e => e.street === 'preflop' && e.action === 'raise' && e.amount === 500);
+  ok('4BETコール本文にvs4bet参照レンジを出す', /参照レンジでは/.test(QQ4c.comment || '') && /Call\/5bet/.test(QQ4c.strategyMix || ''), (QQ4c.comment || '').slice(0, 80));
+  ok('100BB相当のJJ 5BETはvs4bet表でレンジ外寄り', JJ5b.quality === 'bad' && /参照レンジでは/.test(JJ5b.comment || ''), 'q=' + JJ5b.quality + ' c=' + (JJ5b.comment || '').slice(0, 80));
   // [回帰ガード] アンダーペア(自分のポケットペア)を「ボードのペアにキッカー」と誤説明しない
   if (typeof s.coachReviewText === 'function') {
     const D2 = regressionDecision;
