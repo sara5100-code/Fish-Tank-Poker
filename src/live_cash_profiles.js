@@ -534,6 +534,24 @@ function liveCashReraisedPotProfile(hr,d,holeCards,role,tex,nOpponents,lineConte
     risk='ライブ$2/$5ではコールされやすいので、弱いオフスーツやドミネートされる手で3BETしすぎると、ポストフロップで難しいSPRを作ります。';
     suggest='推奨: バリュー寄りを中心に、Axsや一部ポケットを相手位置に応じて混ぜる。4BETにはレンジを一段締める';
     mix='Value 60-75% / Bluff 25-40% / 4BET facingは別判定';
+  }else if(isPreflop&&facingLevel<4&&raiseCount<3&&actionLevel<5&&(facingLevel>=3||raiseCount>=2)&&(action==='call'||action==='fold'||betLike)){
+    lane='threeBetResponse';label='3BET対応';
+    if(action==='fold'){
+      verdict=premiumContinue?'強い手の3BETフォールドは相手依存':'自然な3BETフォールド';
+      severity=premiumContinue?'border':'good';
+      suggest=premiumContinue?'推奨: QQ+/AK級は相手の3BET頻度とサイズ次第でコール/4BETも検討':'推奨: ドミネートされやすいオフスートや小さめのペアはフォールド寄り';
+    }else if(action==='call'){
+      verdict=premiumContinue?'3BETコール許容':'3BETコールしすぎ注意';
+      severity=premiumContinue?'good':(midPair?'border':'bad');
+      suggest=premiumContinue?'推奨: コール/4BETを相手傾向で分ける':'推奨: OOPやドミネートされる手はフォールド寄り。コールはポジションと実現率がある時に限定';
+    }else{
+      verdict=premiumContinue?'4BET候補':'4BET押し返しすぎ注意';
+      severity=premiumContinue?'good':'bad';
+      suggest=premiumContinue?'推奨: バリュー中心に4BET。AK/QQは相手次第でコールも残す':'推奨: 3BETに対して広く押し返さず、フォールドとコールに整理';
+    }
+    policy='自分のオープン後に3BETを受けたら、最初のオープンレンジではなくvs3BETの継続レンジで見ます。コールできる手、4BETする手、降りる手を分けます。';
+    risk='3BETポットはSPRが下がるため、ドミネートされる手やOOPのコールは見た目より実現率が落ちます。';
+    mix=premiumContinue?'Fold 0-20% / Call 40-70% / 4BET 20-50%':midPair?'Fold 45-75% / Call 20-45% / 4BET 0-10%':'Fold 70-95% / Call 0-25% / 4BET 0-5%';
   }else if(isPreflop&&facingLevel>=4&&(action==='call'||action==='fold'||betLike)){
     lane='fourBetResponse';label='4BET対応';
     if(action==='fold'){

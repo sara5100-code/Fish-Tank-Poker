@@ -227,6 +227,17 @@ function runModeChecks(s) {
   const JJ5b = he(analyzeHand(fourBetHand(['Jh', 'Js'], 'raise')), e => e.street === 'preflop' && e.action === 'raise' && e.amount === 500);
   ok('4BETコール本文にvs4bet参照レンジを出す', /参照レンジでは/.test(QQ4c.comment || '') && /Call\/5bet/.test(QQ4c.strategyMix || ''), (QQ4c.comment || '').slice(0, 80));
   ok('100BB相当のJJ 5BETはvs4bet表でレンジ外寄り', JJ5b.quality === 'bad' && /参照レンジでは/.test(JJ5b.comment || ''), 'q=' + JJ5b.quality + ' c=' + (JJ5b.comment || '').slice(0, 80));
+  const threeBetHand = (heroHole, finalAction) => regressionHand({ heroHole, villainHole: ['Ah', '5h'], board: [], pot: 160, decisions: [
+    D({ street: 'preflop', action: 'raise', amount: 15, pot: 7, toCall: 0, facingRaise: false, position: 'BTN', playerName: 'あなた', isHuman: true, playerIdx: 0, playerChipsBefore: 500 }),
+    D({ street: 'preflop', action: 'raise', amount: 55, pot: 22, toCall: 15, facingRaise: true, position: 'BB', playerName: 'v', isHuman: false, playerIdx: 1, playerChipsBefore: 500 }),
+    D({ street: 'preflop', action: finalAction, amount: finalAction === 'fold' ? 0 : (finalAction === 'call' ? 40 : 145), pot: 77, toCall: 40, potOdds: 40 / 117, facingRaise: true, position: 'BTN', playerName: 'あなた', isHuman: true, playerIdx: 0, playerChipsBefore: 485, pfRaiseCountBefore: 2 })
+  ] });
+  const QQ3c = he(analyzeHand(threeBetHand(['Qh', 'Qs'], 'call')), e => e.street === 'preflop' && e.action === 'call');
+  const AJo3f = he(analyzeHand(threeBetHand(['Ah', 'Jd'], 'fold')), e => e.street === 'preflop' && e.action === 'fold');
+  const AJo4b = he(analyzeHand(threeBetHand(['Ah', 'Jd'], 'raise')), e => e.street === 'preflop' && e.action === 'raise' && e.amount === 145);
+  ok('3BETコール本文にvs3bet参照レンジを出す', /vs3BET参照レンジ/.test(QQ3c.comment || '') && /Call\/4BET/i.test(QQ3c.strategyMix || ''), (QQ3c.comment || '').slice(0, 80));
+  ok('AJoの3BETフォールドはvs3bet表で自然', AJo3f.quality === 'good' && /vs3BET参照レンジ/.test(AJo3f.comment || ''), 'q=' + AJo3f.quality + ' c=' + (AJo3f.comment || '').slice(0, 80));
+  ok('AJoの4BETはvs3bet表でレンジ外寄り', AJo4b.quality === 'bad' && /vs3BET参照レンジ/.test(AJo4b.comment || ''), 'q=' + AJo4b.quality + ' c=' + (AJo4b.comment || '').slice(0, 80));
   // [回帰ガード] アンダーペア(自分のポケットペア)を「ボードのペアにキッカー」と誤説明しない
   if (typeof s.coachReviewText === 'function') {
     const D2 = regressionDecision;

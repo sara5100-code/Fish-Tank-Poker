@@ -236,3 +236,9 @@ SKIP_REGRESSION=1 node ...         # 理論検証のみ
 - 4BETコール評価で `preflopChartLookup('vs4bet', ...)` を参照し、スタック帯別の継続レンジと混合頻度をコメント・`strategyMix` に反映するようにした。
 - 5BET/オールイン評価でも同じ `vs4bet` 表を参照し、100BB級のJJなどを「強いから押し返す」ではなくレンジ外寄りとして扱うようにした。
 - 回帰テストに、QQの4BETコール文言が参照レンジを出すこと、100BB相当のJJ 5BETがレンジ外寄りになることを追加した。
+
+## 2026-07-12 Phase 5: vs3BET表をレビュー評価へ接続
+
+- 3BETを受けた後のコール/フォールド/4BET評価で `preflopChartLookup('vs3bet', ...)` を参照し、スタック帯別の継続レンジと混合頻度をコメント・`strategyMix` に反映するようにした。
+- `liveCashReraisedPotProfile` にプリフロップの `threeBetResponse` レーンを追加し、3BET対応を通常の参加レンジではなく3BET/4BETポットの学習主題として扱えるようにした。
+- 回帰テストに、QQの3BETコール、AJoの3BETフォールド、AJoの4BETが `vs3bet` 表に基づいて評価されることを追加した。

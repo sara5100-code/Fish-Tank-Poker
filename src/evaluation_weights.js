@@ -377,7 +377,20 @@
     const before=ev.deduction||0;
     let next=before;
     const notes=[];
-    if(p.lane==='fourBetResponse'){
+    if(p.lane==='threeBetResponse'){
+      if(p.severity==='bad'){
+        next=Math.max(next,12);
+        ev.quality='bad';
+      }else if(p.severity==='good'){
+        if(before>0)next=Math.min(next,5);
+        if(ev.quality==='bad')ev.quality='ok';
+      }else{
+        next=Math.max(next,5);
+        if(ev.quality==='good')ev.quality='ok';
+      }
+      notes.push(liveCashReraisedPotProfileText(p));
+      if(p.mix&&!ev.strategyMix)ev.strategyMix=p.mix;
+    }else if(p.lane==='fourBetResponse'){
       if(p.severity==='bad'){
         next=Math.max(next,18);
         ev.quality='bad';

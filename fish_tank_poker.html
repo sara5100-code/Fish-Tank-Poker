@@ -2608,6 +2608,24 @@ function liveCashReraisedPotProfile(hr,d,holeCards,role,tex,nOpponents,lineConte
     risk='ライブ$2/$5ではコールされやすいので、弱いオフスーツやドミネートされる手で3BETしすぎると、ポストフロップで難しいSPRを作ります。';
     suggest='推奨: バリュー寄りを中心に、Axsや一部ポケットを相手位置に応じて混ぜる。4BETにはレンジを一段締める';
     mix='Value 60-75% / Bluff 25-40% / 4BET facingは別判定';
+  }else if(isPreflop&&facingLevel<4&&raiseCount<3&&actionLevel<5&&(facingLevel>=3||raiseCount>=2)&&(action==='call'||action==='fold'||betLike)){
+    lane='threeBetResponse';label='3BET対応';
+    if(action==='fold'){
+      verdict=premiumContinue?'強い手の3BETフォールドは相手依存':'自然な3BETフォールド';
+      severity=premiumContinue?'border':'good';
+      suggest=premiumContinue?'推奨: QQ+/AK級は相手の3BET頻度とサイズ次第でコール/4BETも検討':'推奨: ドミネートされやすいオフスートや小さめのペアはフォールド寄り';
+    }else if(action==='call'){
+      verdict=premiumContinue?'3BETコール許容':'3BETコールしすぎ注意';
+      severity=premiumContinue?'good':(midPair?'border':'bad');
+      suggest=premiumContinue?'推奨: コール/4BETを相手傾向で分ける':'推奨: OOPやドミネートされる手はフォールド寄り。コールはポジションと実現率がある時に限定';
+    }else{
+      verdict=premiumContinue?'4BET候補':'4BET押し返しすぎ注意';
+      severity=premiumContinue?'good':'bad';
+      suggest=premiumContinue?'推奨: バリュー中心に4BET。AK/QQは相手次第でコールも残す':'推奨: 3BETに対して広く押し返さず、フォールドとコールに整理';
+    }
+    policy='自分のオープン後に3BETを受けたら、最初のオープンレンジではなくvs3BETの継続レンジで見ます。コールできる手、4BETする手、降りる手を分けます。';
+    risk='3BETポットはSPRが下がるため、ドミネートされる手やOOPのコールは見た目より実現率が落ちます。';
+    mix=premiumContinue?'Fold 0-20% / Call 40-70% / 4BET 20-50%':midPair?'Fold 45-75% / Call 20-45% / 4BET 0-10%':'Fold 70-95% / Call 0-25% / 4BET 0-5%';
   }else if(isPreflop&&facingLevel>=4&&(action==='call'||action==='fold'||betLike)){
     lane='fourBetResponse';label='4BET対応';
     if(action==='fold'){
@@ -8668,7 +8686,20 @@ function analyzeHand(hr){
     const before=ev.deduction||0;
     let next=before;
     const notes=[];
-    if(p.lane==='fourBetResponse'){
+    if(p.lane==='threeBetResponse'){
+      if(p.severity==='bad'){
+        next=Math.max(next,12);
+        ev.quality='bad';
+      }else if(p.severity==='good'){
+        if(before>0)next=Math.min(next,5);
+        if(ev.quality==='bad')ev.quality='ok';
+      }else{
+        next=Math.max(next,5);
+        if(ev.quality==='good')ev.quality='ok';
+      }
+      notes.push(liveCashReraisedPotProfileText(p));
+      if(p.mix&&!ev.strategyMix)ev.strategyMix=p.mix;
+    }else if(p.lane==='fourBetResponse'){
       if(p.severity==='bad'){
         next=Math.max(next,18);
         ev.quality='bad';
@@ -9423,6 +9454,26 @@ function analyzeHand(hr){
               ev.suggest='推奨: フォールド';
               ev.strategyMix='Fold 90% / Call 10% / 5bet 0%';
             }
+          }else if(prefBefore(d).some(function(x){return x.isHuman&&(x.action==='raise'||x.action==='allin');})&&prefBefore(d).filter(function(x){return x.action==='raise'||x.action==='allin';}).length>=2){
+            const stackBB3f=Math.max(1,Math.round((d.playerChipsBefore||human.chips||((hr.bigBlind||5)*100))/(hr.bigBlind||5)));
+            const vs3betFoldChart=preflopChartLookup('vs3bet',ht,pos,hr.players.length||6,{stackBB:stackBB3f,openerPos:openerPosForChart});
+            const vs3betFoldNote='自分のオープン後に3BETを受けた局面です。'+Math.round(stackBB3f)+'BB帯のvs3BET参照レンジでは '+vs3betFoldChart.mix+'。';
+            if(vs3betFoldChart.status==='pure'){
+              ev.quality='bad';ev.deduction=14;score-=14;
+              ev.comment='【消極的】'+hd+'（'+rankStr+'）を3BETにフォールド。'+vs3betFoldNote+' 継続レンジ内なので、コールか一部4BETを検討したいハンドです。';
+              ev.suggest='推奨: コール/4BETを検討';
+              ev.strategyMix=vs3betFoldChart.mix;
+            }else if(vs3betFoldChart.status==='mix'){
+              ev.quality='ok';ev.deduction=3;score-=3;
+              ev.comment='境界。'+hd+'（'+rankStr+'）の3BETへのフォールド。'+vs3betFoldNote+' フォールドは悪くありませんが、相手が広く3BETするなら一部継続します。';
+              ev.suggest='相手がタイトならフォールド、広いならコール/4BETを混ぜる';
+              ev.strategyMix=vs3betFoldChart.mix;
+            }else{
+              ev.quality='good';
+              ev.comment='正解。'+hd+'（'+rankStr+'）の3BETへのフォールド。'+vs3betFoldNote+' 参照レンジ外なので、無理にコールして難しいポストフロップへ行かない判断が良いです。';
+              ev.suggest='推奨: フォールド';
+              ev.strategyMix=vs3betFoldChart.mix;
+            }
           }else if(pos==='SB'){
             const hcatFoldSB=handCat(c1,c2);
             const suitedFoldSB=human.holeCards[0].suit===human.holeCards[1].suit;
@@ -9492,6 +9543,28 @@ function analyzeHand(hr){
             ev.comment='【ミス】'+hd+'（'+rankStr+'）で4BET'+(fourBetCallCtx.jamLike?' jam':'')+'にコール。3BET前のハンド価値と、4BETを受けた後の継続価値は別物です。'+live4bCallNote;
             ev.suggest='推奨: フォールド。続けるなら一部5BET jam候補だけに絞る';
             ev.strategyMix=vs4betChart.mix;
+          }
+        }else if(d.facingRaise&&prefBefore(d).some(function(x){return x.isHuman&&(x.action==='raise'||x.action==='allin');})&&prefBefore(d).filter(function(x){return x.action==='raise'||x.action==='allin';}).length>=2){
+          const suited3c=human.holeCards[0].suit===human.holeCards[1].suit;
+          const hcat3c=handCat(c1,c2);
+          const stackBB3c=Math.max(1,Math.round((d.playerChipsBefore||human.chips||((hr.bigBlind||5)*100))/(hr.bigBlind||5)));
+          const vs3betCallChart=preflopChartLookup('vs3bet',ht,pos,hr.players.length||6,{stackBB:stackBB3c,openerPos:openerPosForChart});
+          const vs3betCallNote='自分のオープン後に3BETを受けた局面です。'+Math.round(stackBB3c)+'BB帯のvs3BET参照レンジでは '+vs3betCallChart.mix+'。';
+          if(vs3betCallChart.status==='pure'){
+            ev.quality='good';
+            ev.comment='正解。'+hd+'（'+rankStr+'）の3BETコールは継続レンジ内です。'+vs3betCallNote+' ただしOOPならコール後の実現率とSPR管理に注意します。';
+            ev.strategyMix=vs3betCallChart.mix;
+          }else if(vs3betCallChart.status==='mix'){
+            ev.quality='ok';ev.deduction=4;score-=4;
+            ev.comment='境界。'+hd+'（'+rankStr+'）の3BETコールは混合レンジです。'+vs3betCallNote+' 相手がタイトならフォールド寄り、広く3BETする相手なら一部コール/4BETが残ります。';
+            ev.suggest='相手傾向次第。基本はレンジを絞って継続';
+            ev.strategyMix=vs3betCallChart.mix;
+          }else{
+            const ded=hcat3c==='dominated_broadway'||!suited3c?12:9;
+            ev.quality='bad';ev.deduction=ded;score-=ded;
+            ev.comment='【注意】'+hd+'（'+rankStr+'）の3BETコールは参照レンジ外です。'+vs3betCallNote+' 3BET後はポットが大きく、ドミネートされるハンドや実現率の低いハンドは長期的に苦しくなります。';
+            ev.suggest='推奨: フォールド。続けるなら4BET候補だけに絞る';
+            ev.strategyMix=vs3betCallChart.mix;
           }
         }else if(pos==='BB'){
           // COオープン+BTNフラット等、既にコーラーが入っているか確認
@@ -9668,6 +9741,7 @@ function analyzeHand(hr){
         const is3bet=d.facingRaise&&d.toCall>0;
         const pfRaiseCountBefore=(d.pfRaiseCountBefore!=null?d.pfRaiseCountBefore:prefBefore(d).filter(function(x){return x.action==='raise'||x.action==='allin';}).length);
         const is5bet=is3bet&&pfRaiseCountBefore>=3&&prefBefore(d).some(function(x){return x.isHuman&&(x.action==='raise'||x.action==='allin');});
+        const is4bet=is3bet&&!is5bet&&pfRaiseCountBefore>=2&&prefBefore(d).some(function(x){return x.isHuman&&(x.action==='raise'||x.action==='allin');});
         const isISO=!is3bet&&limpCount>=2;
         const isOOP_r=['SB','BB','UTG','UTG+1'].includes(pos);
         const hcat_r=handCat(c1,c2);
@@ -9757,6 +9831,26 @@ function analyzeHand(hr){
             ev.comment='【ミス】'+hd+'（'+rankStr+'）の5BET。3BETへの4BETはライブ$2/$5ではかなり強く、広い3BETレンジの感覚で押し返すと大きなEV損失になりやすいです。'+vs4betNote;
             ev.suggest='推奨: フォールド';
             ev.strategyMix=vs4betRaiseChart.mix;
+          }
+        }else if(is4bet){
+          const stackBB4b=Math.max(1,Math.round((d.playerChipsBefore||human.chips||((hr.bigBlind||5)*100))/(hr.bigBlind||5)));
+          const vs3betRaiseChart=preflopChartLookup('vs3bet',ht,pos,hr.players.length||6,{stackBB:stackBB4b,openerPos});
+          const vs3betRaiseNote=' '+Math.round(stackBB4b)+'BB帯のvs3BET参照レンジでは '+vs3betRaiseChart.mix+'。';
+          if(vs3betRaiseChart.status==='pure'){
+            ev.quality='good';
+            ev.comment='正解。'+hd+'（'+rankStr+'）の4BET/オールイン。自分のオープン後に3BETを受けた局面で、継続レンジ内の強いハンドです。'+vs3betRaiseNote+sizeNote;
+            ev.suggest='推奨: コール/4BETを相手傾向で選択';
+            ev.strategyMix=vs3betRaiseChart.mix;
+          }else if(vs3betRaiseChart.status==='mix'){
+            ev.quality='ok';ev.deduction=5;score-=5;
+            ev.comment='境界。'+hd+'（'+rankStr+'）の4BET。3BETに対して継続できる候補ですが、常に押し返す手ではありません。'+vs3betRaiseNote+sizeNote;
+            ev.suggest='相手が広く3BETするなら4BET、タイトならコール/フォールド寄り';
+            ev.strategyMix=vs3betRaiseChart.mix;
+          }else{
+            ev.quality='bad';ev.deduction=15;score-=15;
+            ev.comment='【ミス】'+hd+'（'+rankStr+'）の4BET。3BETに対する継続レンジ外で、広いオープンレンジの感覚のまま押し返すとEVを失いやすいです。'+vs3betRaiseNote+sizeNote;
+            ev.suggest='推奨: フォールド';
+            ev.strategyMix=vs3betRaiseChart.mix;
           }
         }else if(isBtnLatePair3bet){
           ev.quality='good';

@@ -209,6 +209,7 @@ GTO モードの AI にはテルを入れない（均衡挙動を守る）。
 受け入れ基準: 各チャートの代表ハンド判定テスト（境界ハンドを含む）を追加。
 追記 2026-07-06: `PREFLOP_RANGE_CHARTS` に `vs3bet` / `vs4bet` を追加し、100BB / 50BB / 20BB / 14BB のスタック帯別継続レンジを定義した。代表ハンド判定テストも追加済み。次は評価本文側でこの表を4BET/5BETコール判断へより強く接続する。
 追記 2026-07-06: 4BETコール評価と5BET評価を `vs4bet` 表へ接続した。コメントと `strategyMix` にスタック帯別の参照レンジを出し、100BB級のJJ 5BETをレンジ外寄りとして扱う回帰テストを追加した。
+追記 2026-07-12: 3BETを受けた後のコール/フォールド/4BET評価を `vs3bet` 表へ接続した。プリフロップの `threeBetResponse` レーンも追加し、3BET対応を単なる参加レンジではなく、3BET/4BETポット主題として扱えるようにした。
 
 ### 5-2. 代表ボード辞書（BLUEPRINT Phase 3）
 `boardTextureProfile`（分類器）の上に、9クラスの代表ボード辞書（A-high dry / K-high dry / paired / monotone / two-tone connected / low connected / broadway / 4-flush river / paired river）を定義する。

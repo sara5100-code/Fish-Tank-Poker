@@ -3,6 +3,7 @@
         const is3bet=d.facingRaise&&d.toCall>0;
         const pfRaiseCountBefore=(d.pfRaiseCountBefore!=null?d.pfRaiseCountBefore:prefBefore(d).filter(function(x){return x.action==='raise'||x.action==='allin';}).length);
         const is5bet=is3bet&&pfRaiseCountBefore>=3&&prefBefore(d).some(function(x){return x.isHuman&&(x.action==='raise'||x.action==='allin');});
+        const is4bet=is3bet&&!is5bet&&pfRaiseCountBefore>=2&&prefBefore(d).some(function(x){return x.isHuman&&(x.action==='raise'||x.action==='allin');});
         const isISO=!is3bet&&limpCount>=2;
         const isOOP_r=['SB','BB','UTG','UTG+1'].includes(pos);
         const hcat_r=handCat(c1,c2);
@@ -92,6 +93,26 @@
             ev.comment='【ミス】'+hd+'（'+rankStr+'）の5BET。3BETへの4BETはライブ$2/$5ではかなり強く、広い3BETレンジの感覚で押し返すと大きなEV損失になりやすいです。'+vs4betNote;
             ev.suggest='推奨: フォールド';
             ev.strategyMix=vs4betRaiseChart.mix;
+          }
+        }else if(is4bet){
+          const stackBB4b=Math.max(1,Math.round((d.playerChipsBefore||human.chips||((hr.bigBlind||5)*100))/(hr.bigBlind||5)));
+          const vs3betRaiseChart=preflopChartLookup('vs3bet',ht,pos,hr.players.length||6,{stackBB:stackBB4b,openerPos});
+          const vs3betRaiseNote=' '+Math.round(stackBB4b)+'BB帯のvs3BET参照レンジでは '+vs3betRaiseChart.mix+'。';
+          if(vs3betRaiseChart.status==='pure'){
+            ev.quality='good';
+            ev.comment='正解。'+hd+'（'+rankStr+'）の4BET/オールイン。自分のオープン後に3BETを受けた局面で、継続レンジ内の強いハンドです。'+vs3betRaiseNote+sizeNote;
+            ev.suggest='推奨: コール/4BETを相手傾向で選択';
+            ev.strategyMix=vs3betRaiseChart.mix;
+          }else if(vs3betRaiseChart.status==='mix'){
+            ev.quality='ok';ev.deduction=5;score-=5;
+            ev.comment='境界。'+hd+'（'+rankStr+'）の4BET。3BETに対して継続できる候補ですが、常に押し返す手ではありません。'+vs3betRaiseNote+sizeNote;
+            ev.suggest='相手が広く3BETするなら4BET、タイトならコール/フォールド寄り';
+            ev.strategyMix=vs3betRaiseChart.mix;
+          }else{
+            ev.quality='bad';ev.deduction=15;score-=15;
+            ev.comment='【ミス】'+hd+'（'+rankStr+'）の4BET。3BETに対する継続レンジ外で、広いオープンレンジの感覚のまま押し返すとEVを失いやすいです。'+vs3betRaiseNote+sizeNote;
+            ev.suggest='推奨: フォールド';
+            ev.strategyMix=vs3betRaiseChart.mix;
           }
         }else if(isBtnLatePair3bet){
           ev.quality='good';

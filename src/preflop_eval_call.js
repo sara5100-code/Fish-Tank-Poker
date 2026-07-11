@@ -30,6 +30,28 @@
             ev.suggest='推奨: フォールド。続けるなら一部5BET jam候補だけに絞る';
             ev.strategyMix=vs4betChart.mix;
           }
+        }else if(d.facingRaise&&prefBefore(d).some(function(x){return x.isHuman&&(x.action==='raise'||x.action==='allin');})&&prefBefore(d).filter(function(x){return x.action==='raise'||x.action==='allin';}).length>=2){
+          const suited3c=human.holeCards[0].suit===human.holeCards[1].suit;
+          const hcat3c=handCat(c1,c2);
+          const stackBB3c=Math.max(1,Math.round((d.playerChipsBefore||human.chips||((hr.bigBlind||5)*100))/(hr.bigBlind||5)));
+          const vs3betCallChart=preflopChartLookup('vs3bet',ht,pos,hr.players.length||6,{stackBB:stackBB3c,openerPos:openerPosForChart});
+          const vs3betCallNote='自分のオープン後に3BETを受けた局面です。'+Math.round(stackBB3c)+'BB帯のvs3BET参照レンジでは '+vs3betCallChart.mix+'。';
+          if(vs3betCallChart.status==='pure'){
+            ev.quality='good';
+            ev.comment='正解。'+hd+'（'+rankStr+'）の3BETコールは継続レンジ内です。'+vs3betCallNote+' ただしOOPならコール後の実現率とSPR管理に注意します。';
+            ev.strategyMix=vs3betCallChart.mix;
+          }else if(vs3betCallChart.status==='mix'){
+            ev.quality='ok';ev.deduction=4;score-=4;
+            ev.comment='境界。'+hd+'（'+rankStr+'）の3BETコールは混合レンジです。'+vs3betCallNote+' 相手がタイトならフォールド寄り、広く3BETする相手なら一部コール/4BETが残ります。';
+            ev.suggest='相手傾向次第。基本はレンジを絞って継続';
+            ev.strategyMix=vs3betCallChart.mix;
+          }else{
+            const ded=hcat3c==='dominated_broadway'||!suited3c?12:9;
+            ev.quality='bad';ev.deduction=ded;score-=ded;
+            ev.comment='【注意】'+hd+'（'+rankStr+'）の3BETコールは参照レンジ外です。'+vs3betCallNote+' 3BET後はポットが大きく、ドミネートされるハンドや実現率の低いハンドは長期的に苦しくなります。';
+            ev.suggest='推奨: フォールド。続けるなら4BET候補だけに絞る';
+            ev.strategyMix=vs3betCallChart.mix;
+          }
         }else if(pos==='BB'){
           // COオープン+BTNフラット等、既にコーラーが入っているか確認
           const callersBB=prefDecs.filter(function(pd){return !pd.isHuman&&pd.action==='call'&&pd.facingRaise;}).length;

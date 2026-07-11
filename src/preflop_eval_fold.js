@@ -31,6 +31,26 @@
               ev.suggest='推奨: フォールド';
               ev.strategyMix='Fold 90% / Call 10% / 5bet 0%';
             }
+          }else if(prefBefore(d).some(function(x){return x.isHuman&&(x.action==='raise'||x.action==='allin');})&&prefBefore(d).filter(function(x){return x.action==='raise'||x.action==='allin';}).length>=2){
+            const stackBB3f=Math.max(1,Math.round((d.playerChipsBefore||human.chips||((hr.bigBlind||5)*100))/(hr.bigBlind||5)));
+            const vs3betFoldChart=preflopChartLookup('vs3bet',ht,pos,hr.players.length||6,{stackBB:stackBB3f,openerPos:openerPosForChart});
+            const vs3betFoldNote='自分のオープン後に3BETを受けた局面です。'+Math.round(stackBB3f)+'BB帯のvs3BET参照レンジでは '+vs3betFoldChart.mix+'。';
+            if(vs3betFoldChart.status==='pure'){
+              ev.quality='bad';ev.deduction=14;score-=14;
+              ev.comment='【消極的】'+hd+'（'+rankStr+'）を3BETにフォールド。'+vs3betFoldNote+' 継続レンジ内なので、コールか一部4BETを検討したいハンドです。';
+              ev.suggest='推奨: コール/4BETを検討';
+              ev.strategyMix=vs3betFoldChart.mix;
+            }else if(vs3betFoldChart.status==='mix'){
+              ev.quality='ok';ev.deduction=3;score-=3;
+              ev.comment='境界。'+hd+'（'+rankStr+'）の3BETへのフォールド。'+vs3betFoldNote+' フォールドは悪くありませんが、相手が広く3BETするなら一部継続します。';
+              ev.suggest='相手がタイトならフォールド、広いならコール/4BETを混ぜる';
+              ev.strategyMix=vs3betFoldChart.mix;
+            }else{
+              ev.quality='good';
+              ev.comment='正解。'+hd+'（'+rankStr+'）の3BETへのフォールド。'+vs3betFoldNote+' 参照レンジ外なので、無理にコールして難しいポストフロップへ行かない判断が良いです。';
+              ev.suggest='推奨: フォールド';
+              ev.strategyMix=vs3betFoldChart.mix;
+            }
           }else if(pos==='SB'){
             const hcatFoldSB=handCat(c1,c2);
             const suitedFoldSB=human.holeCards[0].suit===human.holeCards[1].suit;
