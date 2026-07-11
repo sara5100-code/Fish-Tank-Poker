@@ -5304,6 +5304,45 @@ function boardTex(comm){
   return{paired,tripped,flushy:maxSuit,monotone:maxSuit>=comm.length&&comm.length>=3,twoTone,straightDraw,flushDraw,dynamic,highboard:avgRank>=10,lowboard:avgRank<=6,highConnect};
 }
 
+// [Codex fix 2026-07-12] BLUEPRINT Phase 3: 代表ボード辞書。分類器の上に、役割別の基準頻度とサイズを持たせる。
+const REPRESENTATIVE_BOARD_DICTIONARY={
+  a_high_dry:{label:'A-high dry',baseline:{pfr_ip:{betPct:72,sizePct:33},pfr_oop:{betPct:62,sizePct:33},caller:{betPct:28,sizePct:33}},reason:'A高ドライはPFR側のレンジ優位が出やすく、小さく広く打つ基準ボードです。'},
+  k_high_dry:{label:'K-high dry',baseline:{pfr_ip:{betPct:68,sizePct:33},pfr_oop:{betPct:58,sizePct:33},caller:{betPct:30,sizePct:33}},reason:'K高ドライもPFR側が小さめCBを作りやすいですが、A高より少しだけ受け側の抵抗が残ります。'},
+  paired_board:{label:'paired board',baseline:{pfr_ip:{betPct:58,sizePct:33},pfr_oop:{betPct:50,sizePct:33},caller:{betPct:34,sizePct:33}},reason:'ペアボードはナッツ構造が偏りやすく、小さめサイズでレンジを保つ基準です。'},
+  monotone:{label:'monotone',baseline:{pfr_ip:{betPct:42,sizePct:33},pfr_oop:{betPct:36,sizePct:33},caller:{betPct:30,sizePct:33}},reason:'モノトーンはフラッシュ保有とブロッカーが重要で、全体のベット頻度を落とします。'},
+  two_tone_connected:{label:'two-tone connected',baseline:{pfr_ip:{betPct:48,sizePct:50},pfr_oop:{betPct:40,sizePct:50},caller:{betPct:36,sizePct:50}},reason:'2トーン連結はドローと完成候補が多く、頻度を絞りつつ中サイズを使います。'},
+  low_connected:{label:'low connected',baseline:{pfr_ip:{betPct:38,sizePct:50},pfr_oop:{betPct:32,sizePct:50},caller:{betPct:42,sizePct:50}},reason:'低連結は受け側のセット・2ペア・ストレート絡みが増え、PFRの自動CBを抑える基準です。'},
+  broadway_connected:{label:'broadway connected',baseline:{pfr_ip:{betPct:52,sizePct:50},pfr_oop:{betPct:44,sizePct:50},caller:{betPct:36,sizePct:50}},reason:'ブロードウェイ連結は双方の強い継続レンジが残り、中頻度・中サイズが基準です。'},
+  four_flush_river:{label:'4-flush river',baseline:{pfr_ip:{betPct:34,sizePct:33},pfr_oop:{betPct:28,sizePct:33},caller:{betPct:30,sizePct:33}},reason:'4枚同色リバーはナッツ/強ブロッカー以外の大きな圧力を抑える基準です。'},
+  paired_river:{label:'paired river',baseline:{pfr_ip:{betPct:42,sizePct:33},pfr_oop:{betPct:34,sizePct:33},caller:{betPct:36,sizePct:33}},reason:'ペア化リバーはフルハウスが絡むため、非ナッツの薄いバリューやブラフを小さめに扱います。'}
+};
+function representativeBoardClass(profile){
+  if(!profile)return null;
+  if(profile.street==='river'&&profile.fourFlush)return'four_flush_river';
+  if(profile.street==='river'&&profile.paired)return'paired_river';
+  if(profile.primary==='a_high_dry')return'a_high_dry';
+  if(profile.primary==='k_high_dry'||profile.primary==='q_high_dry')return'k_high_dry';
+  if(profile.primary==='paired'||profile.primary==='trips_board')return'paired_board';
+  if(profile.primary==='monotone'||profile.primary==='four_flush')return profile.street==='river'&&profile.fourFlush?'four_flush_river':'monotone';
+  if(profile.twoTone&&profile.connectedness>=2)return'two_tone_connected';
+  if(profile.primary==='low_connected'||profile.primary==='wet_connected')return'low_connected';
+  if(profile.primary==='broadway_connected'||profile.primary==='straight_complete')return'broadway_connected';
+  return null;
+}
+function representativeBoardRoleKey(opts){
+  opts=opts||{};
+  if(opts.isPfr)return opts.isIP?'pfr_ip':'pfr_oop';
+  return'caller';
+}
+function representativeBoardProfile(profile,opts){
+  const key=representativeBoardClass(profile);
+  if(!key)return null;
+  const entry=REPRESENTATIVE_BOARD_DICTIONARY[key];
+  const roleKey=representativeBoardRoleKey(opts);
+  const base=(entry.baseline&&entry.baseline[roleKey])||entry.baseline.caller;
+  return{key,label:entry.label,roleKey,betPct:base.betPct,sizePct:base.sizePct,reason:entry.reason};
+}
+
 // プレイヤー固有のドロー検出
 // [Codex fix 2026-06-16] GTO理論設計 Phase 3: 公開ボードを独立分類し、後続の頻度/レンジ更新の土台にする。
 function boardTextureProfile(comm,street,prevComm){
@@ -5380,7 +5419,10 @@ function boardTextureProfile(comm,street,prevComm){
   if(staticBoard)reasons.push('高いカード中心でPFR側が小さく高頻度に打ちやすい');
   if(low&&!straightThreat)reasons.push('低いカード中心で受け側のペア/セットも残りやすい');
   if(transition!=='none')reasons.push('前ストリートからの変化: '+transitionLabels[transition]);
-  return{street,primary,label:labels[primary]||primary,transition,transitionLabel:transitionLabels[transition]||transition,paired,trips,pairRank,pairClass,topRank,monotone,twoTone,fourFlush,flushThreat,straightThreat,straightComplete,connectedness,broadway,low,dynamic,staticBoard,rangeTilt,nutVolatility,reasons,raw:tex};
+  const baseProfile={street,primary,label:labels[primary]||primary,transition,transitionLabel:transitionLabels[transition]||transition,paired,trips,pairRank,pairClass,topRank,monotone,twoTone,fourFlush,flushThreat,straightThreat,straightComplete,connectedness,broadway,low,dynamic,staticBoard,rangeTilt,nutVolatility,reasons,raw:tex};
+  baseProfile.representativeClass=representativeBoardClass(baseProfile);
+  baseProfile.representative=baseProfile.representativeClass?REPRESENTATIVE_BOARD_DICTIONARY[baseProfile.representativeClass]:null;
+  return baseProfile;
 }
 function boardTextureProfileText(p){
   if(!p)return'';
@@ -5405,6 +5447,12 @@ function boardTextureFrequencyAdjustment(baseBetProb,profile,opts){
   let mult=1.0,cap=0.88,floor=0.03,preferredSizePct=null;
   const notes=[];
   function note(t){if(t)notes.push(t);}
+  const rep=representativeBoardProfile(profile,{isPfr,isIP:!!opts.isIP});
+  if(rep){
+    baseBetProb=Math.max(0,Math.min(1,baseBetProb*0.65+(rep.betPct/100)*0.35));
+    preferredSizePct=rep.sizePct;
+    note(rep.label+'基準: '+rep.reason);
+  }
   if(profile.rangeTilt==='pfr_range_advantage'){
     if(isPfr){mult*=street==='flop'?1.22:1.08;cap=Math.min(cap,street==='flop'?0.82:0.74);preferredSizePct=33;note('PFR側のレンジ優位が出やすく、小さめ高頻度のCBを作りやすい');}
     else{mult*=0.88;cap=Math.min(cap,0.62);note('受け側はレンジ優位が薄く、無理なリード頻度を落とす');}
@@ -5432,7 +5480,7 @@ function boardTextureFrequencyAdjustment(baseBetProb,profile,opts){
   if(role.isNut||role.role==='nutted'){floor=Math.max(floor,0.40);cap=Math.max(cap,0.70);note('ナッツ級はボードが重くてもバリュー頻度を残す');}
   else if(role.role==='air'&&(profile.flushThreat||profile.straightThreat||profile.paired)){mult*=0.82;cap=Math.min(cap,0.44);note('エアは重いボードでフォールドエクイティが落ちる');}
   const adjusted=Math.max(floor,Math.min(cap,baseBetProb*mult));
-  return{label:profile.label,primary:profile.primary,transition:profile.transition,baseBetPct:Math.round(baseBetProb*100),betPct:Math.round(adjusted*100),checkPct:Math.round((1-adjusted)*100),betProb:adjusted,checkProb:1-adjusted,multiplier:Math.round(mult*100)/100,capPct:Math.round(cap*100),preferredSizePct:preferredSizePct?standardBetSizePct(preferredSizePct):preferredSizePct,reason:notes.slice(0,3).join('。')};
+  return{label:profile.label,primary:profile.primary,representativeClass:rep&&rep.key,representativeLabel:rep&&rep.label,representativeRole:rep&&rep.roleKey,transition:profile.transition,baseBetPct:Math.round(baseBetProb*100),betPct:Math.round(adjusted*100),checkPct:Math.round((1-adjusted)*100),betProb:adjusted,checkProb:1-adjusted,multiplier:Math.round(mult*100)/100,capPct:Math.round(cap*100),preferredSizePct:preferredSizePct?standardBetSizePct(preferredSizePct):preferredSizePct,reason:notes.slice(0,3).join('。')};
 }
 
 // [Codex fix 2026-06-16] ボード分類から、初心者が選ぶべき標準ベットサイズを決める。
@@ -5445,6 +5493,11 @@ function boardTextureSizePlan(pot,profile,role,opts){
   const isOnePair=!!((role.pairTier==='top_pair'||role.pairTier==='overpair'||role.pairTier==='second_pair')&&!isNut);
   let pct=opts.preferredSizePct||null;
   let reason='';
+  const rep=representativeBoardProfile(profile,{isPfr:!!opts.isPfr,isIP:!!opts.isIP});
+  if(rep){
+    pct=pct||rep.sizePct;
+    reason=rep.reason;
+  }
   if(profile.primary==='a_high_dry'||profile.primary==='k_high_dry'||profile.primary==='q_high_dry'){
     pct=33;reason='高いカードのドライボードは、PFR側が小さく広く打つサイズが基本です。';
   }else if(profile.primary==='low_dry'){
@@ -5479,7 +5532,7 @@ function boardTextureSizePlan(pot,profile,role,opts){
   }
   if(!pct)return null;
   pct=standardBetSizePct(Math.max(25,Math.min(125,Math.round(pct))));
-  return{pct,amt:Math.round(pot*pct/100),reason,source:'board_texture'};
+  return{pct,amt:Math.round(pot*pct/100),reason,source:rep?'representative_board':'board_texture',representativeClass:rep&&rep.key,representativeLabel:rep&&rep.label,representativeRole:rep&&rep.roleKey};
 }
 
 // [Codex fix 2026-06-21] ターンカードを「誰に良いか」「続けるか止まるか」で読める判断軸にする。
@@ -16859,7 +16912,7 @@ document.addEventListener('click',function(e){
   }
 });
 
-window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,runFishTankAuditBatch,fishTankAuditBatchReportText,buildFishTankAuditRepairQueue,fishTankAuditRepairPlanText,auditIssuesForHand,playAuditGame,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,boardTextureProfile,boardTextureProfileText,boardTextureFrequencyAdjustment,boardTextureSizePlan,boardTextureTransitionProfile,boardTextureTransitionProfileText,rangeNutAdvantageProfile,rangeNutAdvantageProfileText,rangeActionUpdateProfile,rangeActionUpdateProfileText,postflopBetPurposeProfile,postflopBetPurposeProfileText,postflopRaisePlanProfile,postflopRaisePlanProfileText,postflopBarrelPlanProfile,postflopBarrelPlanProfileText,postflopDefensePlanProfile,postflopDefensePlanProfileText,postflopCallFuturePlanProfile,postflopCallFuturePlanProfileText,standardBetSizePct,preflopOpenQuickOptions,raiseOverBetQuickOptions,postflopQuickBetOptions,liveCashRangeProfile,liveCashSpotProfile,liveCashSpotProfileText,liveCashSprProfile,liveCashSprProfileText,liveCashInitiativeProfile,liveCashInitiativeProfileText,liveCashReraisedPotProfile,liveCashReraisedPotProfileText,liveCashMultiwayProfile,liveCashMultiwayProfileText,liveCashRiverDecisionProfile,liveCashRiverDecisionProfileText,tournamentRangeProfile,tournamentFinalTableProfile,tournamentFinalTableStackRole,tournamentFinalTableCollisionProfile,tournamentFinalTableRangeProfile,tournamentFinalTableRangeProfileText,tournamentFinalTablePostflopProfile,tournamentFinalTablePostflopProfileText,tournamentFinalTableLearningPoint,tournamentFinalTableLearningPointText,tournamentHeadsUpProfile};
+window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,runFishTankAuditBatch,fishTankAuditBatchReportText,buildFishTankAuditRepairQueue,fishTankAuditRepairPlanText,auditIssuesForHand,playAuditGame,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,boardTextureProfile,boardTextureProfileText,representativeBoardProfile,boardTextureFrequencyAdjustment,boardTextureSizePlan,boardTextureTransitionProfile,boardTextureTransitionProfileText,rangeNutAdvantageProfile,rangeNutAdvantageProfileText,rangeActionUpdateProfile,rangeActionUpdateProfileText,postflopBetPurposeProfile,postflopBetPurposeProfileText,postflopRaisePlanProfile,postflopRaisePlanProfileText,postflopBarrelPlanProfile,postflopBarrelPlanProfileText,postflopDefensePlanProfile,postflopDefensePlanProfileText,postflopCallFuturePlanProfile,postflopCallFuturePlanProfileText,standardBetSizePct,preflopOpenQuickOptions,raiseOverBetQuickOptions,postflopQuickBetOptions,liveCashRangeProfile,liveCashSpotProfile,liveCashSpotProfileText,liveCashSprProfile,liveCashSprProfileText,liveCashInitiativeProfile,liveCashInitiativeProfileText,liveCashReraisedPotProfile,liveCashReraisedPotProfileText,liveCashMultiwayProfile,liveCashMultiwayProfileText,liveCashRiverDecisionProfile,liveCashRiverDecisionProfileText,tournamentRangeProfile,tournamentFinalTableProfile,tournamentFinalTableStackRole,tournamentFinalTableCollisionProfile,tournamentFinalTableRangeProfile,tournamentFinalTableRangeProfileText,tournamentFinalTablePostflopProfile,tournamentFinalTablePostflopProfileText,tournamentFinalTableLearningPoint,tournamentFinalTableLearningPointText,tournamentHeadsUpProfile};
 // [Codex fix 2026-06-05] Query-gated regression output for browser verification without exposing debug UI during normal play.
 if(new URLSearchParams(location.search).has('codex_regression')){
   setTimeout(function(){

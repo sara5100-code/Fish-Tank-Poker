@@ -242,3 +242,9 @@ SKIP_REGRESSION=1 node ...         # 理論検証のみ
 - 3BETを受けた後のコール/フォールド/4BET評価で `preflopChartLookup('vs3bet', ...)` を参照し、スタック帯別の継続レンジと混合頻度をコメント・`strategyMix` に反映するようにした。
 - `liveCashReraisedPotProfile` にプリフロップの `threeBetResponse` レーンを追加し、3BET対応を通常の参加レンジではなく3BET/4BETポットの学習主題として扱えるようにした。
 - 回帰テストに、QQの3BETコール、AJoの3BETフォールド、AJoの4BETが `vs3bet` 表に基づいて評価されることを追加した。
+
+## 2026-07-12 Phase 5: 代表ボード辞書を頻度・サイズ評価へ接続
+
+- `REPRESENTATIVE_BOARD_DICTIONARY` を追加し、A-high dry / K-high dry / paired / monotone / two-tone connected / low connected / broadway connected / 4-flush river / paired river の代表クラスを定義した。
+- 代表ボードごとに PFR IP / PFR OOP / コーラーの基準ベット頻度とサイズを持たせ、`boardTextureFrequencyAdjustment` と `boardTextureSizePlan` の根拠として参照するようにした。
+- 理論検証に、代表ボード分類、A-high dry のPFR小CB、low connected の受け側絡み、辞書由来サイズの回帰テストを追加した。

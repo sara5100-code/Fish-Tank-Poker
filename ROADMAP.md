@@ -215,6 +215,7 @@ GTO モードの AI にはテルを入れない（均衡挙動を守る）。
 `boardTextureProfile`（分類器）の上に、9クラスの代表ボード辞書（A-high dry / K-high dry / paired / monotone / two-tone connected / low connected / broadway / 4-flush river / paired river）を定義する。
 各クラスに、役割別（PFR IP / PFR OOP / コーラー）の基準ベット頻度とサイズ候補を持たせ、`solverBetProb` と `boardTextureSizePlan` の根拠として参照する。
 受け入れ基準: 各クラス×役割の頻度出力テスト追加。
+追記 2026-07-12: `REPRESENTATIVE_BOARD_DICTIONARY` を追加し、代表ボードクラス・役割別の基準ベット頻度/サイズを `boardTextureFrequencyAdjustment` と `boardTextureSizePlan` に接続した。理論検証に代表ボード分類、頻度、サイズ参照のテストを追加した。
 
 ### 5-3. レンジ更新の完成（BLUEPRINT Phase 4）
 `rangeActionUpdateProfile` を拡張し、ストリートごとの check / bet / call / raise / fold で相手レンジの「バリュー密度・ブラフ候補数」を更新して保持する。

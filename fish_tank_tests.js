@@ -120,7 +120,7 @@ function patchFastEquity(s) {
 
 function runTheoryChecks(s) {
   const Cs = s.regressionCards;
-  const { estimateEquity, handRole, boardTex, HandEval, handType, HAND_RANK_169, HAND_COMBO_FRAC } = s;
+  const { estimateEquity, handRole, boardTex, boardTextureProfile, boardTextureFrequencyAdjustment, boardTextureSizePlan, representativeBoardProfile, HandEval, handType, HAND_RANK_169, HAND_COMBO_FRAC } = s;
   let pass = 0, fail = 0; const fails = [];
   const ok = (n, c, e) => { if (c) pass++; else { fail++; fails.push(n + (e ? '  [' + e + ']' : '')); } };
   const approx = (n, v, lo, hi) => ok(n, v >= lo && v <= hi, 'got ' + (typeof v === 'number' ? v.toFixed(3) : v) + ' want ' + lo + '..' + hi);
@@ -156,6 +156,24 @@ function runTheoryChecks(s) {
   R = role(['As', 'Qd'], ['Ks', '9c', '4d', '2h', '3s']); ok('river air', R.role === 'air', R.role);
   ok('boardTex monotone flushy>=3', boardTex(Cs(['As', 'Ks', '9s'])).flushy >= 3);
   ok('boardTex paired', boardTex(Cs(['Ks', 'Kd', '4c'])).paired === true);
+  if (typeof boardTextureProfile === 'function' && typeof representativeBoardProfile === 'function') {
+    const aDry = boardTextureProfile(Cs(['Ad', '9c', '3s']), 'flop', []);
+    const lowConn = boardTextureProfile(Cs(['9h', '8c', '7d']), 'flop', []);
+    const mono = boardTextureProfile(Cs(['Ah', 'Th', '4h']), 'flop', []);
+    const fourFlush = boardTextureProfile(Cs(['Ah', 'Th', '4h', '2c', '7h']), 'river', Cs(['Ah', 'Th', '4h', '2c']));
+    const pairRiver = boardTextureProfile(Cs(['Kh', '9c', '4d', '2s', '9h']), 'river', Cs(['Kh', '9c', '4d', '2s']));
+    ok('代表ボード: A-high dry分類', aDry.representativeClass === 'a_high_dry', aDry.representativeClass);
+    ok('代表ボード: low connected分類', lowConn.representativeClass === 'low_connected', lowConn.representativeClass);
+    ok('代表ボード: monotone分類', mono.representativeClass === 'monotone', mono.representativeClass);
+    ok('代表ボード: 4-flush river分類', fourFlush.representativeClass === 'four_flush_river', fourFlush.representativeClass);
+    ok('代表ボード: paired river分類', pairRiver.representativeClass === 'paired_river', pairRiver.representativeClass);
+    const pfrDry = boardTextureFrequencyAdjustment(0.50, aDry, { street: 'flop', isPfr: true, isIP: true, role: { role: 'air' }, nOpponents: 1 });
+    const callerLow = boardTextureFrequencyAdjustment(0.50, lowConn, { street: 'flop', isPfr: false, isIP: true, role: { role: 'air' }, nOpponents: 1 });
+    const drySize = boardTextureSizePlan(100, aDry, { role: 'air' }, { street: 'flop', isPfr: true, isIP: true, nOpponents: 1 });
+    ok('代表ボード頻度: A-high dryのPFR IPは小CB寄り', pfrDry.representativeClass === 'a_high_dry' && pfrDry.preferredSizePct === 33 && pfrDry.betPct >= 55, JSON.stringify(pfrDry));
+    ok('代表ボード頻度: low connected callerは受け側絡みを残す', callerLow.representativeClass === 'low_connected' && callerLow.betPct <= pfrDry.betPct, JSON.stringify(callerLow));
+    ok('代表ボードサイズ: 辞書由来サイズを返す', drySize && drySize.source === 'representative_board' && drySize.pct === 33, JSON.stringify(drySize));
+  }
   // --- クラッシュ回帰ガード: ポケットペア×ペアボード(handRoleのmadeDraw未定義バグ) ---
   for (const [h, b, lbl] of [[['As', 'Ah'], ['8s', '8c', '5d'], 'AA on 8-8-5'], [['5s', '5h'], ['8s', '8c', '3d'], '55 on 8-8-3']]) {
     let crashed = false; try { role(h, b); } catch (e) { crashed = true; }
