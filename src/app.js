@@ -1866,6 +1866,28 @@ function renderGlossary(){
   }).join('');
 }
 
+// ===== ライブ実戦教材 (Phase 6-1) =====
+const LIVE_PRACTICE_GUIDES=[
+  {title:'テーブル/シート選択',
+   text:'勝ちやすさは自分の腕だけで決まりません。深いスタックでルースにコールする相手が多く、強い常連が左に少ない席を優先します。きつい卓で無理に戦うより、良いゲームを選ぶこと自体が大きなEVです。'},
+  {title:'ストラドルポット',
+   text:'ストラドルが入ると実質BBが大きくなり、スタックは浅くなります。プリフロップは少しタイトに、ポストフロップはSPRが下がる前提でワンペアの扱いを決めます。参加するなら、後ろから大きくアイソされても困りにくい手を選びます。'},
+  {title:'ティルトの兆候',
+   text:'取り返したい、相手を懲らしめたい、さっきの負けを理由にコールしたい。この感覚が出たら一度席を離れる合図です。正しい判断を続けられない状態では、良いハンドを待っても利益を守れません。'},
+  {title:'セッション終了判断',
+   text:'勝っている時も負けている時も、疲労と集中力を基準にします。ミスが増えた、リバー判断が雑になった、相手のレンジを考えずにボタンを押している。そう感じたら、まだゲームが良くても終了候補です。'},
+  {title:'バンクロール',
+   text:'$2/$5は一回の負け額が大きくなりやすいゲームです。生活費とプレー資金を分け、負けても判断が崩れない余裕を持ちます。十分な余裕がない時は、下のレートや短いセッションで練習量を積む方が長く続きます。'},
+  {title:'チップハンドリングとエチケット',
+   text:'ベット額ははっきり置き、相手のアクション前に余計な反応をしない。ショーダウンでは自分の手を明確に開き、ディーラーや他プレイヤーを急かさない。テーブルで信頼される振る舞いは、長時間プレーするうえで大事な土台です。'}
+];
+function renderLivePractice(){
+  const intro='<div class="gto-tip"><div class="tip-title">ライブ実戦メモ</div>ハンド単体の正解だけでなく、良いゲームを選び、崩れた状態で打たないことも勝率の一部です。ここでは$2/$5ライブで特に差が出る習慣だけを短くまとめます。</div>';
+  return intro+LIVE_PRACTICE_GUIDES.map(function(g){
+    return '<div class="gto-tip"><div class="tip-title">'+g.title+'</div>'+g.text+'</div>';
+  }).join('');
+}
+
 function selectLesson(decisions,hr){
   const tags=new Set();
   if((hr.numActive||0)>2)tags.add('multiway');
@@ -4410,6 +4432,16 @@ function runFishTankRegressionTests(){
   const humanEval=function(an,pred){
     return an.evals.find(function(e){return e.isHuman&&pred(e);});
   };
+  add('ライブ実戦教材: 主要トピックをタブ用HTMLに描画する',function(){
+    if(typeof renderLivePractice!=='function')return false;
+    const html=renderLivePractice();
+    return /テーブル\/シート選択/.test(html)
+      &&/ストラドルポット/.test(html)
+      &&/ティルトの兆候/.test(html)
+      &&/セッション終了判断/.test(html)
+      &&/バンクロール/.test(html)
+      &&/チップハンドリング/.test(html);
+  });
   const fourBetBaseDecisions=function(extraHeroAction){
     const ds=[
       regressionDecision({street:'preflop',action:'raise',amount:15,pot:7,toCall:5,facingRaise:false,position:'UTG+1',playerName:'utg1',isHuman:false,playerIdx:1,playerChipsBefore:650,pfRaiseCountBefore:0,pfFacingBetLevel:0,pfActionBetLevel:2}),
@@ -9914,13 +9946,14 @@ function isLandscape(){return window.matchMedia('(min-width:860px) and (orientat
 function openSheet(tab){
   // シートのタブを切り替え
   document.querySelectorAll('.stab').forEach(function(s){s.classList.toggle('active',s.dataset.stab===tab);});
-  ['history','trends','glossary'].forEach(function(id){
+  ['history','trends','glossary','live'].forEach(function(id){
     var el=$('stab-'+id);if(el)el.classList.toggle('hidden',id!==tab);
   });
   // コンテンツをリフレッシュ
   if(tab==='trends')renderTrends();
   if(tab==='history'){var html=_historyHTML();var sh=$('stab-history');if(sh)sh.innerHTML=html;}
   if(tab==='glossary'){var sg=$('stab-glossary');if(sg)sg.innerHTML=renderGlossary();}
+  if(tab==='live'){var sl=$('stab-live');if(sl)sl.innerHTML=renderLivePractice();}
   $('sheet-overlay').classList.add('open');
 }
 function closeSheet(){$('sheet-overlay').classList.remove('open');}
@@ -9942,8 +9975,9 @@ document.querySelectorAll('[data-tab]').forEach(function(btn){
     // 横画面デスクトップ → サイドパネルで切り替え
     document.querySelectorAll('.side-tab').forEach(function(s){s.classList.remove('active');});
     document.querySelectorAll('.side-tab[data-tab="'+t+'"]').forEach(function(s){s.classList.add('active');});
-    ['history','trends','glossary'].forEach(function(id){var el=$('tab-'+id);if(el)el.classList.toggle('hidden',id!==t);});
+    ['history','trends','glossary','live'].forEach(function(id){var el=$('tab-'+id);if(el)el.classList.toggle('hidden',id!==t);});
     if(t==='glossary'){var tg=$('tab-glossary');if(tg)tg.innerHTML=renderGlossary();}
+    if(t==='live'){var tl=$('tab-live');if(tl)tl.innerHTML=renderLivePractice();}
     if(t==='trends')renderTrends();
   });
 });
