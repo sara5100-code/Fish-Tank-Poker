@@ -69,6 +69,10 @@
     <div class="form-row"><label>レンジ判定</label>
       <select id="cfg-range-mode"><option value="live" selected>ライブ$2/$5（ブラフ不足を加味）</option><option value="gto">GTO（均衡・EV基準）</option></select>
     </div>
+    <div id="session-check-wrap" class="session-check">
+      <label class="check-toggle"><input type="checkbox" id="cfg-session-check" checked> セッション前後チェックを使う</label>
+      <div id="session-start-check"></div>
+    </div>
     <button class="btn-primary" id="btn-start">ゲーム開始</button>
   </div>
 </div>
@@ -157,6 +161,16 @@
     <div style="display:flex;gap:8px;margin-top:14px">
       <button id="close-only" style="flex:1;padding:12px;background:var(--panel2);border:1px solid var(--border);border-radius:12px;color:var(--dim);font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">← 履歴に戻る</button>
       <button class="close-analysis" id="close-analysis" style="flex:2">次のハンドへ →</button>
+    </div>
+  </div>
+</div>
+<div id="session-end-modal">
+  <div id="session-end-box">
+    <h2>セッション終了チェック</h2>
+    <div id="session-end-content"></div>
+    <div class="session-end-actions">
+      <button id="session-end-cancel">戻る</button>
+      <button id="session-end-confirm">終了する</button>
     </div>
   </div>
 </div>

@@ -1888,6 +1888,68 @@ function renderLivePractice(){
   }).join('');
 }
 
+// ===== セッション前後チェックリスト (Phase 6-2) =====
+const SESSION_CHECK_KEY='fish_tank_session_check_enabled';
+const SESSION_START_CHECKS=[
+  '今日の終了時間と最大損失を先に決める',
+  '疲労・眠気・焦りが強い日は短いセッションにする',
+  '今日の主テーマを一つだけ決める（例: BB防衛、リバーのフォールド）',
+  '負けを取り返す目的でプレーしない'
+];
+const SESSION_END_CHECKS=[
+  '一番大きなミスを一つだけ言語化する',
+  'ティルトでコール/ブラフした場面がなかったか確認する',
+  '終了予定を守れたか確認する',
+  '次回の練習テーマを一つだけ決める'
+];
+function sessionChecklistEnabled(){
+  try{
+    const v=localStorage.getItem(SESSION_CHECK_KEY);
+    return v==null?true:v==='1';
+  }catch(e){return true;}
+}
+function setSessionChecklistEnabled(on){
+  try{localStorage.setItem(SESSION_CHECK_KEY,on?'1':'0');}catch(e){}
+}
+function renderSessionChecklist(items,note){
+  return '<div class="session-check-list">'+items.map(function(t){
+    return '<div class="session-check-item">'+t+'</div>';
+  }).join('')+'</div>'+(note?'<div class="session-check-note">'+note+'</div>':'');
+}
+function renderSessionStartChecklist(){
+  return renderSessionChecklist(SESSION_START_CHECKS,'全部にチェックできなくても開始はできます。崩れそうな条件を先に見つけるためのメモです。');
+}
+function renderSessionEndChecklist(){
+  return renderSessionChecklist(SESSION_END_CHECKS,'点数よりも、次回に一つ直せる形で終えることを優先します。');
+}
+function initSessionChecklistUI(){
+  const cb=$('cfg-session-check');
+  const box=$('session-start-check');
+  if(!cb||!box)return;
+  cb.checked=sessionChecklistEnabled();
+  box.innerHTML=cb.checked?renderSessionStartChecklist():'';
+  cb.addEventListener('change',function(){
+    setSessionChecklistEnabled(cb.checked);
+    box.innerHTML=cb.checked?renderSessionStartChecklist():'';
+  });
+}
+function finishSessionToSetup(){
+  if(aiTimeout)clearTimeout(aiTimeout);game=null;
+  _scenarioMode=false;
+  const el=document.getElementById('scenario-banner');if(el)el.style.display='none';
+  const hudTitle=document.querySelector('#hud .hud-title');
+  if(hudTitle)hudTitle.textContent='🐟 Fish Tank Poker';
+  showScreen('setup-screen');
+}
+function openSessionEndChecklist(){
+  const modal=$('session-end-modal');
+  const content=$('session-end-content');
+  if(!modal||!content)return false;
+  content.innerHTML=renderSessionEndChecklist();
+  modal.classList.add('open');
+  return true;
+}
+
 function selectLesson(decisions,hr){
   const tags=new Set();
   if((hr.numActive||0)>2)tags.add('multiway');
@@ -4441,6 +4503,19 @@ function runFishTankRegressionTests(){
       &&/セッション終了判断/.test(html)
       &&/バンクロール/.test(html)
       &&/チップハンドリング/.test(html);
+  });
+  add('セッションチェック: 開始前と終了時の主要項目を描画する',function(){
+    if(typeof renderSessionStartChecklist!=='function'||typeof renderSessionEndChecklist!=='function')return false;
+    const s=renderSessionStartChecklist();
+    const e=renderSessionEndChecklist();
+    return /終了時間/.test(s)
+      &&/最大損失/.test(s)
+      &&/今日の主テーマ/.test(s)
+      &&/負けを取り返す/.test(s)
+      &&/一番大きなミス/.test(e)
+      &&/ティルト/.test(e)
+      &&/終了予定/.test(e)
+      &&/次回の練習テーマ/.test(e);
   });
   const fourBetBaseDecisions=function(extraHeroAction){
     const ds=[
@@ -9914,6 +9989,7 @@ function applyTournamentPresetToSetup(){
 $('cfg-mode').addEventListener('change',applyTournamentPresetToSetup);
 // [feature 2026-06-10] レンジ判定モード(GTO/Live)の初期化と切替。localStorageに永続化。
 (function(){var el=$('cfg-range-mode');if(!el)return;try{var sv=localStorage.getItem('fish_tank_range_mode');if(sv==='gto'||sv==='live'){setRangeMode(sv);el.value=getRangeMode();}else{setRangeMode(el.value);}}catch(e){setRangeMode(el.value);}el.addEventListener('change',function(){setRangeMode(el.value);try{localStorage.setItem('fish_tank_range_mode',getRangeMode());}catch(e){}});})();
+initSessionChecklistUI();
 $('cfg-tournament-preset').addEventListener('change',applyTournamentPresetToSetup);
 $('cfg-tournament-focus').addEventListener('change',applyTournamentPresetToSetup);
 applyTournamentPresetToSetup();
@@ -10022,15 +10098,18 @@ if(reanalyzeBtn){
   });
 }
 $('btn-quit').addEventListener('click',function(){
-  if(confirm('ゲームを終了してメインメニューに戻りますか？')){
-    if(aiTimeout)clearTimeout(aiTimeout);game=null;
-    // [Claude feature 2026-05-23] シナリオモードをリセット
-    _scenarioMode=false;
-    const el=document.getElementById('scenario-banner');if(el)el.style.display='none';
-    const hudTitle=document.querySelector('#hud .hud-title');
-    if(hudTitle)hudTitle.textContent='🐟 Fish Tank Poker';
-    showScreen('setup-screen');
+  if(sessionChecklistEnabled()){
+    if(!openSessionEndChecklist()&&confirm('ゲームを終了してメインメニューに戻りますか？'))finishSessionToSetup();
+    return;
   }
+  if(confirm('ゲームを終了してメインメニューに戻りますか？'))finishSessionToSetup();
+});
+$('session-end-cancel').addEventListener('click',function(){
+  const modal=$('session-end-modal');if(modal)modal.classList.remove('open');
+});
+$('session-end-confirm').addEventListener('click',function(){
+  const modal=$('session-end-modal');if(modal)modal.classList.remove('open');
+  finishSessionToSetup();
 });
 // [Codex fix 2026-05-26] 重複していた履歴クリック登録は削除済み。直下は統計リセット用。
 document.addEventListener('click',function(e){
