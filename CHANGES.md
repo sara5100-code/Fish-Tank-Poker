@@ -248,3 +248,9 @@ SKIP_REGRESSION=1 node ...         # 理論検証のみ
 - `REPRESENTATIVE_BOARD_DICTIONARY` を追加し、A-high dry / K-high dry / paired / monotone / two-tone connected / low connected / broadway connected / 4-flush river / paired river の代表クラスを定義した。
 - 代表ボードごとに PFR IP / PFR OOP / コーラーの基準ベット頻度とサイズを持たせ、`boardTextureFrequencyAdjustment` と `boardTextureSizePlan` の根拠として参照するようにした。
 - 理論検証に、代表ボード分類、A-high dry のPFR小CB、low connected の受け側絡み、辞書由来サイズの回帰テストを追加した。
+
+## 2026-07-12 Phase 5: レンジ更新に密度スナップショットを追加
+
+- `rangeActionUpdateProfile` に `valueDensityPct` / `bluffCandidatePct` / `rangeDensityBand` / `bluffDensityBand` を追加し、相手ラインのバリュー密度とブラフ候補量を公開アクションから保持するようにした。
+- 複数ストリートの圧力、ターンコール後のリバー、完成寄りボード、サイズを加味して、ワンペア受けや大きいブラフの評価に使える内部軸を増やした。
+- 理論検証に、3バレルライン後のバリュー密度が1バレルより高く、ブラフ候補が増えすぎないことの単調性テストを追加した。

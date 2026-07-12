@@ -6400,13 +6400,32 @@ function rangeActionUpdateProfile(hr,d,profile,role,opts){
   }else if(villainCalledFlop&&d.street!=='flop'){
     updates.push(isRiver?'フロップコール後にリバーまで来ているので、相手には中程度の完成役と一部のミスドローが残ります。':'フロップコール後なので、相手には中程度の完成役とドローが残ります。');
   }
+  // [Codex fix 2026-07-12] BLUEPRINT Phase 4: 公開ラインから相手レンジのバリュー密度とブラフ候補量を定量スナップショット化する。
+  let valueDensityPct=24+pressure*16;
+  let bluffCandidatePct=34-pressure*6;
+  if(rangeState==='capped'){valueDensityPct-=8;bluffCandidatePct+=10;}
+  if(rangeState==='mixed_capped_pressure'){valueDensityPct+=4;bluffCandidatePct+=4;}
+  if(rangeState==='pressure_dense'){valueDensityPct+=12;bluffCandidatePct-=4;}
+  if(rangeState==='turn_call_dense'){valueDensityPct+=16;bluffCandidatePct-=6;}
+  if(villainCalledFlop){valueDensityPct+=5;bluffCandidatePct+=3;}
+  if(villainCalledTurn){valueDensityPct+=8;bluffCandidatePct-=2;}
+  if(danger){valueDensityPct+=8;bluffCandidatePct-=isRiver?5:1;}
+  if(sizePct>=65){valueDensityPct+=8;bluffCandidatePct-=4;}
+  else if(sizePct<=35&&lane==='call'){valueDensityPct-=4;bluffCandidatePct+=4;}
+  if(isRiver){valueDensityPct+=5;bluffCandidatePct-=3;}
+  valueDensityPct=Math.max(5,Math.min(92,Math.round(valueDensityPct)));
+  bluffCandidatePct=Math.max(4,Math.min(55,Math.round(bluffCandidatePct)));
+  const rangeDensityBand=valueDensityPct>=70?'高':valueDensityPct>=50?'中高':valueDensityPct>=35?'中':'低';
+  const bluffDensityBand=bluffCandidatePct>=34?'多め':bluffCandidatePct>=22?'中':'少なめ';
+  if(valueDensityPct>=65)updates.push('公開ライン上、相手のバリュー密度は高めに更新されます（約'+valueDensityPct+'%）。');
+  else if(valueDensityPct<=32)updates.push('相手レンジはまだ広く、バリュー密度は低めです（約'+valueDensityPct+'%）。');
   let verdict='normal',severity='normal',policy='相手レンジはまだ広く、ボードとサイズを合わせて更新します。',suggest='';
   if(lane==='call'){
-    if((rangeState==='pressure_dense'||rangeState==='turn_call_dense')&&!isStrong&&!strongOnePair&&!hasGoodDraw&&sizePct>=45){
+    if((valueDensityPct>=62||rangeState==='pressure_dense'||rangeState==='turn_call_dense')&&!isStrong&&!strongOnePair&&!hasGoodDraw&&sizePct>=45){
       verdict=sizePct>=65||d.street==='river'?'bad':'border';severity=verdict;
       policy='相手レンジが強いバリュー寄りに更新されているため、ワンペア以下の大きいコールは見た目のEQより苦しくなります。';
       suggest='推奨: フォールド寄り。ブラフ過多の相手にだけ一部コール';
-    }else if(strongOnePair&&pressure>=2&&sizePct>=50){
+    }else if(strongOnePair&&valueDensityPct>=58&&sizePct>=50){
       verdict='border';severity='border';
       policy='強いワンペアでも、複数ストリートの圧力後は明確コールではなくブラフキャッチ寄りです。';
       suggest='推奨: 相手のブラフ頻度次第。パッシブ相手には頻度を落とす';
@@ -6437,12 +6456,12 @@ function rangeActionUpdateProfile(hr,d,profile,role,opts){
     }
   }
   if(!updates.length)updates.push('この時点では相手レンジの大きな絞り込みはまだ少ないです。');
-  return{street:d.street,lane,sizePct,rangeState,pressure,priorAggStreets,lastVillainAction:lastVillainAction?lastVillainAction.action:'',cappedByCheck,heroBetTurn,villainCalledTurn,verdict,severity,policy,suggest,updates:updates.slice(0,4)};
+  return{street:d.street,lane,sizePct,rangeState,pressure,valueDensityPct,bluffCandidatePct,rangeDensityBand,bluffDensityBand,priorAggStreets,lastVillainAction:lastVillainAction?lastVillainAction.action:'',cappedByCheck,heroBetTurn,villainCalledTurn,verdict,severity,policy,suggest,updates:updates.slice(0,4)};
 }
 function rangeActionUpdateProfileText(p){
   if(!p)return'';
   const lane={check:'チェック',call:'コール',bet:'ベット/レイズ',fold:'フォールド'}[p.lane]||p.lane;
-  return '相手レンジ更新='+p.rangeState+' / 圧力'+p.pressure+'回 / '+lane+' / '+p.verdict+'：'+p.policy;
+  return '相手レンジ更新='+p.rangeState+' / バリュー密度='+p.rangeDensityBand+'('+p.valueDensityPct+'%) / ブラフ候補='+p.bluffDensityBand+'('+p.bluffCandidatePct+'%) / '+lane+' / '+p.verdict+'：'+p.policy;
 }
 
 function playerDraw(holeCards,comm){

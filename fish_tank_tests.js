@@ -120,7 +120,7 @@ function patchFastEquity(s) {
 
 function runTheoryChecks(s) {
   const Cs = s.regressionCards;
-  const { estimateEquity, handRole, boardTex, boardTextureProfile, boardTextureFrequencyAdjustment, boardTextureSizePlan, representativeBoardProfile, HandEval, handType, HAND_RANK_169, HAND_COMBO_FRAC } = s;
+  const { estimateEquity, handRole, boardTex, boardTextureProfile, boardTextureFrequencyAdjustment, boardTextureSizePlan, representativeBoardProfile, rangeActionUpdateProfile, HandEval, handType, HAND_RANK_169, HAND_COMBO_FRAC } = s;
   let pass = 0, fail = 0; const fails = [];
   const ok = (n, c, e) => { if (c) pass++; else { fail++; fails.push(n + (e ? '  [' + e + ']' : '')); } };
   const approx = (n, v, lo, hi) => ok(n, v >= lo && v <= hi, 'got ' + (typeof v === 'number' ? v.toFixed(3) : v) + ' want ' + lo + '..' + hi);
@@ -173,6 +173,29 @@ function runTheoryChecks(s) {
     ok('代表ボード頻度: A-high dryのPFR IPは小CB寄り', pfrDry.representativeClass === 'a_high_dry' && pfrDry.preferredSizePct === 33 && pfrDry.betPct >= 55, JSON.stringify(pfrDry));
     ok('代表ボード頻度: low connected callerは受け側絡みを残す', callerLow.representativeClass === 'low_connected' && callerLow.betPct <= pfrDry.betPct, JSON.stringify(callerLow));
     ok('代表ボードサイズ: 辞書由来サイズを返す', drySize && drySize.source === 'representative_board' && drySize.pct === 33, JSON.stringify(drySize));
+  }
+  if (typeof rangeActionUpdateProfile === 'function' && typeof boardTextureProfile === 'function') {
+    const board = boardTextureProfile(Cs(['Th', '9h', '4d', '8c', '2s']), 'river', Cs(['Th', '9h', '4d', '8c']));
+    const roleWeak = { role: 'medium', pairTier: 'second_pair' };
+    const oneBarrelCall = { street: 'river', action: 'call', amount: 42, toCall: 42, pot: 142, position: 'BTN', isHuman: true };
+    const oneBarrelHand = { decisions: [
+      { street: 'river', action: 'bet', amount: 42, pot: 100, isHuman: false },
+      oneBarrelCall
+    ] };
+    const threeBarrelCall = { street: 'river', action: 'call', amount: 78, toCall: 78, pot: 218, position: 'BTN', isHuman: true };
+    const threeBarrelHand = { decisions: [
+      { street: 'flop', action: 'bet', amount: 35, pot: 70, isHuman: false },
+      { street: 'flop', action: 'call', amount: 35, pot: 105, isHuman: true },
+      { street: 'turn', action: 'bet', amount: 70, pot: 140, isHuman: false },
+      { street: 'turn', action: 'call', amount: 70, pot: 210, isHuman: true },
+      { street: 'river', action: 'bet', amount: 78, pot: 218, isHuman: false },
+      threeBarrelCall
+    ] };
+    const one = rangeActionUpdateProfile(oneBarrelHand, oneBarrelCall, board, roleWeak, { heroRangeAdv: '低' });
+    const three = rangeActionUpdateProfile(threeBarrelHand, threeBarrelCall, board, roleWeak, { heroRangeAdv: '低' });
+    ok('レンジ更新: 3バレルは1バレルよりバリュー密度が高い', three.valueDensityPct > one.valueDensityPct, 'one=' + one.valueDensityPct + ' three=' + three.valueDensityPct);
+    ok('レンジ更新: 3バレルはブラフ候補が増えすぎない', three.bluffCandidatePct <= one.bluffCandidatePct, 'one=' + one.bluffCandidatePct + ' three=' + three.bluffCandidatePct);
+    ok('レンジ更新: 密度フィールドを保持する', typeof three.rangeDensityBand === 'string' && typeof three.bluffDensityBand === 'string', JSON.stringify(three));
   }
   // --- クラッシュ回帰ガード: ポケットペア×ペアボード(handRoleのmadeDraw未定義バグ) ---
   for (const [h, b, lbl] of [[['As', 'Ah'], ['8s', '8c', '5d'], 'AA on 8-8-5'], [['5s', '5h'], ['8s', '8c', '3d'], '55 on 8-8-3']]) {
