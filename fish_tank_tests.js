@@ -439,6 +439,28 @@ function runAiPreflopModeChecks(s) {
     for (let i = 0; i < N; i++) { const a = aiDecide(v, g, 'hard'); if (a.action === 'raise' || a.action === 'allin') bet++; else if (a.action === 'call') call++; }
     return { bet: bet / N, call: call / N };
   }
+  function openRates(mode, hc, N, pos) {
+    setRangeMode(mode);
+    const g = createAuditRingGame();
+    const v = g.players[1];
+    g.dealerIndex = v.seatIndex;
+    g.bigBlind = 5;
+    g.currentBet = 5;
+    g.pot = 7;
+    g.currentHandDecisions = [];
+    v.profile = AI_PROFILES.take;
+    v.holeCards = hc.map(c => new Card(c[0], c[1]));
+    v.currentBet = 0;
+    v.chips = 1000;
+    let open = 0, limp = 0, fold = 0;
+    for (let i = 0; i < N; i++) {
+      const a = aiDecide(v, g, 'hard');
+      if (a.action === 'raise' || a.action === 'allin') open++;
+      else if (a.action === 'call') limp++;
+      else fold++;
+    }
+    return { open: open / N, limp: limp / N, fold: fold / N, pos };
+  }
   let pass = 0, fail = 0; const fails = [];
   const ok = (n, c, e) => { if (c) pass++; else { fail++; fails.push(n + (e ? '  [' + e + ']' : '')); } };
   const N = 1500;
@@ -447,6 +469,9 @@ function runAiPreflopModeChecks(s) {
   ok('Live 3bet頻度 < GTO (A5s)', L.bet < G.bet - 0.05, 'live=' + L.bet.toFixed(2) + ' gto=' + G.bet.toFixed(2));
   // Liveはその分コールに回す(より受け身)
   ok('Live コール頻度 > GTO (A5s)', L.call > G.call + 0.05, 'live=' + L.call.toFixed(2) + ' gto=' + G.call.toFixed(2));
+  const OL = openRates('live', ['Jc', '6c'], N, 'BTN'), OG = openRates('gto', ['Jc', '6c'], N, 'BTN');
+  ok('AI open: GTO opens BTN mix hands more than Live', OG.open > OL.open + 0.08, 'live=' + OL.open.toFixed(2) + ' gto=' + OG.open.toFixed(2));
+  ok('AI open: Live keeps more marginal BTN hands folded', OL.fold > OG.fold + 0.08, 'live=' + OL.fold.toFixed(2) + ' gto=' + OG.fold.toFixed(2));
   setRangeMode('live');
   console.log(`\n[AIプリフロップ検証] ${pass} pass / ${fail} fail`);
   fails.forEach(x => console.log('  FAIL:', x));

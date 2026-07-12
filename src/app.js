@@ -1138,8 +1138,12 @@ function aiDecide(player,game,baseLevel){
 
     // プロファイル調整: openWidthMult > 1.0 = ルーズ, < 1.0 = タイト
     // [Codex fix 2026-06-25] AIのリングオープンも評価表の$2/$5ライブ上限へ寄せる。EP/MPの謎オープンを減らす。
+    const aiPfModeOpen=getRangeMode();
     const liveOpenCap=live25OpenPct(pos,game.players.length)+(prof.openWidthMult>1.05?0.02:0);
-    const adjOpenPct=Math.min(0.85, Math.min(effOpenPct*prof.openWidthMult,liveOpenCap));
+    const gtoOpenCap=Math.min(0.85,(POS_RANGE.medium[pos]||baseOpenPct)*1.10+(prof.openWidthMult>1.05?0.03:0));
+    const modeOpenCap=aiPfModeOpen==='gto'?gtoOpenCap:liveOpenCap;
+    const modeOpenMult=aiPfModeOpen==='gto'?1.04:0.98;
+    const adjOpenPct=Math.min(0.85, Math.min(effOpenPct*prof.openWidthMult*modeOpenMult,modeOpenCap));
 
     // ノイズ: コンボフラクションに直接加算 (±noise*3%)
     const noiseAdj=(Math.random()*2-1)*prof.noise*0.03;
@@ -1189,7 +1193,8 @@ function aiDecide(player,game,baseLevel){
     if(!isRaisedPot){
       // [Codex fix 2026-06-26] 通常AIはプリフロップ表でoutのハンドをプロフィール補正だけで開かない。
       const openChartForAI=preflopChartLookup('open',ht,pos,game.players.length,{});
-      const openMixOk=openChartForAI.status==='pure'||(openChartForAI.status==='mix'&&Math.random()<(prof.openWidthMult>1.4?0.55:0.34));
+      const mixFreqBase=aiPfModeOpen==='gto'?(prof.openWidthMult>1.4?0.70:0.50):(prof.openWidthMult>1.4?0.50:0.28);
+      const openMixOk=openChartForAI.status==='pure'||(openChartForAI.status==='mix'&&Math.random()<mixFreqBase);
       if(handFrac<=effOpenPctN&&openMixOk){
         const mult=2.3+Math.random()*0.5;
         const amt=Math.round(Math.min(bb*mult*prof.betSizeMult,chips));
