@@ -120,7 +120,7 @@ function patchFastEquity(s) {
 
 function runTheoryChecks(s) {
   const Cs = s.regressionCards;
-  const { estimateEquity, handRole, boardTex, boardTextureProfile, boardTextureFrequencyAdjustment, boardTextureSizePlan, representativeBoardProfile, rangeActionUpdateProfile, HandEval, handType, HAND_RANK_169, HAND_COMBO_FRAC } = s;
+  const { estimateEquity, handRole, boardTex, boardTextureProfile, boardTextureFrequencyAdjustment, boardTextureSizePlan, representativeBoardProfile, rangeActionUpdateProfile, setRangeMode, HandEval, handType, HAND_RANK_169, HAND_COMBO_FRAC } = s;
   let pass = 0, fail = 0; const fails = [];
   const ok = (n, c, e) => { if (c) pass++; else { fail++; fails.push(n + (e ? '  [' + e + ']' : '')); } };
   const approx = (n, v, lo, hi) => ok(n, v >= lo && v <= hi, 'got ' + (typeof v === 'number' ? v.toFixed(3) : v) + ' want ' + lo + '..' + hi);
@@ -170,6 +170,17 @@ function runTheoryChecks(s) {
     const pfrDry = boardTextureFrequencyAdjustment(0.50, aDry, { street: 'flop', isPfr: true, isIP: true, role: { role: 'air' }, nOpponents: 1 });
     const callerLow = boardTextureFrequencyAdjustment(0.50, lowConn, { street: 'flop', isPfr: false, isIP: true, role: { role: 'air' }, nOpponents: 1 });
     const drySize = boardTextureSizePlan(100, aDry, { role: 'air' }, { street: 'flop', isPfr: true, isIP: true, nOpponents: 1 });
+    let gtoStrong = null, liveStrong = null, liveAir = null;
+    if (typeof setRangeMode === 'function') {
+      setRangeMode('gto');
+      gtoStrong = boardTextureSizePlan(100, aDry, { role: 'strong' }, { street: 'flop', isPfr: true, isIP: true, nOpponents: 1 });
+      setRangeMode('live');
+      liveStrong = boardTextureSizePlan(100, aDry, { role: 'strong' }, { street: 'flop', isPfr: true, isIP: true, nOpponents: 1, opponentTypeProfile: { label: 'コール多め', valueLoosen: true } });
+      liveAir = boardTextureSizePlan(100, lowConn, { role: 'air' }, { street: 'flop', isPfr: true, isIP: true, nOpponents: 1 });
+      setRangeMode('live');
+    }
+    ok('GTO/Live size: live value can size up against callers', gtoStrong && liveStrong && gtoStrong.mode === 'gto' && liveStrong.mode === 'live' && liveStrong.pct > gtoStrong.pct, JSON.stringify({ gtoStrong, liveStrong }));
+    ok('GTO/Live size: live air bluff stays small', liveAir && liveAir.mode === 'live' && liveAir.pct <= 33, JSON.stringify(liveAir));
     ok('代表ボード頻度: A-high dryのPFR IPは小CB寄り', pfrDry.representativeClass === 'a_high_dry' && pfrDry.preferredSizePct === 33 && pfrDry.betPct >= 55, JSON.stringify(pfrDry));
     ok('代表ボード頻度: low connected callerは受け側絡みを残す', callerLow.representativeClass === 'low_connected' && callerLow.betPct <= pfrDry.betPct, JSON.stringify(callerLow));
     ok('代表ボードサイズ: 辞書由来サイズを返す', drySize && drySize.source === 'representative_board' && drySize.pct === 33, JSON.stringify(drySize));

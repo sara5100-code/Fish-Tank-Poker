@@ -2969,11 +2969,18 @@ function freqToDeduction(freq,street){
 
 function suggestBet(pot,eq,street){
   let pct;
-  if(street==='river'){pct=eq>0.92?100:eq>0.80?75:eq>0.68?60:45;}
-  else if(street==='turn'){pct=eq>0.75?75:eq>0.62?65:50;}
-  else{pct=eq>0.70?65:eq>0.56?50:33;}
+  const mode=typeof getRangeMode==='function'?getRangeMode():'live';
+  if(mode==='gto'){
+    if(street==='river'){pct=eq>0.92?100:eq>0.80?75:eq>0.68?60:45;}
+    else if(street==='turn'){pct=eq>0.75?75:eq>0.62?65:50;}
+    else{pct=eq>0.70?65:eq>0.56?50:33;}
+  }else{
+    if(street==='river'){pct=eq>0.92?100:eq>0.80?75:eq>0.68?50:33;}
+    else if(street==='turn'){pct=eq>0.78?75:eq>0.62?50:33;}
+    else{pct=eq>0.75?75:eq>0.58?50:33;}
+  }
   pct=standardBetSizePct(pct);
-  return{pct,amt:Math.round(pot*pct/100)};
+  return{pct,amt:Math.round(pot*pct/100),mode};
 }
 function formatBetSuggestion(label,plan,d){
   if(!plan)return label;
@@ -6723,10 +6730,10 @@ function runFishTankRegressionTests(){
     const dry=boardTextureProfile(regressionCards(['Ad','9c','3s']),'flop',[]);
     const mono=boardTextureProfile(regressionCards(['Ah','Th','4h']),'flop',[]);
     const conn=boardTextureProfile(regressionCards(['9h','8c','7d']),'flop',[]);
-    const dryPlan=boardTextureSizePlan(100,dry,{role:'air'},{street:'flop',isPfr:true,nOpponents:1});
-    const monoPlan=boardTextureSizePlan(100,mono,{role:'value',pairTier:'top_pair'},{street:'flop',isPfr:true,nOpponents:1});
-    const connStrong=boardTextureSizePlan(100,conn,{role:'strong'},{street:'flop',isPfr:true,nOpponents:1});
-    const connOnePair=boardTextureSizePlan(100,conn,{role:'value',pairTier:'top_pair'},{street:'flop',isPfr:true,nOpponents:1});
+    const dryPlan=boardTextureSizePlan(100,dry,{role:'air'},{street:'flop',isPfr:true,nOpponents:1,mode:'gto'});
+    const monoPlan=boardTextureSizePlan(100,mono,{role:'value',pairTier:'top_pair'},{street:'flop',isPfr:true,nOpponents:1,mode:'gto'});
+    const connStrong=boardTextureSizePlan(100,conn,{role:'strong'},{street:'flop',isPfr:true,nOpponents:1,mode:'gto'});
+    const connOnePair=boardTextureSizePlan(100,conn,{role:'value',pairTier:'top_pair'},{street:'flop',isPfr:true,nOpponents:1,mode:'gto'});
     return !!(dryPlan&&dryPlan.pct===33&&monoPlan&&monoPlan.pct===33&&connStrong&&connStrong.pct>=75&&connOnePair&&connOnePair.pct<=50);
   });
 
@@ -6785,10 +6792,12 @@ function runFishTankRegressionTests(){
       ],
       pot:133
     });
+    setRangeMode('gto');
     const an=analyzeHand(hr);
     const ev=humanEval(an,function(e){return e.street==='flop'&&e.action==='bet';});
     const snap=evaluationSnapshot(hr,an);
     const se=snap&&snap.evaluations&&snap.evaluations.find(function(e){return e.street==='flop'&&e.action==='bet';});
+    setRangeMode('live');
     return !!(ev&&ev.boardTextureSizeProfile&&ev.boardTextureSizeProfile.pct===33&&ev.gtoTheory&&ev.gtoTheory.boardTextureSize&&se&&se.boardTextureSizeProfile&&se.gtoTheory&&se.gtoTheory.boardTextureSize);
   });
 

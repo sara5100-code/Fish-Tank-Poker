@@ -214,9 +214,11 @@ function boardTextureSizePlan(pot,profile,role,opts){
   if(!pot||!profile)return null;
   opts=opts||{};
   role=role||{};
+  const mode=opts.mode||(typeof getRangeMode==='function'?getRangeMode():'live');
   const isNut=!!(role.isNut||role.role==='nutted');
   const isStrong=!!(isNut||role.role==='strong');
   const isOnePair=!!((role.pairTier==='top_pair'||role.pairTier==='overpair'||role.pairTier==='second_pair')&&!isNut);
+  const isAir=role.role==='air';
   let pct=opts.preferredSizePct||null;
   let reason='';
   const rep=representativeBoardProfile(profile,{isPfr:!!opts.isPfr,isIP:!!opts.isIP});
@@ -256,9 +258,32 @@ function boardTextureSizePlan(pot,profile,role,opts){
     pct=Math.min(pct||50,40);
     reason='マルチウェイではコールされるレンジが強いため、非ナッツの大サイズを避けます。';
   }
+  if(mode==='live'){
+    const opponentType=opts.opponentTypeProfile||null;
+    const callStation=!!(opponentType&&(opponentType.label==='コール多め'||opponentType.valueLoosen));
+    const completedLike=!!(profile.primary==='monotone'||profile.primary==='four_flush'||profile.primary==='straight_complete'||profile.transition==='flush_complete_card'||profile.transition==='four_flush_card'||profile.transition==='straight_complete_card'||profile.transition==='board_pair');
+    if(isAir){
+      pct=Math.min(pct||33,33);
+      reason='Live $2/$5ではコールされやすいので、空ブラフは小さく打つかチェック寄りにします。';
+    }else if((isNut||isStrong)&&!completedLike&&opts.nOpponents<2){
+      pct=Math.max(pct||50,callStation?75:50);
+      reason='Live $2/$5では下のペアやドローに払ってもらえる時、強いバリューはGTOより取り切り寄りにします。';
+    }else if(isOnePair&&(completedLike||profile.flushThreat||profile.straightThreat||opts.nOpponents>=2)){
+      pct=Math.min(pct||50,40);
+      reason='Live $2/$5ではワンペアを重いボードで大きく打つと、弱い手が降りて強い手だけに続けられやすくなります。';
+    }
+  }else if(mode==='gto'){
+    if((profile.staticBoard||profile.primary==='a_high_dry'||profile.primary==='k_high_dry'||profile.primary==='q_high_dry')&&opts.isPfr&&!isNut){
+      pct=Math.min(pct||33,33);
+      reason='GTO基準では、レンジ優位のドライボードは小さめ高頻度のベットを多く使います。';
+    }else if(isNut||isStrong){
+      pct=Math.min(Math.max(pct||50,50),75);
+      reason=reason||'GTO基準では、強いハンドもレンジ全体のサイズ構成に合わせて50〜75%potを中心にします。';
+    }
+  }
   if(!pct)return null;
   pct=standardBetSizePct(Math.max(25,Math.min(125,Math.round(pct))));
-  return{pct,amt:Math.round(pot*pct/100),reason,source:rep?'representative_board':'board_texture',representativeClass:rep&&rep.key,representativeLabel:rep&&rep.label,representativeRole:rep&&rep.roleKey};
+  return{pct,amt:Math.round(pot*pct/100),reason,mode,source:rep?'representative_board':'board_texture',representativeClass:rep&&rep.key,representativeLabel:rep&&rep.label,representativeRole:rep&&rep.roleKey};
 }
 
 // [Codex fix 2026-06-21] ターンカードを「誰に良いか」「続けるか止まるか」で読める判断軸にする。
@@ -474,7 +499,7 @@ function postflopBetPurposeProfile(hr,d,role,texture,rangeProfile,opts){
   const staticDry=!!(texture&&texture.staticBoard);
   const rangeHigh=!!(rangeProfile&&(rangeProfile.heroRangeAdv==='高'||rangeProfile.heroRangeAdv==='high'||rangeProfile.heroRangeAdv==='高い'||rangeProfile.rangeOwner==='hero'));
   const nutLow=!!(rangeProfile&&(rangeProfile.heroNutAdv==='低'||rangeProfile.heroNutAdv==='low'||rangeProfile.nutOwner==='villain'));
-  const sizePlan=texture?boardTextureSizePlan(pot,texture,role,{isPfr,nOpponents:opts.nOpponents||1}):null;
+  const sizePlan=texture?boardTextureSizePlan(pot,texture,role,{isPfr,nOpponents:opts.nOpponents||1,opponentTypeProfile:opponentType}):null;
   const recommendedPct=sizePlan&&sizePlan.pct?sizePlan.pct:null;
   const sizeTooLarge=!!(recommendedPct&&sizePct>=recommendedPct+25&&sizePct>=65);
   const sizeTooSmall=!!(recommendedPct&&sizePct<=recommendedPct-25&&strongMade&&!isNut&&sizePct<=33);
