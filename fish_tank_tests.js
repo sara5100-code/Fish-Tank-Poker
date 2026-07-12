@@ -281,6 +281,28 @@ function runModeChecks(s) {
   ok('AJoの4BETはvs3bet表でレンジ外寄り', AJo4b.quality === 'bad' && /vs3BET参照レンジ/.test(AJo4b.comment || ''), 'q=' + AJo4b.quality + ' c=' + (AJo4b.comment || '').slice(0, 80));
   // [回帰ガード] アンダーペア(自分のポケットペア)を「ボードのペアにキッカー」と誤説明しない
   if (typeof s.coachReviewText === 'function') {
+    const riverCatch = {
+      street: 'river',
+      action: 'call',
+      potOdds: 0.30,
+      liveCashRiverDecisionProfile: {
+        lane: 'riverOnePairCatch',
+        sizePct: 75,
+        completed: true,
+        line: { label: '3barrel' },
+        suggest: 'フォールド寄り'
+      },
+      rangeActionUpdateProfile: {
+        street: 'river',
+        lane: 'call',
+        valueDensityPct: 78,
+        bluffCandidatePct: 18,
+        rangeDensityBand: '高',
+        bluffDensityBand: '少なめ'
+      }
+    };
+    const riverTxt = s.coachReviewText(riverCatch);
+    ok('river call text compares required equity and range density', /必要勝率/.test(riverTxt) && /バリュー密度/.test(riverTxt) && /ブラフ候補/.test(riverTxt) && /フォールド寄り/.test(riverTxt), riverTxt);
     const D2 = regressionDecision;
     const up = regressionHand({ heroHole: ['4c', '4d'], villainHole: ['Qd', '6c'], board: ['5h', '2c', 'Qh', 'Ac', 'Ks'], pot: 41, decisions: [
       D2({ street: 'flop', action: 'check', amount: 0, pot: 28, toCall: 0, facingRaise: false, position: 'MP', playerName: 'あ', isHuman: true, playerIdx: 0, playerChipsBefore: 987 }),

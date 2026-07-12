@@ -278,11 +278,20 @@ function naturalFacingBetDecisionText(ev){
   const rv=ev.liveCashRiverDecisionProfile||null;
   const fp=ev.postflopDefensePlanProfile||null;
   const next=ev.postflopCallFuturePlanProfile||null;
+  const rau=ev.rangeActionUpdateProfile||null;
   const p=rv||fp||null;
   if(!p)return'';
   const action={call:'コール',fold:'フォールド',raise:'レイズ',bet:'ベット',allin:'オールイン',check:'チェック'}[ev.action]||ev.action||'判断';
   const sizePct=p.sizePct!=null?p.sizePct:null;
   const required=sizePct!=null?Math.round(sizePct/(100+2*sizePct)*100):null;
+  const riverDensityNote=rv&&rau&&ev.street==='river'&&rau.valueDensityPct!=null&&rau.bluffCandidatePct!=null
+    ?'公開ラインでは相手のバリュー密度は'+(rau.rangeDensityBand||'中')+'（約'+rau.valueDensityPct+'%）、ブラフ候補は'+(rau.bluffDensityBand||'中')+'（約'+rau.bluffCandidatePct+'%）'
+    :'';
+  const riverOddsNote=rv&&rau&&required!=null&&rau.bluffCandidatePct!=null
+    ?(rau.bluffCandidatePct+4<required
+      ?'必要勝率に対してブラフ候補が足りないため、相手がよほど打てるタイプでない限りフォールド寄り'
+      :'必要勝率に対してブラフ候補は残るため、相手が実際にブラフを作れるタイプならコールが残る')
+    :'';
   if(rv){
     const lane=rv.lane||'';
     const board=rv.completed?'完成寄りボード':'比較的静的なボード';
@@ -298,8 +307,9 @@ function naturalFacingBetDecisionText(ev){
     }else{
       return'';
     }
-    const sizeText=sizePct!=null?'リバーで'+(tendency?tendency:'')+'相手の'+sizePct+'%potに対する'+action+'で、必要勝率は約'+required+'%です。':'リバーで相手のベット/レイズに対する'+action+'で、相手のサイズとラインを見ます。';
-    return [sizeText,heroPlan,board+'です。',rv.suggest?naturalRecommendationText(rv.suggest):''].filter(Boolean).join(' ');
+    const sizeText=sizePct!=null?'リバーで'+(tendency?tendency:'')+'相手の'+sizePct+'%potに対する'+action+'で、必要勝率は約'+required+'%':'リバーで相手のベット/レイズに対する'+action+'で、相手のサイズとラインを見る';
+    const oddsText=[sizeText,riverDensityNote,riverOddsNote].filter(Boolean).join('、')+'。';
+    return [oddsText,heroPlan,board+'です。',rv.suggest?naturalRecommendationText(rv.suggest):''].filter(Boolean).join(' ');
   }
   const goodTarget=fp.target||'相手のベットレンジ';
   let winPlan='';

@@ -98,6 +98,10 @@
     const before=ev.deduction||0;
     let next=before;
     const notes=[];
+    const requiredPct=ev.potOdds!=null?Math.round(ev.potOdds*100):null;
+    const riverDenseLine=p.rangeState==='pressure_dense'||p.rangeState==='turn_call_dense'||(p.pressure||0)>=2;
+    const riverDensityTooValueHeavy=ev.street==='river'&&ev.action==='call'&&requiredPct!=null&&
+      riverDenseLine&&p.valueDensityPct!=null&&p.bluffCandidatePct!=null&&p.valueDensityPct>=65&&p.bluffCandidatePct+4<requiredPct;
     if(gtoMode&&p.severity==='border'&&p.lane==='call'){
       ev.rangeActionUpdateWeightNote=rangeActionUpdateProfileText(p);
       ev.comment=(ev.comment||'')+' 【レンジ更新】'+ev.rangeActionUpdateWeightNote;
@@ -117,6 +121,13 @@
       if(before>0&&(p.lane==='check'||p.lane==='fold'||p.lane==='bet'))next=Math.min(next,5);
       if(ev.quality==='bad')ev.quality='ok';
       notes.push(rangeActionUpdateProfileText(p));
+    }
+    if(riverDensityTooValueHeavy&&!gtoMode){
+      next=Math.max(next,p.valueDensityPct>=75?18:12);
+      if(ev.quality==='good')ev.quality='ok';
+      if(p.valueDensityPct>=75)ev.quality='bad';
+      notes.push('リバーの公開ラインでは相手のバリュー密度が高く、必要勝率に対してブラフ候補が不足しています。コールは相手依存よりフォールド寄りに補正します。');
+      if(!ev.suggest)ev.suggest='フォールド寄り';
     }
     next=Math.max(0,Math.min(45,next));
     if(next!==before||notes.length){
