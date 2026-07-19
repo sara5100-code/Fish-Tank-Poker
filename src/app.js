@@ -1890,6 +1890,7 @@ function renderLivePractice(){
 
 // ===== セッション前後チェックリスト (Phase 6-2) =====
 const SESSION_CHECK_KEY='fish_tank_session_check_enabled';
+const SESSION_NEXT_FOCUS_KEY='fish_tank_session_next_focus';
 const SESSION_START_CHECKS=[
   '今日の終了時間と最大損失を先に決める',
   '疲労・眠気・焦りが強い日は短いセッションにする',
@@ -1911,13 +1912,37 @@ function sessionChecklistEnabled(){
 function setSessionChecklistEnabled(on){
   try{localStorage.setItem(SESSION_CHECK_KEY,on?'1':'0');}catch(e){}
 }
+function getStoredSessionNextFocus(){
+  try{
+    const raw=localStorage.getItem(SESSION_NEXT_FOCUS_KEY);
+    if(!raw)return null;
+    const parsed=JSON.parse(raw);
+    if(parsed&&parsed.title&&parsed.body)return parsed;
+  }catch(e){}
+  return null;
+}
+function storeSessionNextFocus(focus){
+  if(!focus||!focus.title||!focus.body)return;
+  try{localStorage.setItem(SESSION_NEXT_FOCUS_KEY,JSON.stringify({title:focus.title,body:focus.body,tone:focus.tone||'neutral'}));}catch(e){}
+}
 function renderSessionChecklist(items,note){
   return '<div class="session-check-list">'+items.map(function(t){
     return '<div class="session-check-item">'+t+'</div>';
   }).join('')+'</div>'+(note?'<div class="session-check-note">'+note+'</div>':'');
 }
-function renderSessionStartChecklist(){
-  return renderSessionChecklist(SESSION_START_CHECKS,'全部にチェックできなくても開始はできます。崩れそうな条件を先に見つけるためのメモです。');
+function sessionTextHTML(txt){
+  return String(txt||'').replace(/[&<>"']/g,function(ch){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch];
+  });
+}
+function renderSessionCarryOver(focus){
+  if(!focus)return '';
+  const color=focus.tone==='good'?'var(--green)':focus.tone==='warn'?'var(--orange)':'var(--accent)';
+  return '<div class="session-summary session-carryover" style="border-left-color:'+color+'"><div class="session-summary-title">前回からの引き継ぎ: '+sessionTextHTML(focus.title.replace(/^次回の一点:\s*/,''))+'</div><div class="session-summary-body">'+sessionTextHTML(focus.body)+'</div></div>';
+}
+function renderSessionStartChecklist(focus){
+  const carry=renderSessionCarryOver(focus===undefined?getStoredSessionNextFocus():focus);
+  return carry+renderSessionChecklist(SESSION_START_CHECKS,'全部にチェックできなくても開始はできます。崩れそうな条件を先に見つけるためのメモです。');
 }
 function sessionEndStatsProfile(stats){
   stats=stats||sessionStats||{};
@@ -1970,6 +1995,12 @@ function initSessionChecklistUI(){
     box.innerHTML=cb.checked?renderSessionStartChecklist():'';
   });
 }
+function refreshSessionStartChecklist(){
+  const cb=$('cfg-session-check');
+  const box=$('session-start-check');
+  if(!cb||!box)return;
+  box.innerHTML=cb.checked?renderSessionStartChecklist():'';
+}
 function finishSessionToSetup(){
   if(aiTimeout)clearTimeout(aiTimeout);game=null;
   _scenarioMode=false;
@@ -1977,11 +2008,13 @@ function finishSessionToSetup(){
   const hudTitle=document.querySelector('#hud .hud-title');
   if(hudTitle)hudTitle.textContent='🐟 Fish Tank Poker';
   showScreen('setup-screen');
+  refreshSessionStartChecklist();
 }
 function openSessionEndChecklist(){
   const modal=$('session-end-modal');
   const content=$('session-end-content');
   if(!modal||!content)return false;
+  storeSessionNextFocus(sessionEndStatsProfile().focus);
   content.innerHTML=renderSessionEndChecklist();
   modal.classList.add('open');
   return true;
@@ -4563,6 +4596,14 @@ function runFishTankRegressionTests(){
       &&/Hands/.test(html)
       &&/PostF/.test(html)
       &&/次回の一点/.test(html);
+  });
+  add('セッションチェック: 前回の次回テーマを開始前に引き継ぐ',function(){
+    if(typeof renderSessionStartChecklist!=='function')return false;
+    const html=renderSessionStartChecklist({title:'次回の一点: リバーで降りる力',body:'ワンペアの受けを少し締めます。',tone:'warn'});
+    return /前回からの引き継ぎ/.test(html)
+      &&/リバーで降りる力/.test(html)
+      &&/ワンペアの受け/.test(html)
+      &&/今日の終了時間/.test(html);
   });
   const fourBetBaseDecisions=function(extraHeroAction){
     const ds=[
