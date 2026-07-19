@@ -51,6 +51,8 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,'Hiragino 
 .session-recommend{margin-top:8px;background:var(--panel);border:1px solid var(--border);border-radius:9px;padding:7px 8px;}
 .session-recommend-title{font-size:11px;font-weight:900;color:var(--accent);margin-bottom:3px;}
 .session-recommend-body{font-size:10px;line-height:1.5;color:var(--dim);}
+.session-apply-practice{margin-top:7px;width:100%;padding:7px 9px;background:rgba(61,108,240,.08);border:1px solid rgba(61,108,240,.24);border-radius:8px;color:var(--accent);font-family:inherit;font-size:11px;font-weight:900;cursor:pointer;}
+.session-apply-practice:hover{background:rgba(61,108,240,.13);}
 
 /* ===== HUD ===== */
 #game-screen{flex-direction:column;overflow:hidden;}
@@ -5370,17 +5372,17 @@ function sessionTextHTML(txt){
 }
 function sessionPracticeRecommendation(focus){
   const txt=((focus&&focus.title)||'')+' '+((focus&&focus.body)||'');
-  if(/BB防衛|BBディフェンス|defend/i.test(txt))return{mode:'トーナメント局面別',focus:'BBディフェンス練習',reason:'BB防衛はポットオッズだけでなく、OOPで払いすぎない感覚まで一緒に練習できます。'};
-  if(/リバー|ワンペア|ショーダウン|WTSD/.test(txt))return{mode:'リングゲーム',focus:'リバー判断',reason:'ライブ$2/$5で差が出る、ワンペアの受けすぎと薄バリューの切り分けを重点的に見ます。'};
-  if(/ポストフロップ|フロップ|ターン|PostF/.test(txt))return{mode:'フロップトレーニング',focus:'ポストフロップ判断',reason:'ボード、ポジション、ベット目的を短い反復で確認できます。'};
-  if(/リンプ|入口|VPIP|参加|フロップ前/.test(txt))return{mode:'リングゲーム',focus:'フロップ前の入口整理',reason:'参加する手と降りる手を整理し、難しいワンペア判断を最初から減らします。'};
-  if(/ミス|テーマ|振り返り/.test(txt))return{mode:'リングゲーム',focus:'主テーマ確認',reason:'まずは通常ハンドで、レビューの主テーマを一つずつ潰していきます。'};
+  if(/BB防衛|BBディフェンス|defend/i.test(txt))return{mode:'トーナメント局面別',modeValue:'tournament',focus:'BBディフェンス練習',focusValue:'bb_defend',presetValue:'middle',reason:'BB防衛はポットオッズだけでなく、OOPで払いすぎない感覚まで一緒に練習できます。'};
+  if(/リバー|ワンペア|ショーダウン|WTSD/.test(txt))return{mode:'リングゲーム',modeValue:'normal',focus:'リバー判断',reason:'ライブ$2/$5で差が出る、ワンペアの受けすぎと薄バリューの切り分けを重点的に見ます。'};
+  if(/ポストフロップ|フロップ|ターン|PostF/.test(txt))return{mode:'フロップトレーニング',modeValue:'scenario',focus:'ポストフロップ判断',reason:'ボード、ポジション、ベット目的を短い反復で確認できます。'};
+  if(/リンプ|入口|VPIP|参加|フロップ前/.test(txt))return{mode:'リングゲーム',modeValue:'normal',focus:'フロップ前の入口整理',reason:'参加する手と降りる手を整理し、難しいワンペア判断を最初から減らします。'};
+  if(/ミス|テーマ|振り返り/.test(txt))return{mode:'リングゲーム',modeValue:'normal',focus:'主テーマ確認',reason:'まずは通常ハンドで、レビューの主テーマを一つずつ潰していきます。'};
   return null;
 }
 function renderSessionPracticeRecommendation(focus){
   const rec=sessionPracticeRecommendation(focus);
   if(!rec)return '';
-  return '<div class="session-recommend"><div class="session-recommend-title">おすすめ練習: '+sessionTextHTML(rec.mode)+' / '+sessionTextHTML(rec.focus)+'</div><div class="session-recommend-body">'+sessionTextHTML(rec.reason)+'</div></div>';
+  return '<div class="session-recommend"><div class="session-recommend-title">おすすめ練習: '+sessionTextHTML(rec.mode)+' / '+sessionTextHTML(rec.focus)+'</div><div class="session-recommend-body">'+sessionTextHTML(rec.reason)+'</div><button type="button" class="session-apply-practice" data-mode="'+sessionTextHTML(rec.modeValue||'normal')+'" data-focus="'+sessionTextHTML(rec.focusValue||'')+'" data-preset="'+sessionTextHTML(rec.presetValue||'')+'">この練習を設定</button></div>';
 }
 function renderSessionCarryOver(focus){
   if(!focus)return '';
@@ -5447,6 +5449,23 @@ function refreshSessionStartChecklist(){
   const box=$('session-start-check');
   if(!cb||!box)return;
   box.innerHTML=cb.checked?renderSessionStartChecklist():'';
+}
+function applySessionPracticeRecommendation(rec){
+  if(!rec)return false;
+  const mode=rec.modeValue||rec.mode||'normal';
+  const modeEl=$('cfg-mode');
+  if(!modeEl)return false;
+  modeEl.value=mode;
+  if(mode==='tournament'){
+    const presetEl=$('cfg-tournament-preset');
+    const focusEl=$('cfg-tournament-focus');
+    if(presetEl&&rec.presetValue)presetEl.value=rec.presetValue;
+    if(focusEl&&rec.focusValue)focusEl.value=rec.focusValue;
+  }
+  applyTournamentPresetToSetup();
+  refreshSessionStartChecklist();
+  if(typeof toast==='function')toast('おすすめ練習を設定しました。内容を確認して開始してください。','info',2600);
+  return true;
 }
 function finishSessionToSetup(){
   if(aiTimeout)clearTimeout(aiTimeout);game=null;
@@ -10753,6 +10772,16 @@ function runFishTankRegressionTests(){
     return river&&river.mode==='リングゲーム'&&/リバー/.test(river.focus)
       &&bb&&bb.mode==='トーナメント局面別'&&/BBディフェンス/.test(bb.focus)
       &&/おすすめ練習/.test(html)&&/フロップトレーニング/.test(html);
+  });
+  add('セッションチェック: おすすめ練習を設定ボタンとして描画する',function(){
+    if(typeof renderSessionPracticeRecommendation!=='function')return false;
+    const bbHtml=renderSessionPracticeRecommendation({title:'次回の一点: BB防衛',body:'BBディフェンスを整理します。'});
+    const riverHtml=renderSessionPracticeRecommendation({title:'次回の一点: リバーで降りる力',body:'ワンペアの受けを少し締めます。'});
+    return /session-apply-practice/.test(bbHtml)
+      &&/data-mode="tournament"/.test(bbHtml)
+      &&/data-focus="bb_defend"/.test(bbHtml)
+      &&/data-preset="middle"/.test(bbHtml)
+      &&/data-mode="normal"/.test(riverHtml);
   });
   const fourBetBaseDecisions=function(extraHeroAction){
     const ds=[
@@ -17247,6 +17276,11 @@ $('session-end-confirm').addEventListener('click',function(){
 });
 // [Codex fix 2026-05-26] 重複していた履歴クリック登録は削除済み。直下は統計リセット用。
 document.addEventListener('click',function(e){
+  const practiceBtn=e.target&&e.target.closest&&e.target.closest('.session-apply-practice');
+  if(practiceBtn){
+    applySessionPracticeRecommendation({modeValue:practiceBtn.dataset.mode||'normal',focusValue:practiceBtn.dataset.focus||'',presetValue:practiceBtn.dataset.preset||''});
+    return;
+  }
   if(e.target&&(e.target.id==='btn-reset-stats'||e.target.id==='btn-reset-stats2')){
     if(confirm('統計データをリセットしますか？（累積ハンド数・VPIP・CBet等がすべてクリアされます）')){
       try{localStorage.removeItem(_STATS_KEY);}catch(ex){}
