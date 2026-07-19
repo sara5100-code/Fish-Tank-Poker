@@ -48,6 +48,9 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,'Hiragino 
 .session-summary-grid div{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:5px 3px;text-align:center;}
 .session-summary-grid b{display:block;font-size:14px;color:var(--text);line-height:1.1;}
 .session-summary-grid span{display:block;font-size:9px;color:var(--dim);margin-top:2px;}
+.session-recommend{margin-top:8px;background:var(--panel);border:1px solid var(--border);border-radius:9px;padding:7px 8px;}
+.session-recommend-title{font-size:11px;font-weight:900;color:var(--accent);margin-bottom:3px;}
+.session-recommend-body{font-size:10px;line-height:1.5;color:var(--dim);}
 
 /* ===== HUD ===== */
 #game-screen{flex-direction:column;overflow:hidden;}
@@ -5365,10 +5368,24 @@ function sessionTextHTML(txt){
     return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch];
   });
 }
+function sessionPracticeRecommendation(focus){
+  const txt=((focus&&focus.title)||'')+' '+((focus&&focus.body)||'');
+  if(/BB防衛|BBディフェンス|defend/i.test(txt))return{mode:'トーナメント局面別',focus:'BBディフェンス練習',reason:'BB防衛はポットオッズだけでなく、OOPで払いすぎない感覚まで一緒に練習できます。'};
+  if(/リバー|ワンペア|ショーダウン|WTSD/.test(txt))return{mode:'リングゲーム',focus:'リバー判断',reason:'ライブ$2/$5で差が出る、ワンペアの受けすぎと薄バリューの切り分けを重点的に見ます。'};
+  if(/ポストフロップ|フロップ|ターン|PostF/.test(txt))return{mode:'フロップトレーニング',focus:'ポストフロップ判断',reason:'ボード、ポジション、ベット目的を短い反復で確認できます。'};
+  if(/リンプ|入口|VPIP|参加|フロップ前/.test(txt))return{mode:'リングゲーム',focus:'フロップ前の入口整理',reason:'参加する手と降りる手を整理し、難しいワンペア判断を最初から減らします。'};
+  if(/ミス|テーマ|振り返り/.test(txt))return{mode:'リングゲーム',focus:'主テーマ確認',reason:'まずは通常ハンドで、レビューの主テーマを一つずつ潰していきます。'};
+  return null;
+}
+function renderSessionPracticeRecommendation(focus){
+  const rec=sessionPracticeRecommendation(focus);
+  if(!rec)return '';
+  return '<div class="session-recommend"><div class="session-recommend-title">おすすめ練習: '+sessionTextHTML(rec.mode)+' / '+sessionTextHTML(rec.focus)+'</div><div class="session-recommend-body">'+sessionTextHTML(rec.reason)+'</div></div>';
+}
 function renderSessionCarryOver(focus){
   if(!focus)return '';
   const color=focus.tone==='good'?'var(--green)':focus.tone==='warn'?'var(--orange)':'var(--accent)';
-  return '<div class="session-summary session-carryover" style="border-left-color:'+color+'"><div class="session-summary-title">前回からの引き継ぎ: '+sessionTextHTML(focus.title.replace(/^次回の一点:\s*/,''))+'</div><div class="session-summary-body">'+sessionTextHTML(focus.body)+'</div></div>';
+  return '<div class="session-summary session-carryover" style="border-left-color:'+color+'"><div class="session-summary-title">前回からの引き継ぎ: '+sessionTextHTML(focus.title.replace(/^次回の一点:\s*/,''))+'</div><div class="session-summary-body">'+sessionTextHTML(focus.body)+'</div>'+renderSessionPracticeRecommendation(focus)+'</div>';
 }
 function renderSessionStartChecklist(focus){
   const carry=renderSessionCarryOver(focus===undefined?getStoredSessionNextFocus():focus);
@@ -10727,6 +10744,15 @@ function runFishTankRegressionTests(){
       &&/リバーで降りる力/.test(html)
       &&/ワンペアの受け/.test(html)
       &&/今日の終了時間/.test(html);
+  });
+  add('セッションチェック: 前回テーマからおすすめ練習を出す',function(){
+    if(typeof sessionPracticeRecommendation!=='function'||typeof renderSessionPracticeRecommendation!=='function')return false;
+    const river=sessionPracticeRecommendation({title:'次回の一点: リバーで降りる力',body:'ワンペアの受けを少し締めます。'});
+    const bb=sessionPracticeRecommendation({title:'次回の一点: BB防衛',body:'BBディフェンスを整理します。'});
+    const html=renderSessionPracticeRecommendation({title:'次回の一点: ポストフロップで守る',body:'フロップ以降の判断を確認します。'});
+    return river&&river.mode==='リングゲーム'&&/リバー/.test(river.focus)
+      &&bb&&bb.mode==='トーナメント局面別'&&/BBディフェンス/.test(bb.focus)
+      &&/おすすめ練習/.test(html)&&/フロップトレーニング/.test(html);
   });
   const fourBetBaseDecisions=function(extraHeroAction){
     const ds=[
