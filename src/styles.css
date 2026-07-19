@@ -48,6 +48,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,'Hiragino 
 .session-apply-practice:hover{background:rgba(61,108,240,.13);}
 .session-progress{margin-top:8px;border-radius:8px;padding:6px 8px;background:var(--panel);border:1px solid var(--border);font-size:10px;line-height:1.5;color:var(--dim);}
 .session-progress span{display:inline-block;margin-right:6px;font-weight:900;}
+.session-progress small{display:block;margin-top:3px;color:var(--muted);font-size:9px;font-weight:800;}
 .session-progress-good span{color:var(--green);}
 .session-progress-improving span{color:var(--accent);}
 .session-progress-warn span{color:var(--orange);}

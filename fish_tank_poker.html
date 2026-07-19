@@ -55,6 +55,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,'Hiragino 
 .session-apply-practice:hover{background:rgba(61,108,240,.13);}
 .session-progress{margin-top:8px;border-radius:8px;padding:6px 8px;background:var(--panel);border:1px solid var(--border);font-size:10px;line-height:1.5;color:var(--dim);}
 .session-progress span{display:inline-block;margin-right:6px;font-weight:900;}
+.session-progress small{display:block;margin-top:3px;color:var(--muted);font-size:9px;font-weight:800;}
 .session-progress-good span{color:var(--green);}
 .session-progress-improving span{color:var(--accent);}
 .session-progress-warn span{color:var(--orange);}
@@ -5519,11 +5520,32 @@ function sessionFocusProgress(focus,stats){
   }
   return{state:'pending',label:'確認中',text:(scoped?'前回テーマ後のデータを見ながら、':'')+'今回のセッションでも同じ一点を見ます。'};
 }
+function sessionFocusProgressSample(focus,stats){
+  stats=stats||sessionStats||{};
+  const txt=((focus&&focus.title)||'')+' '+((focus&&focus.body)||'');
+  const delta=sessionStatsSinceBaseline(stats,focus&&focus.baseline);
+  const scoped=!!delta;
+  const src=delta||{
+    hands:stats.hands||0,
+    limpOpp:stats.limpOpp||0,
+    wtsdSaw:stats.wtsdSaw||0,
+    totalDec:stats.totalDec||0,
+    poCount:(stats.poScores||[]).length
+  };
+  const lead=scoped?'前回後':'累積';
+  if(/リンプ|繝ｪ繝ｳ繝/.test(txt))return lead+': '+(src.hands||0)+'ハンド / リンプ機会'+(src.limpOpp||0);
+  if(/入口|VPIP|参加|フロップ前|蜈･蜿｣|蜿ょ刈/.test(txt))return lead+': '+(src.hands||0)+'ハンド';
+  if(/ポストフロップ|フロップ|ターン|PostF|繝昴せ繝医ヵ繝ｭ/.test(txt))return lead+': '+(src.hands||0)+'ハンド / PostF '+(src.poCount||0)+'回';
+  if(/リバー|ワンペア|ショーダウン|WTSD|繝ｪ繝舌|繝ｯ繝ｳ/.test(txt))return lead+': '+(src.hands||0)+'ハンド / WTSD機会'+(src.wtsdSaw||0);
+  if(/ミス|繝溘せ/.test(txt))return lead+': '+(src.hands||0)+'ハンド / 判断'+(src.totalDec||0)+'回';
+  return lead+': '+(src.hands||0)+'ハンド';
+}
 function renderSessionFocusProgress(focus,stats){
   if(!focus)return '';
   const p=sessionFocusProgress(focus,stats);
   const cls='session-progress-'+(p.state||'pending');
-  return '<div class="session-progress '+cls+'"><span>'+sessionTextHTML(p.label)+'</span>'+sessionTextHTML(p.text)+'</div>';
+  const sample=sessionFocusProgressSample(focus,stats);
+  return '<div class="session-progress '+cls+'"><span>'+sessionTextHTML(p.label)+'</span>'+sessionTextHTML(p.text)+'<small>'+sessionTextHTML(sample)+'</small></div>';
 }
 function renderSessionCarryOver(focus){
   if(!focus)return '';
@@ -10949,6 +10971,17 @@ function runFishTankRegressionTests(){
       &&limp.state==='good'
       &&/前回テーマ後/.test(html)
       &&!/60%/.test(html);
+  });
+  add('セッションチェック: 現在地に判定母数を添える',function(){
+    if(typeof sessionFocusProgressSample!=='function'||typeof renderSessionFocusProgress!=='function')return false;
+    const base=sessionStatsSnapshot({hands:20,wtsdSaw:20,wtsdWent:12,poScores:[50,50,50,50],limpOpp:8,limp:4,totalDec:20,badDec:10});
+    const now={hands:30,wtsdSaw:30,wtsdWent:15,poScores:[50,50,50,50,72,74,73,75],limpOpp:12,limp:4,totalDec:32,badDec:12};
+    const river={title:'次回の一点: リバーで降りる力',body:'WTSDを締めます。',baseline:base};
+    const post={title:'次回の一点: ポストフロップで守る',body:'PostFを見ます。',baseline:base};
+    const html=renderSessionFocusProgress(river,now);
+    return /前回後: 10ハンド \/ WTSD機会10/.test(sessionFocusProgressSample(river,now))
+      &&/前回後: 10ハンド \/ PostF 4回/.test(sessionFocusProgressSample(post,now))
+      &&/<small>前回後: 10ハンド \/ WTSD機会10<\/small>/.test(html);
   });
   const fourBetBaseDecisions=function(extraHeroAction){
     const ds=[
