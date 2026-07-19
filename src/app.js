@@ -1923,7 +1923,7 @@ function getStoredSessionNextFocus(){
 }
 function storeSessionNextFocus(focus){
   if(!focus||!focus.title||!focus.body)return;
-  try{localStorage.setItem(SESSION_NEXT_FOCUS_KEY,JSON.stringify({title:focus.title,body:focus.body,tone:focus.tone||'neutral'}));}catch(e){}
+  try{localStorage.setItem(SESSION_NEXT_FOCUS_KEY,JSON.stringify({title:focus.title,body:focus.body,tone:focus.tone||'neutral',baseline:focus.baseline||sessionStatsSnapshot()}));}catch(e){}
 }
 function renderSessionChecklist(items,note){
   return '<div class="session-check-list">'+items.map(function(t){
@@ -1992,6 +1992,91 @@ function sessionFocusProgress(focus,stats){
     return{state:'warn',label:'継続課題',text:'ミス率は'+mistake+'%。前回テーマをもう少し続ける価値があります。'};
   }
   return{state:'pending',label:'確認中',text:'前回テーマを意識して、今回のセッションでも同じ一点を見ます。'};
+}
+function sessionStatsSnapshot(stats){
+  stats=stats||sessionStats||{};
+  const poScores=stats.poScores||[];
+  return{
+    hands:stats.hands||0,
+    vpip:stats.vpip||0,
+    limp:stats.limp||0,
+    limpOpp:stats.limpOpp||0,
+    wtsdSaw:stats.wtsdSaw||0,
+    wtsdWent:stats.wtsdWent||0,
+    badDec:stats.badDec||0,
+    totalDec:stats.totalDec||0,
+    poCount:poScores.length,
+    poSum:poScores.reduce(function(a,b){return a+b;},0)
+  };
+}
+function sessionStatsSinceBaseline(stats,base){
+  const snap=sessionStatsSnapshot(stats);
+  if(!base)return null;
+  const sub=function(a,b){return Math.max(0,Math.round((a||0)-(b||0)));};
+  const poCount=sub(snap.poCount,base.poCount);
+  const poSum=Math.max(0,(snap.poSum||0)-(base.poSum||0));
+  return{
+    hands:sub(snap.hands,base.hands),
+    vpip:sub(snap.vpip,base.vpip),
+    limp:sub(snap.limp,base.limp),
+    limpOpp:sub(snap.limpOpp,base.limpOpp),
+    wtsdSaw:sub(snap.wtsdSaw,base.wtsdSaw),
+    wtsdWent:sub(snap.wtsdWent,base.wtsdWent),
+    badDec:sub(snap.badDec,base.badDec),
+    totalDec:sub(snap.totalDec,base.totalDec),
+    poCount:poCount,
+    poAvg:poCount>0?Math.round(poSum/poCount):0
+  };
+}
+function sessionFocusProgress(focus,stats){
+  stats=stats||sessionStats||{};
+  const txt=((focus&&focus.title)||'')+' '+((focus&&focus.body)||'');
+  const pct=function(a,b){return b>0?Math.round(a/b*100):-1;};
+  const avg=function(arr){return arr&&arr.length?Math.round(arr.reduce(function(a,b){return a+b;},0)/arr.length):0;};
+  const delta=sessionStatsSinceBaseline(stats,focus&&focus.baseline);
+  const scoped=!!delta;
+  const n=scoped?delta.hands:(stats.hands||0);
+  const poN=scoped?delta.poCount:(stats.poScores||[]).length;
+  const avgPO=scoped?delta.poAvg:avg(stats.poScores||[]);
+  const limpOpp=scoped?delta.limpOpp:(stats.limpOpp||0);
+  const limpPct=scoped?pct(delta.limp,delta.limpOpp):pct(stats.limp||0,stats.limpOpp||0);
+  const vpip=scoped?pct(delta.vpip,delta.hands):pct(stats.vpip||0,n);
+  const wtsdSaw=scoped?delta.wtsdSaw:(stats.wtsdSaw||0);
+  const wtsd=scoped?pct(delta.wtsdWent,delta.wtsdSaw):pct(stats.wtsdWent||0,stats.wtsdSaw||0);
+  const totalDec=scoped?delta.totalDec:(stats.totalDec||0);
+  const mistake=scoped?pct(delta.badDec,delta.totalDec):pct(stats.badDec||0,stats.totalDec||0);
+  const prefix=scoped?'前回テーマ後は':'';
+  if(/リンプ|繝ｪ繝ｳ繝/.test(txt)){
+    if(limpOpp<3)return{state:'pending',label:'データ待ち',text:(scoped?'前回テーマ後の':'')+'リンプ機会がまだ少ないので、数ハンド続けて入口を確認します。'};
+    if(limpPct<=10)return{state:'good',label:'改善中',text:prefix+'リンプ率は'+limpPct+'%。入口はかなり整理できています。'};
+    if(limpPct<=25)return{state:'improving',label:'あと少し',text:prefix+'リンプ率は'+limpPct+'%。かなり減っていますが、まだレイズかフォールドへ寄せられます。'};
+    return{state:'warn',label:'継続課題',text:prefix+'リンプ率は'+limpPct+'%。前回テーマとしてもう少し続けたい状態です。'};
+  }
+  if(/入口|VPIP|参加|フロップ前|蜈･蜿｣|蜿ょ刈/.test(txt)){
+    if(n<5)return{state:'pending',label:'データ待ち',text:(scoped?'前回テーマ後の':'')+'ハンド数がまだ少ないので、参加レンジの傾向は参考程度です。'};
+    if(vpip>=14&&vpip<=38)return{state:'good',label:'改善中',text:prefix+'VPIPは'+vpip+'%。参加レンジはかなり自然な範囲に入っています。'};
+    if(vpip<=45)return{state:'improving',label:'あと少し',text:prefix+'VPIPは'+vpip+'%。大きく崩れてはいませんが、OOPの入口はもう少し締められます。'};
+    return{state:'warn',label:'継続課題',text:prefix+'VPIPは'+vpip+'%。まだ参加しすぎ寄りなので、入口整理を続けます。'};
+  }
+  if(/ポストフロップ|フロップ|ターン|PostF|繝昴せ繝医ヵ繝ｭ/.test(txt)){
+    if(poN<4)return{state:'pending',label:'データ待ち',text:(scoped?'前回テーマ後の':'')+'ポストフロップ到達がまだ少ないので、まずは判断サンプルを集めます。'};
+    if(avgPO>=70)return{state:'good',label:'改善中',text:prefix+'PostF平均は'+avgPO+'pt。ポストフロップ判断は安定してきています。'};
+    if(avgPO>=60)return{state:'improving',label:'あと少し',text:prefix+'PostF平均は'+avgPO+'pt。大事故は減っていますが、ベット目的と受け方をもう少し磨けます。'};
+    return{state:'warn',label:'継続課題',text:prefix+'PostF平均は'+avgPO+'pt。まだ大きな失点が残りやすい状態です。'};
+  }
+  if(/リバー|ワンペア|ショーダウン|WTSD|繝ｪ繝舌|繝ｯ繝ｳ/.test(txt)){
+    if(wtsdSaw<5)return{state:'pending',label:'データ待ち',text:(scoped?'前回テーマ後の':'')+'リバー判断のサンプルがまだ少ないので、数ハンド続けて見ます。'};
+    if(wtsd>=20&&wtsd<=34)return{state:'good',label:'改善中',text:prefix+'WTSDは'+wtsd+'%。ショーダウンへ行きすぎない形に近づいています。'};
+    if(wtsd<=40)return{state:'improving',label:'あと少し',text:prefix+'WTSDは'+wtsd+'%。かなり締まっていますが、完成ボードのワンペア受けはもう一段見ます。'};
+    return{state:'warn',label:'継続課題',text:prefix+'WTSDは'+wtsd+'%。まだリバーで受けすぎる可能性があります。'};
+  }
+  if(/ミス|繝溘せ/.test(txt)){
+    if(totalDec<10)return{state:'pending',label:'データ待ち',text:(scoped?'前回テーマ後の':'')+'判断数がまだ少ないので、大きなミスの傾向はもう少し見ます。'};
+    if(mistake<=20)return{state:'good',label:'改善中',text:prefix+'ミス率は'+mistake+'%。大きな失点はかなり抑えられています。'};
+    if(mistake<=30)return{state:'improving',label:'あと少し',text:prefix+'ミス率は'+mistake+'%。改善は見えますが、まだ一つ大きな判断を減らせます。'};
+    return{state:'warn',label:'継続課題',text:prefix+'ミス率は'+mistake+'%。前回テーマをもう少し続ける価値があります。'};
+  }
+  return{state:'pending',label:'確認中',text:(scoped?'前回テーマ後のデータを見ながら、':'')+'今回のセッションでも同じ一点を見ます。'};
 }
 function renderSessionFocusProgress(focus,stats){
   if(!focus)return '';
@@ -4716,6 +4801,20 @@ function runFishTankRegressionTests(){
       &&post.state==='good'
       &&/session-progress/.test(html)
       &&/WTSD/.test(html);
+  });
+  add('セッションチェック: 前回テーマ後の増分で現在地を判定する',function(){
+    if(typeof sessionStatsSnapshot!=='function'||typeof sessionStatsSinceBaseline!=='function'||typeof sessionFocusProgress!=='function')return false;
+    const base=sessionStatsSnapshot({hands:20,wtsdSaw:20,wtsdWent:12,poScores:[50,50,50,50],limpOpp:8,limp:4,totalDec:20,badDec:10});
+    const now={hands:30,wtsdSaw:30,wtsdWent:15,poScores:[50,50,50,50,72,74,73,75],limpOpp:12,limp:4,totalDec:32,badDec:12};
+    const river=sessionFocusProgress({title:'次回の一点: リバーで降りる力',body:'WTSDを締めます。',baseline:base},now);
+    const post=sessionFocusProgress({title:'次回の一点: ポストフロップで守る',body:'PostFを見ます。',baseline:base},now);
+    const limp=sessionFocusProgress({title:'次回の一点: オープンリンプを減らす',body:'リンプが多めです。',baseline:base},now);
+    const html=renderSessionFocusProgress({title:'次回の一点: リバーで降りる力',body:'WTSDを締めます。',baseline:base},now);
+    return river.state==='good'
+      &&post.state==='good'
+      &&limp.state==='good'
+      &&/前回テーマ後/.test(html)
+      &&!/60%/.test(html);
   });
   const fourBetBaseDecisions=function(extraHeroAction){
     const ds=[
