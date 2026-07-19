@@ -53,6 +53,12 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,'Hiragino 
 .session-recommend-body{font-size:10px;line-height:1.5;color:var(--dim);}
 .session-apply-practice{margin-top:7px;width:100%;padding:7px 9px;background:rgba(61,108,240,.08);border:1px solid rgba(61,108,240,.24);border-radius:8px;color:var(--accent);font-family:inherit;font-size:11px;font-weight:900;cursor:pointer;}
 .session-apply-practice:hover{background:rgba(61,108,240,.13);}
+.session-progress{margin-top:8px;border-radius:8px;padding:6px 8px;background:var(--panel);border:1px solid var(--border);font-size:10px;line-height:1.5;color:var(--dim);}
+.session-progress span{display:inline-block;margin-right:6px;font-weight:900;}
+.session-progress-good span{color:var(--green);}
+.session-progress-improving span{color:var(--accent);}
+.session-progress-warn span{color:var(--orange);}
+.session-progress-pending span{color:var(--dim);}
 
 /* ===== HUD ===== */
 #game-screen{flex-direction:column;overflow:hidden;}
@@ -5384,10 +5390,60 @@ function renderSessionPracticeRecommendation(focus){
   if(!rec)return '';
   return '<div class="session-recommend"><div class="session-recommend-title">おすすめ練習: '+sessionTextHTML(rec.mode)+' / '+sessionTextHTML(rec.focus)+'</div><div class="session-recommend-body">'+sessionTextHTML(rec.reason)+'</div><button type="button" class="session-apply-practice" data-mode="'+sessionTextHTML(rec.modeValue||'normal')+'" data-focus="'+sessionTextHTML(rec.focusValue||'')+'" data-preset="'+sessionTextHTML(rec.presetValue||'')+'">この練習を設定</button></div>';
 }
+function sessionFocusProgress(focus,stats){
+  stats=stats||sessionStats||{};
+  const txt=((focus&&focus.title)||'')+' '+((focus&&focus.body)||'');
+  const pct=function(a,b){return b>0?Math.round(a/b*100):-1;};
+  const avg=function(arr){return arr&&arr.length?Math.round(arr.reduce(function(a,b){return a+b;},0)/arr.length):0;};
+  const n=stats.hands||0;
+  const limpPct=pct(stats.limp||0,stats.limpOpp||0);
+  const vpip=pct(stats.vpip||0,n);
+  const wtsd=pct(stats.wtsdWent||0,stats.wtsdSaw||0);
+  const mistake=pct(stats.badDec||0,stats.totalDec||0);
+  const poN=(stats.poScores||[]).length;
+  const avgPO=avg(stats.poScores||[]);
+  if(/リンプ/.test(txt)){
+    if((stats.limpOpp||0)<3)return{state:'pending',label:'データ待ち',text:'リンプ機会がまだ少ないので、数ハンド続けて入口を確認します。'};
+    if(limpPct<=10)return{state:'good',label:'改善中',text:'リンプ率は'+limpPct+'%。入口はかなり整理できています。'};
+    if(limpPct<=25)return{state:'improving',label:'あと少し',text:'リンプ率は'+limpPct+'%。かなり減っていますが、まだレイズかフォールドへ寄せられます。'};
+    return{state:'warn',label:'継続課題',text:'リンプ率は'+limpPct+'%。前回テーマとしてもう少し続けたい状態です。'};
+  }
+  if(/入口|VPIP|参加|フロップ前/.test(txt)){
+    if(n<5)return{state:'pending',label:'データ待ち',text:'まだハンド数が少ないので、参加レンジの傾向は参考程度です。'};
+    if(vpip>=14&&vpip<=38)return{state:'good',label:'改善中',text:'VPIPは'+vpip+'%。参加レンジはかなり自然な範囲に入っています。'};
+    if(vpip<=45)return{state:'improving',label:'あと少し',text:'VPIPは'+vpip+'%。大きく崩れてはいませんが、OOPの入口はもう少し締められます。'};
+    return{state:'warn',label:'継続課題',text:'VPIPは'+vpip+'%。まだ参加しすぎ寄りなので、入口整理を続けます。'};
+  }
+  if(/ポストフロップ|フロップ|ターン|PostF/.test(txt)){
+    if(poN<4)return{state:'pending',label:'データ待ち',text:'ポストフロップ到達がまだ少ないので、まずは判断サンプルを集めます。'};
+    if(avgPO>=70)return{state:'good',label:'改善中',text:'PostF平均は'+avgPO+'pt。ポストフロップ判断は安定してきています。'};
+    if(avgPO>=60)return{state:'improving',label:'あと少し',text:'PostF平均は'+avgPO+'pt。大事故は減っていますが、ベット目的と受け方をもう少し磨けます。'};
+    return{state:'warn',label:'継続課題',text:'PostF平均は'+avgPO+'pt。まだ大きな失点が残りやすい状態です。'};
+  }
+  if(/リバー|ワンペア|ショーダウン|WTSD/.test(txt)){
+    if((stats.wtsdSaw||0)<5)return{state:'pending',label:'データ待ち',text:'リバー判断のサンプルがまだ少ないので、数ハンド続けて見ます。'};
+    if(wtsd>=20&&wtsd<=34)return{state:'good',label:'改善中',text:'WTSDは'+wtsd+'%。ショーダウンへ行きすぎない形に近づいています。'};
+    if(wtsd<=40)return{state:'improving',label:'あと少し',text:'WTSDは'+wtsd+'%。かなり締まっていますが、完成ボードのワンペア受けはもう一段見ます。'};
+    return{state:'warn',label:'継続課題',text:'WTSDは'+wtsd+'%。まだリバーで受けすぎる可能性があります。'};
+  }
+  if(/ミス/.test(txt)){
+    if((stats.totalDec||0)<10)return{state:'pending',label:'データ待ち',text:'判断数がまだ少ないので、大きなミスの傾向はもう少し見ます。'};
+    if(mistake<=20)return{state:'good',label:'改善中',text:'ミス率は'+mistake+'%。大きな失点はかなり抑えられています。'};
+    if(mistake<=30)return{state:'improving',label:'あと少し',text:'ミス率は'+mistake+'%。改善は見えますが、まだ一つ大きな判断を減らせます。'};
+    return{state:'warn',label:'継続課題',text:'ミス率は'+mistake+'%。前回テーマをもう少し続ける価値があります。'};
+  }
+  return{state:'pending',label:'確認中',text:'前回テーマを意識して、今回のセッションでも同じ一点を見ます。'};
+}
+function renderSessionFocusProgress(focus,stats){
+  if(!focus)return '';
+  const p=sessionFocusProgress(focus,stats);
+  const cls='session-progress-'+(p.state||'pending');
+  return '<div class="session-progress '+cls+'"><span>'+sessionTextHTML(p.label)+'</span>'+sessionTextHTML(p.text)+'</div>';
+}
 function renderSessionCarryOver(focus){
   if(!focus)return '';
   const color=focus.tone==='good'?'var(--green)':focus.tone==='warn'?'var(--orange)':'var(--accent)';
-  return '<div class="session-summary session-carryover" style="border-left-color:'+color+'"><div class="session-summary-title">前回からの引き継ぎ: '+sessionTextHTML(focus.title.replace(/^次回の一点:\s*/,''))+'</div><div class="session-summary-body">'+sessionTextHTML(focus.body)+'</div>'+renderSessionPracticeRecommendation(focus)+'</div>';
+  return '<div class="session-summary session-carryover" style="border-left-color:'+color+'"><div class="session-summary-title">前回からの引き継ぎ: '+sessionTextHTML(focus.title.replace(/^次回の一点:\s*/,''))+'</div><div class="session-summary-body">'+sessionTextHTML(focus.body)+'</div>'+renderSessionFocusProgress(focus)+renderSessionPracticeRecommendation(focus)+'</div>';
 }
 function renderSessionStartChecklist(focus){
   const carry=renderSessionCarryOver(focus===undefined?getStoredSessionNextFocus():focus);
@@ -10782,6 +10838,18 @@ function runFishTankRegressionTests(){
       &&/data-focus="bb_defend"/.test(bbHtml)
       &&/data-preset="middle"/.test(bbHtml)
       &&/data-mode="normal"/.test(riverHtml);
+  });
+  add('セッションチェック: 前回テーマの現在地を短く判定する',function(){
+    if(typeof sessionFocusProgress!=='function'||typeof renderSessionFocusProgress!=='function')return false;
+    const river=sessionFocusProgress({title:'次回の一点: リバーで降りる力',body:'ワンペアの受けを少し締めます。'},{hands:12,wtsdSaw:10,wtsdWent:3});
+    const limp=sessionFocusProgress({title:'次回の一点: オープンリンプを減らす',body:'リンプが多めです。'},{hands:8,limpOpp:5,limp:2});
+    const post=sessionFocusProgress({title:'次回の一点: ポストフロップで守る',body:'PostFを見ます。'},{hands:8,poScores:[72,70,75,74]});
+    const html=renderSessionFocusProgress({title:'次回の一点: リバーで降りる力',body:'ワンペアの受けを少し締めます。'},{hands:12,wtsdSaw:10,wtsdWent:5});
+    return river.state==='good'
+      &&limp.state==='warn'
+      &&post.state==='good'
+      &&/session-progress/.test(html)
+      &&/WTSD/.test(html);
   });
   const fourBetBaseDecisions=function(extraHeroAction){
     const ds=[
