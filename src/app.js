@@ -1919,8 +1919,45 @@ function renderSessionChecklist(items,note){
 function renderSessionStartChecklist(){
   return renderSessionChecklist(SESSION_START_CHECKS,'全部にチェックできなくても開始はできます。崩れそうな条件を先に見つけるためのメモです。');
 }
+function sessionEndStatsProfile(stats){
+  stats=stats||sessionStats||{};
+  const n=stats.hands||0;
+  const avg=function(arr){return arr&&arr.length?Math.round(arr.reduce(function(a,b){return a+b;},0)/arr.length):0;};
+  const pct=function(a,b){return b>0?Math.round(a/b*100):-1;};
+  const avgScore=avg(stats.scores||[]);
+  const avgPF=avg(stats.pfScores||[]);
+  const avgPO=avg(stats.poScores||[]);
+  const poN=(stats.poScores||[]).length;
+  const vpip=pct(stats.vpip||0,n);
+  const limpPct=pct(stats.limp||0,stats.limpOpp||0);
+  const wtsd=pct(stats.wtsdWent||0,stats.wtsdSaw||0);
+  const mistake=pct(stats.badDec||0,stats.totalDec||0);
+  let focus={title:'今日の振り返り',body:'まだハンド数が少ないため、数字よりも「集中して判断できたか」を見ます。次回のテーマを一つだけ決めて終えましょう。',tone:'neutral'};
+  if(n>=5&&limpPct>25){
+    focus={title:'次回の一点: オープンリンプを減らす',body:'リンプが多めです。参加するならレイズ、難しいハンドは最初からフォールドに整理すると、後のストリートがかなり楽になります。',tone:'warn'};
+  }else if(n>=5&&vpip>45){
+    focus={title:'次回の一点: 入口を締める',body:'VPIPが高めです。特にOOPやオフスートブロードウェイは、ヒットしても難しい判断になりやすいので参加前に一段絞ります。',tone:'warn'};
+  }else if(n>=8&&poN>=4&&avgPF-avgPO>=18){
+    focus={title:'次回の一点: ポストフロップで守る',body:'フロップ前よりポストフロップの失点が目立ちます。ワンペアで大きなポットを作る前に、相手レンジと嫌なターン/リバーを確認しましょう。',tone:'warn'};
+  }else if(n>=8&&wtsd>37){
+    focus={title:'次回の一点: リバーで降りる力',body:'ショーダウン到達が多めです。ライブ$2/$5では大きなリバーベットがバリュー寄りになりやすいので、ワンペアの受けを少し締めます。',tone:'warn'};
+  }else if(n>=8&&mistake>30){
+    focus={title:'次回の一点: 大きなミスを一つ減らす',body:'ミス率が高めです。全部を直すより、今日一番大きかった判断だけを次回のテーマにすると改善が続きます。',tone:'warn'};
+  }else if(n>=8&&avgScore>=80){
+    focus={title:'良いセッションです',body:'平均スコアは安定しています。次は得意な場面を増やすより、苦手な一領域を選んで精度を上げる段階です。',tone:'good'};
+  }
+  return{hands:n,avgScore,avgPF,avgPO,poN,vpip,limpPct,wtsd,mistake,focus};
+}
+function renderSessionEndSummary(stats){
+  const p=sessionEndStatsProfile(stats);
+  const color=p.focus.tone==='good'?'var(--green)':p.focus.tone==='warn'?'var(--orange)':'var(--accent)';
+  const score=p.hands>0
+    ? '<div class="session-summary-grid"><div><b>'+p.hands+'</b><span>Hands</span></div><div><b>'+(p.avgScore||'--')+'</b><span>Avg</span></div><div><b>'+(p.avgPF||'--')+'</b><span>PF</span></div><div><b>'+(p.poN?p.avgPO:'--')+'</b><span>PostF</span></div></div>'
+    : '<div class="session-check-note">まだハンドがないので、終了前の自己確認だけ表示します。</div>';
+  return '<div class="session-summary" style="border-left-color:'+color+'"><div class="session-summary-title">'+p.focus.title+'</div><div class="session-summary-body">'+p.focus.body+'</div>'+score+'</div>';
+}
 function renderSessionEndChecklist(){
-  return renderSessionChecklist(SESSION_END_CHECKS,'点数よりも、次回に一つ直せる形で終えることを優先します。');
+  return renderSessionEndSummary()+renderSessionChecklist(SESSION_END_CHECKS,'点数よりも、次回に一つ直せる形で終えることを優先します。');
 }
 function initSessionChecklistUI(){
   const cb=$('cfg-session-check');
@@ -4516,6 +4553,16 @@ function runFishTankRegressionTests(){
       &&/ティルト/.test(e)
       &&/終了予定/.test(e)
       &&/次回の練習テーマ/.test(e);
+  });
+  add('セッションチェック: 終了時に統計から次回テーマを一つ出す',function(){
+    if(typeof sessionEndStatsProfile!=='function'||typeof renderSessionEndSummary!=='function')return false;
+    const stats={hands:10,vpip:5,pfr:2,limp:3,limpOpp:6,wtsdWent:2,wtsdSaw:8,badDec:2,totalDec:20,scores:[70,72,75,74,73],pfScores:[82,80,78,81],poScores:[55,58,60,57]};
+    const p=sessionEndStatsProfile(stats);
+    const html=renderSessionEndSummary(stats);
+    return /リンプ/.test(p.focus.title+p.focus.body)
+      &&/Hands/.test(html)
+      &&/PostF/.test(html)
+      &&/次回の一点/.test(html);
   });
   const fourBetBaseDecisions=function(extraHeroAction){
     const ds=[
