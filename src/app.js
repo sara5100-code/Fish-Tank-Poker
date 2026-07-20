@@ -1947,6 +1947,36 @@ function storeSessionFocusHistory(list){
 function sessionFocusTitleText(focus){
   return String((focus&&focus.title)||'').replace(/^次回の一点:\s*/,'').replace(/^谺｡蝗槭・荳轤ｹ:\s*/,'');
 }
+function sessionFocusRepeatCandidate(history){
+  const list=(Array.isArray(history)?history:getSessionFocusHistory()).filter(function(it){return it&&it.title;});
+  if(list.length<2)return null;
+  const title=list[0].title;
+  let count=0;
+  for(const it of list){
+    if(it.title!==title)break;
+    if(it.state==='good'||it.state==='pending')break;
+    count++;
+  }
+  if(count<2)return null;
+  return{title:title,count:count,state:list[0].state||'warn'};
+}
+function sessionFocusApplyHistory(profile,history){
+  if(!profile||!profile.focus)return profile;
+  const repeat=sessionFocusRepeatCandidate(history);
+  if(!repeat)return profile;
+  const curTitle=sessionFocusTitleText(profile.focus);
+  const canContinue=profile.focus.tone==='good'||profile.focus.tone==='neutral'||curTitle===repeat.title;
+  if(!canContinue)return profile;
+  const next=Object.assign({},profile);
+  next.focus={
+    title:'次回の一点: '+repeat.title,
+    body:'同じテーマが'+repeat.count+'回続いています。新しい課題へ広げるより、まずここをもう一度だけ確認します。今回も同じ場面で迷ったら、判断前に一拍置いてレンジとサイズを見直してください。',
+    tone:'warn',
+    historyRepeat:repeat.count
+  };
+  next.historyRepeat=repeat;
+  return next;
+}
 function renderSessionChecklist(items,note){
   return '<div class="session-check-list">'+items.map(function(t){
     return '<div class="session-check-item">'+t+'</div>';
@@ -2163,10 +2193,11 @@ function sessionEndStatsProfile(stats){
   }else if(n>=8&&avgScore>=80){
     focus={title:'良いセッションです',body:'平均スコアは安定しています。次は得意な場面を増やすより、苦手な一領域を選んで精度を上げる段階です。',tone:'good'};
   }
-  return{hands:n,avgScore,avgPF,avgPO,poN,vpip,limpPct,wtsd,mistake,focus};
+  return sessionFocusApplyHistory({hands:n,avgScore,avgPF,avgPO,poN,vpip,limpPct,wtsd,mistake,focus});
 }
 function sessionEndFocusReason(profile){
   const p=profile||sessionEndStatsProfile();
+  if(p.historyRepeat&&p.historyRepeat.title)return '同じテーマが'+p.historyRepeat.count+'回続いています。いまは新しい課題へ広げるより、'+p.historyRepeat.title+'をもう一度だけ継続する判断です。';
   const txt=((p.focus&&p.focus.title)||'')+' '+((p.focus&&p.focus.body)||'');
   if(/繝ｪ繝ｳ繝|リンプ/.test(txt))return 'リンプ率 '+(p.limpPct>=0?p.limpPct+'%':'--')+'。参加するならレイズかフォールドに寄せるテーマです。';
   if(/VPIP|蜈･蜿｣|蜿ょ刈|入口|参加/.test(txt))return 'VPIP '+(p.vpip>=0?p.vpip+'%':'--')+'。参加ハンドを一段絞るテーマです。';
@@ -5007,6 +5038,30 @@ function runFishTankRegressionTests(){
         &&/session-history/.test(html)
         &&/session-history-good/.test(html)
         &&/リバーで降りる力/.test(html);
+    }finally{
+      SESSION_FOCUS_HISTORY_FALLBACK=oldFallback||[];
+      if(old==null)localStorage.removeItem(SESSION_FOCUS_HISTORY_KEY);
+      else localStorage.setItem(SESSION_FOCUS_HISTORY_KEY,old);
+    }
+  });
+  add('session checklist: repeated unfinished focus continues next theme',function(){
+    if(typeof sessionEndStatsProfile!=='function'||typeof sessionFocusRepeatCandidate!=='function')return false;
+    const old=localStorage.getItem(SESSION_FOCUS_HISTORY_KEY);
+    const oldFallback=SESSION_FOCUS_HISTORY_FALLBACK;
+    try{
+      SESSION_FOCUS_HISTORY_FALLBACK=[
+        {title:'リバーで降りる力',state:'warn',sample:'前回後: 8ハンド / WTSD機会6'},
+        {title:'リバーで降りる力',state:'improving',sample:'前回後: 10ハンド / WTSD機会7'},
+        {title:'入口を締める',state:'good',sample:'前回後: 12ハンド'}
+      ];
+      localStorage.removeItem(SESSION_FOCUS_HISTORY_KEY);
+      const stats={hands:12,vpip:4,pfr:3,limp:0,limpOpp:4,wtsdWent:3,wtsdSaw:10,badDec:1,totalDec:20,scores:[82,84,81,85],pfScores:[76,78,80],poScores:[72,74,70,75]};
+      const repeat=sessionFocusRepeatCandidate();
+      const p=sessionEndStatsProfile(stats);
+      return repeat&&repeat.count===2
+        &&p.historyRepeat&&p.historyRepeat.count===2
+        &&/リバーで降りる力/.test(p.focus.title)
+        &&/同じテーマ/.test(sessionEndFocusReason(p));
     }finally{
       SESSION_FOCUS_HISTORY_FALLBACK=oldFallback||[];
       if(old==null)localStorage.removeItem(SESSION_FOCUS_HISTORY_KEY);
