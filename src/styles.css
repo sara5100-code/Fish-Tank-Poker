@@ -39,6 +39,13 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,'Hiragino 
 .session-summary-body{font-size:11px;line-height:1.55;color:var(--dim);margin-bottom:8px;}
 .session-focus-good{margin:-2px 0 6px;padding:6px 8px;border-radius:8px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.20);font-size:10px;line-height:1.45;color:var(--green);font-weight:900;}
 .session-focus-reason{margin:-2px 0 8px;padding:6px 8px;border-radius:8px;background:var(--panel);border:1px solid var(--border);font-size:10px;line-height:1.45;color:var(--dim);font-weight:800;}
+.session-focus-result{margin:-2px 0 6px;padding:7px 8px;border-radius:9px;background:var(--panel);border:1px solid var(--border);font-size:10px;line-height:1.45;color:var(--dim);}
+.session-focus-result b{display:block;margin-bottom:2px;font-size:11px;color:var(--text);}
+.session-focus-result span{display:block;}
+.session-focus-result small{display:block;margin-top:3px;color:var(--muted);font-weight:800;}
+.session-focus-result-good b{color:var(--green);}
+.session-focus-result-improving b{color:var(--accent);}
+.session-focus-result-warn b{color:var(--orange);}
 .session-summary-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;}
 .session-summary-grid div{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:5px 3px;text-align:center;}
 .session-summary-grid b{display:block;font-size:14px;color:var(--text);line-height:1.1;}
