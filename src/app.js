@@ -2143,13 +2143,24 @@ function sessionEndStatsProfile(stats){
   }
   return{hands:n,avgScore,avgPF,avgPO,poN,vpip,limpPct,wtsd,mistake,focus};
 }
+function sessionEndFocusReason(profile){
+  const p=profile||sessionEndStatsProfile();
+  const txt=((p.focus&&p.focus.title)||'')+' '+((p.focus&&p.focus.body)||'');
+  if(/繝ｪ繝ｳ繝|リンプ/.test(txt))return 'リンプ率 '+(p.limpPct>=0?p.limpPct+'%':'--')+'。参加するならレイズかフォールドに寄せるテーマです。';
+  if(/VPIP|蜈･蜿｣|蜿ょ刈|入口|参加/.test(txt))return 'VPIP '+(p.vpip>=0?p.vpip+'%':'--')+'。参加ハンドを一段絞るテーマです。';
+  if(/PostF|繝昴せ繝医ヵ繝ｭ|ポストフロップ|フロップ|ターン/.test(txt))return 'PF '+(p.avgPF||'--')+'pt / PostF '+(p.poN?p.avgPO+'pt':'--')+'。フロップ以降の失点を減らすテーマです。';
+  if(/WTSD|繝ｪ繝舌|繝ｯ繝ｳ|リバー|ワンペア|ショーダウン/.test(txt))return 'WTSD '+(p.wtsd>=0?p.wtsd+'%':'--')+'。リバーでショーダウンへ行きすぎない練習です。';
+  if(/繝溘せ|ミス/.test(txt))return 'ミス率 '+(p.mistake>=0?p.mistake+'%':'--')+'。一番大きい判断ミスを減らすテーマです。';
+  if((p.avgScore||0)>=80)return '平均 '+(p.avgScore||'--')+'pt。次は弱点探しより精度維持を狙います。';
+  return (p.hands||0)+'ハンド。サンプルを増やして次回テーマを絞ります。';
+}
 function renderSessionEndSummary(stats){
   const p=sessionEndStatsProfile(stats);
   const color=p.focus.tone==='good'?'var(--green)':p.focus.tone==='warn'?'var(--orange)':'var(--accent)';
   const score=p.hands>0
     ? '<div class="session-summary-grid"><div><b>'+p.hands+'</b><span>Hands</span></div><div><b>'+(p.avgScore||'--')+'</b><span>Avg</span></div><div><b>'+(p.avgPF||'--')+'</b><span>PF</span></div><div><b>'+(p.poN?p.avgPO:'--')+'</b><span>PostF</span></div></div>'
     : '<div class="session-check-note">まだハンドがないので、終了前の自己確認だけ表示します。</div>';
-  return '<div class="session-summary" style="border-left-color:'+color+'"><div class="session-summary-title">'+p.focus.title+'</div><div class="session-summary-body">'+p.focus.body+'</div>'+score+'</div>';
+  return '<div class="session-summary" style="border-left-color:'+color+'"><div class="session-summary-title">'+p.focus.title+'</div><div class="session-summary-body">'+p.focus.body+'</div><div class="session-focus-reason">'+sessionTextHTML(sessionEndFocusReason(p))+'</div>'+score+'</div>';
 }
 function renderSessionEndChecklist(){
   return renderSessionEndSummary()+renderSessionChecklist(SESSION_END_CHECKS,'点数よりも、次回に一つ直せる形で終えることを優先します。');
@@ -4847,6 +4858,16 @@ function runFishTankRegressionTests(){
     return /前回後: 10ハンド \/ WTSD機会10/.test(sessionFocusProgressSample(river,now))
       &&/前回後: 10ハンド \/ PostF 4回/.test(sessionFocusProgressSample(post,now))
       &&/<small>前回後: 10ハンド \/ WTSD機会10<\/small>/.test(html);
+  });
+  add('session checklist: end summary shows why next focus was selected',function(){
+    if(typeof sessionEndFocusReason!=='function'||typeof renderSessionEndSummary!=='function')return false;
+    const stats={hands:10,vpip:5,pfr:2,limp:3,limpOpp:6,wtsdWent:2,wtsdSaw:8,badDec:2,totalDec:20,scores:[70,72,75,74,73],pfScores:[82,80,78,81],poScores:[55,58,60,57]};
+    const p=sessionEndStatsProfile(stats);
+    const reason=sessionEndFocusReason(p);
+    const html=renderSessionEndSummary(stats);
+    return /リンプ率 50%/.test(reason)
+      &&/session-focus-reason/.test(html)
+      &&/レイズかフォールド/.test(html);
   });
   const fourBetBaseDecisions=function(extraHeroAction){
     const ds=[
