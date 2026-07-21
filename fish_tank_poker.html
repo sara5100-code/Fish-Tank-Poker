@@ -79,6 +79,10 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,'Hiragino 
 .session-progress-improving span{color:var(--accent);}
 .session-progress-warn span{color:var(--orange);}
 .session-progress-pending span{color:var(--dim);}
+.session-action-plan{margin-top:8px;background:rgba(61,108,240,.06);border:1px solid rgba(61,108,240,.18);border-radius:9px;padding:7px 8px;}
+.session-action-plan-title{font-size:11px;font-weight:900;color:var(--accent);margin-bottom:5px;}
+.session-action-item{display:flex;gap:6px;font-size:10px;line-height:1.45;color:var(--dim);font-weight:800;margin-top:4px;}
+.session-action-item::before{content:'・';color:var(--accent);font-weight:900;}
 
 /* ===== HUD ===== */
 #game-screen{flex-direction:column;overflow:hidden;}
@@ -5462,6 +5466,46 @@ function renderSessionPracticeRecommendation(focus){
   if(!rec)return '';
   return '<div class="session-recommend"><div class="session-recommend-title">おすすめ練習: '+sessionTextHTML(rec.mode)+' / '+sessionTextHTML(rec.focus)+'</div><div class="session-recommend-body">'+sessionTextHTML(rec.reason)+'</div><button type="button" class="session-apply-practice" data-mode="'+sessionTextHTML(rec.modeValue||'normal')+'" data-focus="'+sessionTextHTML(rec.focusValue||'')+'" data-preset="'+sessionTextHTML(rec.presetValue||'')+'">この練習を設定</button></div>';
 }
+function sessionFocusActionChecklist(focus){
+  const txt=((focus&&focus.title)||'')+' '+((focus&&focus.body)||'');
+  if(/リバー|ワンペア|ショーダウン|WTSD/.test(txt))return[
+    'リバーでワンペアのまま大きいベットを受けたら、相手のバリュー候補を3つ挙げる',
+    '必要勝率だけで決めず、相手に十分なブラフが残るかを確認する',
+    '相手がパッシブ寄りなら、迷ったコールは一段フォールド寄りにする'
+  ];
+  if(/BB防衛|BBディフェンス|defend/i.test(txt))return[
+    'BBで守る前に、相手の位置とオープンサイズを確認する',
+    'コール後にOOPで困る弱いトップペア型かどうかを見る',
+    '守った後は、ワンペアで大きく払いすぎないことを先に決める'
+  ];
+  if(/ポストフロップ|フロップ|ターン|PostF/.test(txt))return[
+    'ベット前に、何にコールしてほしいかを一つ言う',
+    'チェック時は、ショーダウン価値を守る目的か諦める目的かを分ける',
+    'ターン以降は、落ちたカードで相手レンジが強くなったかを見る'
+  ];
+  if(/リンプ|入口|VPIP|参加/.test(txt))return[
+    '参加前に、レイズで入る手かフォールドする手かを先に決める',
+    'OOPでオフスートブロードウェイをコールしすぎない',
+    '迷うハンドは、安いからコールではなくフォールド寄りに整理する'
+  ];
+  if(/ミス|振り返り/.test(txt))return[
+    '大きいポットになる前に、一度だけ相手の強いレンジを考える',
+    '押したいボタンではなく、推奨ラインとサイズを先に確認する',
+    '終わったら一番迷った判断を一つだけメモする'
+  ];
+  return[
+    '今日のテーマを一つだけ決めてから始める',
+    '迷った場面は、手役ではなく相手レンジから考える',
+    'セッション後に一番大きかった判断を一つだけ振り返る'
+  ];
+}
+function renderSessionFocusActionChecklist(focus){
+  if(!focus)return '';
+  const items=sessionFocusActionChecklist(focus);
+  return '<div class="session-action-plan"><div class="session-action-plan-title">次の1ハンドで見ること</div>'+items.map(function(t){
+    return '<div class="session-action-item">'+sessionTextHTML(t)+'</div>';
+  }).join('')+'</div>';
+}
 function sessionFocusProgress(focus,stats){
   stats=stats||sessionStats||{};
   const txt=((focus&&focus.title)||'')+' '+((focus&&focus.body)||'');
@@ -5621,7 +5665,7 @@ function renderSessionFocusProgress(focus,stats){
 function renderSessionCarryOver(focus){
   if(!focus)return '';
   const color=focus.tone==='good'?'var(--green)':focus.tone==='warn'?'var(--orange)':'var(--accent)';
-  return '<div class="session-summary session-carryover" style="border-left-color:'+color+'"><div class="session-summary-title">前回からの引き継ぎ: '+sessionTextHTML(focus.title.replace(/^次回の一点:\s*/,''))+'</div><div class="session-summary-body">'+sessionTextHTML(focus.body)+'</div>'+renderSessionFocusProgress(focus)+renderSessionPracticeRecommendation(focus)+'</div>';
+  return '<div class="session-summary session-carryover" style="border-left-color:'+color+'"><div class="session-summary-title">前回からの引き継ぎ: '+sessionTextHTML(focus.title.replace(/^次回の一点:\s*/,''))+'</div><div class="session-summary-body">'+sessionTextHTML(focus.body)+'</div>'+renderSessionFocusProgress(focus)+renderSessionFocusActionChecklist(focus)+renderSessionPracticeRecommendation(focus)+'</div>';
 }
 function renderSessionStartChecklist(focus){
   const carry=renderSessionCarryOver(focus===undefined?getStoredSessionNextFocus():focus);
@@ -11221,6 +11265,20 @@ function runFishTankRegressionTests(){
       if(old==null)localStorage.removeItem(SESSION_FOCUS_HISTORY_KEY);
       else localStorage.setItem(SESSION_FOCUS_HISTORY_KEY,old);
     }
+  });
+  add('session checklist: focus becomes one-hand action plan',function(){
+    if(typeof sessionFocusActionChecklist!=='function'||typeof renderSessionFocusActionChecklist!=='function'||typeof renderSessionStartChecklist!=='function')return false;
+    const river={title:'次回の一点: リバーで降りる力',body:'WTSDを締めます。',tone:'warn'};
+    const post={title:'次回の一点: ポストフロップで守る',body:'PostFを見ます。',tone:'warn'};
+    const riverItems=sessionFocusActionChecklist(river);
+    const postItems=sessionFocusActionChecklist(post);
+    const html=renderSessionStartChecklist(river);
+    return riverItems.length===3
+      &&postItems.length===3
+      &&/バリュー候補を3つ/.test(riverItems.join(' '))
+      &&/何にコールしてほしいか/.test(postItems.join(' '))
+      &&/session-action-plan/.test(html)
+      &&/次の1ハンドで見ること/.test(html);
   });
   const fourBetBaseDecisions=function(extraHeroAction){
     const ds=[

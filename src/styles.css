@@ -72,6 +72,10 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,'Hiragino 
 .session-progress-improving span{color:var(--accent);}
 .session-progress-warn span{color:var(--orange);}
 .session-progress-pending span{color:var(--dim);}
+.session-action-plan{margin-top:8px;background:rgba(61,108,240,.06);border:1px solid rgba(61,108,240,.18);border-radius:9px;padding:7px 8px;}
+.session-action-plan-title{font-size:11px;font-weight:900;color:var(--accent);margin-bottom:5px;}
+.session-action-item{display:flex;gap:6px;font-size:10px;line-height:1.45;color:var(--dim);font-weight:800;margin-top:4px;}
+.session-action-item::before{content:'・';color:var(--accent);font-weight:900;}
 
 /* ===== HUD ===== */
 #game-screen{flex-direction:column;overflow:hidden;}
