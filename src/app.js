@@ -2034,6 +2034,14 @@ function sessionFocusActionChecklist(focus){
     'セッション後に一番大きかった判断を一つだけ振り返る'
   ];
 }
+function sessionFocusModeKey(focus){
+  const txt=((focus&&focus.title)||'')+' '+((focus&&focus.body)||'');
+  if(/BB防衛|BBディフェンス|defend/i.test(txt))return 'tournament_bb_defense';
+  if(/リバー|ワンペア|ショーダウン|WTSD/.test(txt))return 'ring_river';
+  if(/ポストフロップ|フロップ|ターン|PostF/.test(txt))return 'flop_bet_plan';
+  if(/リンプ|入口|VPIP|参加/.test(txt))return 'ring_preflop_entry';
+  return 'general';
+}
 function renderSessionFocusActionChecklist(focus){
   if(!focus)return '';
   const items=sessionFocusActionChecklist(focus);
@@ -2044,28 +2052,37 @@ function renderSessionFocusActionChecklist(focus){
 function sessionFocusActionResult(focus,stats){
   if(!focus)return null;
   stats=stats||sessionStats||{};
-  const txt=((focus&&focus.title)||'')+' '+((focus&&focus.body)||'');
+  const mode=sessionFocusModeKey(focus);
   const p=sessionEndCarryoverProgress(focus,stats);
   const action=sessionFocusActionChecklist(focus)[0]||'今回のテーマを意識して判断する';
-  if(p.state==='pending')return{state:'pending',title:'行動チェック: 判定待ち',body:'まだサンプルが少ないので、このチェックを数ハンド続けて見ます。',action};
-  if(/リバー|ワンペア|ショーダウン|WTSD/.test(txt)){
+  const pct=function(a,b){return b>0?Math.round(a/b*100):-1;};
+  const avg=function(arr){return arr&&arr.length?Math.round(arr.reduce(function(a,b){return a+b;},0)/arr.length):0;};
+  if(p.state==='pending'&&mode!=='tournament_bb_defense'&&mode!=='flop_bet_plan')return{state:'pending',title:'行動チェック: 判定待ち',body:'まだサンプルが少ないので、このチェックを数ハンド続けて見ます。',action};
+  if(mode==='ring_river'){
     if(p.state==='good')return{state:'good',title:'行動チェック: 守れています',body:'リバーでショーダウンへ行きすぎる量は抑えられています。ワンペアで払う前に、相手の強いレンジを一度見られている可能性が高いです。',action};
     if(p.state==='improving')return{state:'improving',title:'行動チェック: もう少し',body:'かなり締まっていますが、完成ボードや大きいベットではまだ一段だけフォールド寄りにできます。',action};
     return{state:'warn',title:'行動チェック: 継続',body:'まだリバーで受けすぎる可能性があります。次回も、ワンペアで払う前に相手のバリュー候補を先に数えてください。',action};
   }
-  if(/ポストフロップ|フロップ|ターン|PostF/.test(txt)){
-    if(p.state==='good')return{state:'good',title:'行動チェック: 守れています',body:'ポストフロップの判断は安定しています。ベット前に「何にコールしてほしいか」を考える癖が形になっています。',action};
-    if(p.state==='improving')return{state:'improving',title:'行動チェック: もう少し',body:'大きな崩れは減っています。次はベット目的とチェックの目的を、各ストリートでもう少しはっきり分けます。',action};
-    return{state:'warn',title:'行動チェック: 継続',body:'まだポストフロップで失点が残っています。ベットする時は、コールしてほしい相手レンジを一つ言ってから押してください。',action};
+  if(mode==='flop_bet_plan'){
+    const poN=(stats.poScores||[]).length;
+    const poAvg=avg(stats.poScores||[]);
+    if(poN<4)return{state:'pending',title:'行動チェック: 判定待ち',body:'フロップ以降のサンプルがまだ少ないので、ベット目的の確認をもう少し続けます。',action};
+    if(poAvg>=72)return{state:'good',title:'行動チェック: 守れています',body:'フロップトレーニングでは、ベット目的とサイズ選びがかなり安定しています。打つ前に「何に払ってほしいか」を考える形が出ています。',action};
+    if(poAvg>=62)return{state:'improving',title:'行動チェック: もう少し',body:'大きな崩れは減っています。次はベット、チェック、コールの目的を各ストリートでもう少しはっきり分けます。',action};
+    return{state:'warn',title:'行動チェック: 継続',body:'まだベット目的が曖昧になりやすい状態です。打つ時は、コールしてほしい相手と降ろしたい相手を一つずつ言ってから押してください。',action};
   }
-  if(/リンプ|入口|VPIP|参加/.test(txt)){
+  if(mode==='ring_preflop_entry'){
     if(p.state==='good')return{state:'good',title:'行動チェック: 守れています',body:'参加前にレイズかフォールドかを整理できています。入口で難しいワンペア判断を減らす方向です。',action};
     if(p.state==='improving')return{state:'improving',title:'行動チェック: もう少し',body:'入口はかなり締まっていますが、OOPやオフスート系の迷うコールはまだ削れます。',action};
     return{state:'warn',title:'行動チェック: 継続',body:'まだ参加しすぎ、またはリンプ寄りです。安いからコールではなく、参加前にレイズかフォールドへ整理してください。',action};
   }
-  if(/BB防衛|BBディフェンス|defend/i.test(txt)){
-    if(p.state==='good')return{state:'good',title:'行動チェック: 守れています',body:'BB防衛の入口は大きく崩れていません。守った後にOOPで払いすぎない意識を続けます。',action};
-    if(p.state==='warn')return{state:'warn',title:'行動チェック: 継続',body:'BBは広く守れますが、守った後に弱いワンペアで払いすぎると損になります。相手位置とサイズを見てから守ってください。',action};
+  if(mode==='tournament_bb_defense'){
+    const total=stats.totalDec||0;
+    const miss=pct(stats.badDec||0,total);
+    if(total<10)return{state:'pending',title:'行動チェック: 判定待ち',body:'BB防衛の判断サンプルがまだ少ないので、相手位置とサイズを見る確認を続けます。',action};
+    if(miss>=0&&miss<=20)return{state:'good',title:'行動チェック: 守れています',body:'トーナメントのBB防衛は大きく崩れていません。守った後にOOPで払いすぎない意識を続けます。',action};
+    if(miss<=30)return{state:'improving',title:'行動チェック: もう少し',body:'BBは広く守れますが、守った後の難しいワンペア判断がまだ残ります。相手位置とサイズを見てから守る癖を続けます。',action};
+    return{state:'warn',title:'行動チェック: 継続',body:'BB防衛の判断がまだ荒れています。ポットオッズだけで守らず、OOPで払いすぎるハンドかどうかを先に確認してください。',action};
   }
   if(p.state==='good')return{state:'good',title:'行動チェック: 守れています',body:'今回のテーマは大きく崩れていません。次は同じ確認をもう少し速くできるようにします。',action};
   return{state:p.state||'warn',title:'行動チェック: 継続',body:'今回のテーマはまだ残っています。次回も同じチェックを最初の数ハンドで確認します。',action};
@@ -5181,6 +5198,25 @@ function runFishTankRegressionTests(){
         localStorage.setItem(SESSION_NEXT_FOCUS_KEY,old);
       }
     }
+  });
+  add('session checklist: action result uses mode specific metrics',function(){
+    if(typeof sessionFocusActionResult!=='function'||typeof sessionFocusModeKey!=='function')return false;
+    const river={title:'次回の一点: リバーで降りる力',body:'WTSDを締めます。'};
+    const bb={title:'次回の一点: BB防衛',body:'BBディフェンスを整理します。'};
+    const flop={title:'次回の一点: ポストフロップで守る',body:'PostFを見ます。'};
+    const riverGood=sessionFocusActionResult(river,{hands:12,wtsdSaw:10,wtsdWent:3});
+    const bbGood=sessionFocusActionResult(bb,{hands:12,totalDec:20,badDec:3});
+    const bbWarn=sessionFocusActionResult(bb,{hands:12,totalDec:20,badDec:8});
+    const flopGood=sessionFocusActionResult(flop,{hands:12,poScores:[72,74,75,73]});
+    const flopWarn=sessionFocusActionResult(flop,{hands:12,poScores:[50,55,58,57]});
+    return sessionFocusModeKey(river)==='ring_river'
+      &&sessionFocusModeKey(bb)==='tournament_bb_defense'
+      &&sessionFocusModeKey(flop)==='flop_bet_plan'
+      &&riverGood&&riverGood.state==='good'
+      &&bbGood&&bbGood.state==='good'&&/トーナメントのBB防衛/.test(bbGood.body)
+      &&bbWarn&&bbWarn.state==='warn'
+      &&flopGood&&flopGood.state==='good'&&/フロップトレーニング/.test(flopGood.body)
+      &&flopWarn&&flopWarn.state==='warn';
   });
   const fourBetBaseDecisions=function(extraHeroAction){
     const ds=[
