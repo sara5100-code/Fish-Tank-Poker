@@ -2041,6 +2041,40 @@ function renderSessionFocusActionChecklist(focus){
     return '<div class="session-action-item">'+sessionTextHTML(t)+'</div>';
   }).join('')+'</div>';
 }
+function sessionFocusActionResult(focus,stats){
+  if(!focus)return null;
+  stats=stats||sessionStats||{};
+  const txt=((focus&&focus.title)||'')+' '+((focus&&focus.body)||'');
+  const p=sessionEndCarryoverProgress(focus,stats);
+  const action=sessionFocusActionChecklist(focus)[0]||'今回のテーマを意識して判断する';
+  if(p.state==='pending')return{state:'pending',title:'行動チェック: 判定待ち',body:'まだサンプルが少ないので、このチェックを数ハンド続けて見ます。',action};
+  if(/リバー|ワンペア|ショーダウン|WTSD/.test(txt)){
+    if(p.state==='good')return{state:'good',title:'行動チェック: 守れています',body:'リバーでショーダウンへ行きすぎる量は抑えられています。ワンペアで払う前に、相手の強いレンジを一度見られている可能性が高いです。',action};
+    if(p.state==='improving')return{state:'improving',title:'行動チェック: もう少し',body:'かなり締まっていますが、完成ボードや大きいベットではまだ一段だけフォールド寄りにできます。',action};
+    return{state:'warn',title:'行動チェック: 継続',body:'まだリバーで受けすぎる可能性があります。次回も、ワンペアで払う前に相手のバリュー候補を先に数えてください。',action};
+  }
+  if(/ポストフロップ|フロップ|ターン|PostF/.test(txt)){
+    if(p.state==='good')return{state:'good',title:'行動チェック: 守れています',body:'ポストフロップの判断は安定しています。ベット前に「何にコールしてほしいか」を考える癖が形になっています。',action};
+    if(p.state==='improving')return{state:'improving',title:'行動チェック: もう少し',body:'大きな崩れは減っています。次はベット目的とチェックの目的を、各ストリートでもう少しはっきり分けます。',action};
+    return{state:'warn',title:'行動チェック: 継続',body:'まだポストフロップで失点が残っています。ベットする時は、コールしてほしい相手レンジを一つ言ってから押してください。',action};
+  }
+  if(/リンプ|入口|VPIP|参加/.test(txt)){
+    if(p.state==='good')return{state:'good',title:'行動チェック: 守れています',body:'参加前にレイズかフォールドかを整理できています。入口で難しいワンペア判断を減らす方向です。',action};
+    if(p.state==='improving')return{state:'improving',title:'行動チェック: もう少し',body:'入口はかなり締まっていますが、OOPやオフスート系の迷うコールはまだ削れます。',action};
+    return{state:'warn',title:'行動チェック: 継続',body:'まだ参加しすぎ、またはリンプ寄りです。安いからコールではなく、参加前にレイズかフォールドへ整理してください。',action};
+  }
+  if(/BB防衛|BBディフェンス|defend/i.test(txt)){
+    if(p.state==='good')return{state:'good',title:'行動チェック: 守れています',body:'BB防衛の入口は大きく崩れていません。守った後にOOPで払いすぎない意識を続けます。',action};
+    if(p.state==='warn')return{state:'warn',title:'行動チェック: 継続',body:'BBは広く守れますが、守った後に弱いワンペアで払いすぎると損になります。相手位置とサイズを見てから守ってください。',action};
+  }
+  if(p.state==='good')return{state:'good',title:'行動チェック: 守れています',body:'今回のテーマは大きく崩れていません。次は同じ確認をもう少し速くできるようにします。',action};
+  return{state:p.state||'warn',title:'行動チェック: 継続',body:'今回のテーマはまだ残っています。次回も同じチェックを最初の数ハンドで確認します。',action};
+}
+function renderSessionFocusActionResult(focus,stats){
+  const r=sessionFocusActionResult(focus,stats);
+  if(!r)return '';
+  return '<div class="session-action-result session-action-result-'+(r.state||'pending')+'"><b>'+sessionTextHTML(r.title)+'</b><span>'+sessionTextHTML(r.body)+'</span><small>'+sessionTextHTML(r.action)+'</small></div>';
+}
 function sessionFocusProgress(focus,stats){
   stats=stats||sessionStats||{};
   const txt=((focus&&focus.title)||'')+' '+((focus&&focus.body)||'');
@@ -2314,7 +2348,7 @@ function renderSessionEndSummary(stats,carryFocus){
   const score=p.hands>0
     ? '<div class="session-summary-grid"><div><b>'+p.hands+'</b><span>Hands</span></div><div><b>'+(p.avgScore||'--')+'</b><span>Avg</span></div><div><b>'+(p.avgPF||'--')+'</b><span>PF</span></div><div><b>'+(p.poN?p.avgPO:'--')+'</b><span>PostF</span></div></div>'
     : '<div class="session-check-note">まだハンドがないので、終了前の自己確認だけ表示します。</div>';
-  return '<div class="session-summary" style="border-left-color:'+color+'"><div class="session-summary-title">'+p.focus.title+'</div><div class="session-summary-body">'+p.focus.body+'</div>'+sessionEndCarryoverResult(carry,stats)+'<div class="session-focus-good">'+sessionTextHTML(sessionEndPositiveNote(p))+'</div><div class="session-focus-reason">'+sessionTextHTML(sessionEndFocusReason(p))+'</div>'+score+'</div>'+renderSessionFocusHistory();
+  return '<div class="session-summary" style="border-left-color:'+color+'"><div class="session-summary-title">'+p.focus.title+'</div><div class="session-summary-body">'+p.focus.body+'</div>'+sessionEndCarryoverResult(carry,stats)+renderSessionFocusActionResult(carry,stats)+'<div class="session-focus-good">'+sessionTextHTML(sessionEndPositiveNote(p))+'</div><div class="session-focus-reason">'+sessionTextHTML(sessionEndFocusReason(p))+'</div>'+score+'</div>'+renderSessionFocusHistory();
 }
 function renderSessionEndChecklist(carryFocus){
   return renderSessionEndSummary(undefined,carryFocus)+renderSessionChecklist(SESSION_END_CHECKS,'点数よりも、次回に一つ直せる形で終えることを優先します。');
@@ -5121,6 +5155,32 @@ function runFishTankRegressionTests(){
       &&/何にコールしてほしいか/.test(postItems.join(' '))
       &&/session-action-plan/.test(html)
       &&/次の1ハンドで見ること/.test(html);
+  });
+  add('session checklist: end summary reviews action plan result',function(){
+    if(typeof sessionFocusActionResult!=='function'||typeof renderSessionFocusActionResult!=='function'||typeof renderSessionEndSummary!=='function')return false;
+    const old=localStorage.getItem(SESSION_NEXT_FOCUS_KEY);
+    const base=sessionStatsSnapshot({hands:20,wtsdSaw:20,wtsdWent:12,poScores:[50,50,50,50],limpOpp:8,limp:4,totalDec:20,badDec:10});
+    const focus={title:'次回の一点: リバーで降りる力',body:'WTSDを締めます。',tone:'warn',baseline:base};
+    const goodStats={hands:30,wtsdSaw:30,wtsdWent:15,poScores:[50,50,50,50,72,74,73,75],limpOpp:12,limp:4,totalDec:32,badDec:12};
+    const badStats={hands:30,wtsdSaw:30,wtsdWent:19,poScores:[50,50,50,50,62,64,63,65],limpOpp:12,limp:4,totalDec:32,badDec:12};
+    try{
+      storeSessionNextFocus(focus);
+      const good=sessionFocusActionResult(focus,goodStats);
+      const bad=sessionFocusActionResult(focus,badStats);
+      const html=renderSessionEndSummary(goodStats,focus);
+      return good&&good.state==='good'
+        &&bad&&bad.state==='warn'
+        &&/session-action-result/.test(renderSessionFocusActionResult(focus,goodStats))
+        &&/行動チェック/.test(html)
+        &&/バリュー候補/.test(html);
+    }finally{
+      SESSION_NEXT_FOCUS_FALLBACK=null;
+      if(old==null)localStorage.removeItem(SESSION_NEXT_FOCUS_KEY);
+      else{
+        try{SESSION_NEXT_FOCUS_FALLBACK=JSON.parse(old);}catch(e){}
+        localStorage.setItem(SESSION_NEXT_FOCUS_KEY,old);
+      }
+    }
   });
   const fourBetBaseDecisions=function(extraHeroAction){
     const ds=[
