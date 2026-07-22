@@ -5082,6 +5082,15 @@ function runFishTankRegressionTests(){
   const humanEval=function(an,pred){
     return an.evals.find(function(e){return e.isHuman&&pred(e);});
   };
+  add('UI audit: mobile HUD wraps practice focus',function(){
+    const css=[].slice.call(document.querySelectorAll('style')).map(function(s){return s.textContent||'';}).join('\n').replace(/\s+/g,'');
+    if(!css)return true;
+    const mobile=css.split('@media(max-width:600px)').pop()||'';
+    return mobile.indexOf('#hud{')>=0
+      &&mobile.indexOf('flex-wrap:wrap')>=0
+      &&mobile.indexOf('#hud-practice-focus{order:3;flex:11100%')>=0
+      &&mobile.indexOf('.hud-btns{gap:4px;flex-shrink:0;margin-left:auto')>=0;
+  });
   add('ライブ実戦教材: 主要トピックをタブ用HTMLに描画する',function(){
     if(typeof renderLivePractice!=='function')return false;
     const html=renderLivePractice();

@@ -332,11 +332,11 @@ body.codex-dev .dev-btn{display:inline-flex;}
   .setup-card{padding:20px 16px;width:100%;max-width:100%;}
   .setup-card h1{font-size:18px;}
   #game-screen.active{display:flex;flex-direction:column;height:auto!important;min-height:100dvh;overflow-y:auto;}
-  #hud{padding:6px 8px;height:auto;min-height:44px;gap:6px;align-items:center;}
+  #hud{padding:6px 8px;height:auto;min-height:44px;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-start;}
   #hud .hud-title{font-size:12px;line-height:1.15;max-width:112px;white-space:normal;flex:0 0 auto;}
-  #hud-info{font-size:11px;line-height:1.2;min-width:46px;text-align:center;flex:1 1 auto;}
-  #hud-practice-focus{max-width:92px;padding:3px 6px;font-size:9px;}
-  .hud-btns{gap:4px;flex-shrink:0;}
+  #hud-info{font-size:11px;line-height:1.2;min-width:46px;text-align:center;flex:1 1 60px;}
+  #hud-practice-focus{order:3;flex:1 1 100%;max-width:100%;padding:3px 6px;font-size:9px;}
+  .hud-btns{gap:4px;flex-shrink:0;margin-left:auto;}
   .hud-btn{padding:5px 7px;font-size:11px;border-radius:7px;min-width:0;}
   #main-area{overflow:visible;flex:none;}
   #table-wrap{flex:none;padding:14px 8px 0;overflow:hidden;}
@@ -394,7 +394,7 @@ body.codex-dev .dev-btn{display:inline-flex;}
 @media(max-width:380px){
   #hud .hud-title{max-width:96px;font-size:11px;}
   #hud-info{font-size:10px;min-width:40px;}
-  #hud-practice-focus{max-width:74px;}
+  #hud-practice-focus{max-width:100%;}
   .hud-btn{padding:5px 6px;font-size:10px;}
   #table-container{width:min(calc(100% - 34px),480px);}
   .seat{width:54px;}
@@ -11257,6 +11257,15 @@ function runFishTankRegressionTests(){
   const humanEval=function(an,pred){
     return an.evals.find(function(e){return e.isHuman&&pred(e);});
   };
+  add('UI audit: mobile HUD wraps practice focus',function(){
+    const css=[].slice.call(document.querySelectorAll('style')).map(function(s){return s.textContent||'';}).join('\n').replace(/\s+/g,'');
+    if(!css)return true;
+    const mobile=css.split('@media(max-width:600px)').pop()||'';
+    return mobile.indexOf('#hud{')>=0
+      &&mobile.indexOf('flex-wrap:wrap')>=0
+      &&mobile.indexOf('#hud-practice-focus{order:3;flex:11100%')>=0
+      &&mobile.indexOf('.hud-btns{gap:4px;flex-shrink:0;margin-left:auto')>=0;
+  });
   add('ライブ実戦教材: 主要トピックをタブ用HTMLに描画する',function(){
     if(typeof renderLivePractice!=='function')return false;
     const html=renderLivePractice();
