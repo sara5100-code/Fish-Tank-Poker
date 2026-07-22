@@ -2431,11 +2431,26 @@ function appendSessionFocusHistory(focus,stats){
   storeSessionFocusHistory(list);
   return entry;
 }
+function sessionFocusGrowthSummary(list){
+  const items=(Array.isArray(list)?list:getSessionFocusHistory()).filter(function(it){return it&&it.title;}).slice(0,5);
+  if(!items.length)return '';
+  const recent=items[0];
+  const good=items.filter(function(it){return it.state==='good';}).length;
+  const warn=items.filter(function(it){return it.state==='warn';}).length;
+  const same=items.filter(function(it){return it.title===recent.title;}).length;
+  if(recent.state==='good'&&items[1]&&items[1].state==='warn'&&items[1].title===recent.title)return recent.title+'は前回の継続課題から達成まで戻せています。この修正はかなり良い流れです。';
+  if(recent.state==='good')return recent.title+'は達成寄りです。直近'+items.length+'回で達成が'+good+'回あり、次は確認しながら別テーマへ広げられます。';
+  if(same>=2&&recent.state==='warn')return recent.title+'が続いています。新しい課題を増やすより、この一点をもう一度だけ集中的に見ます。';
+  if(warn>=3)return '直近は継続課題が多めです。全部を直そうとせず、次回は一番大きいテーマを一つだけ選ぶのが良さそうです。';
+  if(recent.state==='improving')return recent.title+'は改善途中です。あと少し同じ見方で反復すると、判断がかなり安定します。';
+  return 'テーマ履歴がたまり始めています。達成と継続の流れを見ながら、次回の一点を絞っていきます。';
+}
 function renderSessionFocusHistory(list){
   const items=(Array.isArray(list)?list:getSessionFocusHistory()).slice(0,3);
   if(!items.length)return '';
   const label=function(st){return st==='good'?'達成':st==='improving'?'もう少し':st==='warn'?'継続':'判定待ち';};
-  return '<div class="session-history"><div class="session-history-title">最近のテーマ履歴</div>'+items.map(function(it){
+  const growth=sessionFocusGrowthSummary(Array.isArray(list)?list:getSessionFocusHistory());
+  return '<div class="session-history"><div class="session-history-title">成長ログ</div>'+(growth?'<div class="session-growth-summary">'+sessionTextHTML(growth)+'</div>':'')+items.map(function(it){
     const st=it.state||'pending';
     return '<div class="session-history-item session-history-'+st+'"><b>'+sessionTextHTML(label(st))+'</b><span>'+sessionTextHTML(it.title)+'</span><small>'+sessionTextHTML(it.sample||it.text||'')+'</small></div>';
   }).join('')+'</div>';
@@ -5257,6 +5272,8 @@ function runFishTankRegressionTests(){
       return entry&&entry.state==='good'
         &&list.length===1
         &&/session-history/.test(html)
+        &&/成長ログ/.test(html)
+        &&/session-growth-summary/.test(html)
         &&/session-history-good/.test(html)
         &&/リバーで降りる力/.test(html);
     }finally{
@@ -5264,6 +5281,20 @@ function runFishTankRegressionTests(){
       if(old==null)localStorage.removeItem(SESSION_FOCUS_HISTORY_KEY);
       else localStorage.setItem(SESSION_FOCUS_HISTORY_KEY,old);
     }
+  });
+  add('session checklist: growth log summarizes improvement flow',function(){
+    if(typeof sessionFocusGrowthSummary!=='function'||typeof renderSessionFocusHistory!=='function')return false;
+    const list=[
+      {title:'リバーで降りる力',state:'good',sample:'前回後: 10ハンド / WTSD機会10'},
+      {title:'リバーで降りる力',state:'warn',sample:'前回後: 10ハンド / WTSD機会10'},
+      {title:'入口を締める',state:'improving',sample:'8ハンド'}
+    ];
+    const txt=sessionFocusGrowthSummary(list);
+    const html=renderSessionFocusHistory(list);
+    return /継続課題から達成/.test(txt)
+      &&/良い流れ/.test(txt)
+      &&/成長ログ/.test(html)
+      &&/継続課題から達成/.test(html);
   });
   add('session checklist: repeated unfinished focus continues next theme',function(){
     if(typeof sessionEndStatsProfile!=='function'||typeof sessionFocusRepeatCandidate!=='function')return false;
