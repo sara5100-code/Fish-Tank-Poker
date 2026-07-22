@@ -1892,8 +1892,10 @@ function renderLivePractice(){
 const SESSION_CHECK_KEY='fish_tank_session_check_enabled';
 const SESSION_NEXT_FOCUS_KEY='fish_tank_session_next_focus';
 const SESSION_FOCUS_HISTORY_KEY='fish_tank_session_focus_history';
+const SESSION_APPLIED_PRACTICE_KEY='fish_tank_session_applied_practice';
 let SESSION_NEXT_FOCUS_FALLBACK=null;
 let SESSION_FOCUS_HISTORY_FALLBACK=[];
+let SESSION_APPLIED_PRACTICE_FALLBACK=null;
 const SESSION_START_CHECKS=[
   '今日の終了時間と最大損失を先に決める',
   '疲労・眠気・焦りが強い日は短いセッションにする',
@@ -1929,6 +1931,30 @@ function storeSessionNextFocus(focus){
   const payload={title:focus.title,body:focus.body,tone:focus.tone||'neutral',baseline:focus.baseline||sessionStatsSnapshot()};
   SESSION_NEXT_FOCUS_FALLBACK=payload;
   try{localStorage.setItem(SESSION_NEXT_FOCUS_KEY,JSON.stringify(payload));}catch(e){}
+}
+function getStoredAppliedPractice(){
+  try{
+    const raw=localStorage.getItem(SESSION_APPLIED_PRACTICE_KEY);
+    if(!raw)return SESSION_APPLIED_PRACTICE_FALLBACK;
+    const parsed=JSON.parse(raw);
+    if(parsed&&parsed.mode&&parsed.focus)return parsed;
+  }catch(e){}
+  return SESSION_APPLIED_PRACTICE_FALLBACK;
+}
+function storeAppliedPractice(rec){
+  if(!rec)return;
+  const payload={
+    mode:rec.mode||rec.modeValue||'リングゲーム',
+    focus:rec.focus||'練習テーマ',
+    status:rec.status||'',
+    reason:rec.reason||'',
+    modeValue:rec.modeValue||'normal',
+    focusValue:rec.focusValue||'',
+    presetValue:rec.presetValue||'',
+    savedAt:Date.now()
+  };
+  SESSION_APPLIED_PRACTICE_FALLBACK=payload;
+  try{localStorage.setItem(SESSION_APPLIED_PRACTICE_KEY,JSON.stringify(payload));}catch(e){}
 }
 function getSessionFocusHistory(){
   try{
@@ -2016,7 +2042,17 @@ function renderSessionPracticeRecommendation(focus,stats){
   const rec=sessionPracticeRecommendation(focus,stats);
   if(!rec)return '';
   const label=rec.status?'（'+rec.status+'）':'';
-  return '<div class="session-recommend"><div class="session-recommend-title">おすすめ練習'+sessionTextHTML(label)+': '+sessionTextHTML(rec.mode)+' / '+sessionTextHTML(rec.focus)+'</div><div class="session-recommend-body">'+sessionTextHTML(rec.reason)+'</div><button type="button" class="session-apply-practice" data-mode="'+sessionTextHTML(rec.modeValue||'normal')+'" data-focus="'+sessionTextHTML(rec.focusValue||'')+'" data-preset="'+sessionTextHTML(rec.presetValue||'')+'">この練習を設定</button></div>';
+  return '<div class="session-recommend"><div class="session-recommend-title">おすすめ練習'+sessionTextHTML(label)+': '+sessionTextHTML(rec.mode)+' / '+sessionTextHTML(rec.focus)+'</div><div class="session-recommend-body">'+sessionTextHTML(rec.reason)+'</div><button type="button" class="session-apply-practice" data-mode="'+sessionTextHTML(rec.modeValue||'normal')+'" data-focus="'+sessionTextHTML(rec.focusValue||'')+'" data-preset="'+sessionTextHTML(rec.presetValue||'')+'" data-mode-label="'+sessionTextHTML(rec.mode||'')+'" data-focus-label="'+sessionTextHTML(rec.focus||'')+'" data-status="'+sessionTextHTML(rec.status||'')+'" data-reason="'+sessionTextHTML(rec.reason||'')+'">この練習を設定</button></div>';
+}
+function renderAppliedPracticeNote(rec){
+  rec=rec||getStoredAppliedPractice();
+  if(!rec)return '';
+  const label=rec.status?'今日の狙い（'+rec.status+'）':'今日の狙い';
+  return '<div class="session-practice-note"><b>'+sessionTextHTML(label)+'</b><span>'+sessionTextHTML((rec.mode||'練習')+' / '+(rec.focus||'テーマ確認'))+'</span>'+sessionTextHTML(rec.reason||'このテーマを意識して開始します。')+'</div>';
+}
+function refreshAppliedPracticeNote(){
+  const el=$('session-practice-note');
+  if(el)el.innerHTML=renderAppliedPracticeNote();
 }
 function sessionFocusActionChecklist(focus){
   const txt=((focus&&focus.title)||'')+' '+((focus&&focus.body)||'');
@@ -2393,16 +2429,18 @@ function initSessionChecklistUI(){
   if(!cb||!box)return;
   cb.checked=sessionChecklistEnabled();
   box.innerHTML=cb.checked?renderSessionStartChecklist():'';
+  refreshAppliedPracticeNote();
   cb.addEventListener('change',function(){
     setSessionChecklistEnabled(cb.checked);
     box.innerHTML=cb.checked?renderSessionStartChecklist():'';
+    refreshAppliedPracticeNote();
   });
 }
 function refreshSessionStartChecklist(){
   const cb=$('cfg-session-check');
   const box=$('session-start-check');
-  if(!cb||!box)return;
-  box.innerHTML=cb.checked?renderSessionStartChecklist():'';
+  if(cb&&box)box.innerHTML=cb.checked?renderSessionStartChecklist():'';
+  refreshAppliedPracticeNote();
 }
 function applySessionPracticeRecommendation(rec){
   if(!rec)return false;
@@ -2417,6 +2455,7 @@ function applySessionPracticeRecommendation(rec){
     if(focusEl&&rec.focusValue)focusEl.value=rec.focusValue;
   }
   applyTournamentPresetToSetup();
+  storeAppliedPractice(rec);
   refreshSessionStartChecklist();
   if(typeof toast==='function')toast('おすすめ練習を設定しました。内容を確認して開始してください。','info',2600);
   return true;
@@ -5056,6 +5095,24 @@ function runFishTankRegressionTests(){
       &&/前回の行動チェックは「継続」/.test(bbWarn)
       &&riverGood&&riverGood.status==='確認練習'
       &&/崩れないか確認/.test(riverGood.reason);
+  });
+  add('セッションチェック: 設定したおすすめ練習の狙いを開始前に残す',function(){
+    if(typeof storeAppliedPractice!=='function'||typeof renderAppliedPracticeNote!=='function')return false;
+    const old=localStorage.getItem(SESSION_APPLIED_PRACTICE_KEY);
+    try{
+      storeAppliedPractice({mode:'トーナメント局面別',focus:'BBディフェンス練習',status:'継続推奨',reason:'前回の行動チェックは「継続」です。BB防衛をもう一度確認します。',modeValue:'tournament',focusValue:'bb_defend',presetValue:'middle'});
+      const html=renderAppliedPracticeNote();
+      return /今日の狙い（継続推奨）/.test(html)
+        &&/トーナメント局面別 \/ BBディフェンス練習/.test(html)
+        &&/前回の行動チェック/.test(html);
+    }finally{
+      SESSION_APPLIED_PRACTICE_FALLBACK=null;
+      if(old==null)localStorage.removeItem(SESSION_APPLIED_PRACTICE_KEY);
+      else{
+        try{SESSION_APPLIED_PRACTICE_FALLBACK=JSON.parse(old);}catch(e){}
+        localStorage.setItem(SESSION_APPLIED_PRACTICE_KEY,old);
+      }
+    }
   });
   add('セッションチェック: 前回テーマの現在地を短く判定する',function(){
     if(typeof sessionFocusProgress!=='function'||typeof renderSessionFocusProgress!=='function')return false;
@@ -10844,7 +10901,15 @@ $('session-end-confirm').addEventListener('click',function(){
 document.addEventListener('click',function(e){
   const practiceBtn=e.target&&e.target.closest&&e.target.closest('.session-apply-practice');
   if(practiceBtn){
-    applySessionPracticeRecommendation({modeValue:practiceBtn.dataset.mode||'normal',focusValue:practiceBtn.dataset.focus||'',presetValue:practiceBtn.dataset.preset||''});
+    applySessionPracticeRecommendation({
+      modeValue:practiceBtn.dataset.mode||'normal',
+      focusValue:practiceBtn.dataset.focus||'',
+      presetValue:practiceBtn.dataset.preset||'',
+      mode:practiceBtn.dataset.modeLabel||'',
+      focus:practiceBtn.dataset.focusLabel||'',
+      status:practiceBtn.dataset.status||'',
+      reason:practiceBtn.dataset.reason||''
+    });
     return;
   }
   if(e.target&&(e.target.id==='btn-reset-stats'||e.target.id==='btn-reset-stats2')){

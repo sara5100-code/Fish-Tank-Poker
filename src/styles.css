@@ -63,6 +63,9 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,'Hiragino 
 .session-recommend{margin-top:8px;background:var(--panel);border:1px solid var(--border);border-radius:9px;padding:7px 8px;}
 .session-recommend-title{font-size:11px;font-weight:900;color:var(--accent);margin-bottom:3px;}
 .session-recommend-body{font-size:10px;line-height:1.5;color:var(--dim);}
+.session-practice-note{margin-top:8px;background:#f8fbff;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:9px;padding:8px 9px;font-size:10px;line-height:1.45;color:var(--dim);}
+.session-practice-note b{display:block;font-size:11px;color:var(--text);margin-bottom:3px;}
+.session-practice-note span{display:block;color:var(--accent);font-weight:800;margin-bottom:3px;}
 .session-apply-practice{margin-top:7px;width:100%;padding:7px 9px;background:rgba(61,108,240,.08);border:1px solid rgba(61,108,240,.24);border-radius:8px;color:var(--accent);font-family:inherit;font-size:11px;font-weight:900;cursor:pointer;}
 .session-apply-practice:hover{background:rgba(61,108,240,.13);}
 .session-progress{margin-top:8px;border-radius:8px;padding:6px 8px;background:var(--panel);border:1px solid var(--border);font-size:10px;line-height:1.5;color:var(--dim);}
