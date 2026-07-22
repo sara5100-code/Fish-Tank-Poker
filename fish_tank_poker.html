@@ -5505,7 +5505,20 @@ function sessionPracticeRecommendation(focus,stats){
   else if(/ミス|テーマ|振り返り/.test(txt))rec={mode:'リングゲーム',modeValue:'normal',focus:'主テーマ確認',reason:'まずは通常ハンドで、レビューの主テーマを一つずつ潰していきます。'};
   if(!rec)return null;
   const r=sessionFocusActionResult(focus,stats||sessionStats);
-  if(r&&r.state==='warn'){
+  const hist=getSessionFocusHistory();
+  const title=sessionFocusTitleText(focus);
+  const recent=hist[0]||null;
+  const prev=hist[1]||null;
+  const sameRecent=recent&&recent.title===title;
+  const recovered=sameRecent&&recent.state==='good'&&prev&&prev.title===title&&prev.state==='warn';
+  const repeat=sessionFocusRepeatCandidate(hist);
+  if(repeat&&repeat.title===title){
+    rec.status='一点集中';
+    rec.reason='同じテーマが続いています。新しい課題へ広げず、まずこの練習で一点だけ直します。'+rec.reason;
+  }else if(recovered){
+    rec.status='卒業確認';
+    rec.reason='前回の継続課題を今回は達成まで戻せています。この練習は軽い確認用にして、次回は別テーマへ広げる準備をします。'+rec.reason;
+  }else if(r&&r.state==='warn'){
     rec.status='継続推奨';
     rec.reason='前回の行動チェックは「継続」です。'+rec.reason;
   }else if(r&&r.state==='improving'){
@@ -11314,6 +11327,32 @@ function runFishTankRegressionTests(){
       &&/前回の行動チェックは「継続」/.test(bbWarn)
       &&riverGood&&riverGood.status==='確認練習'
       &&/崩れないか確認/.test(riverGood.reason);
+  });
+  add('セッションチェック: 成長ログから次回練習の続行/卒業を決める',function(){
+    if(typeof sessionPracticeRecommendation!=='function'||typeof storeSessionFocusHistory!=='function')return false;
+    const old=localStorage.getItem(SESSION_FOCUS_HISTORY_KEY);
+    const oldFallback=SESSION_FOCUS_HISTORY_FALLBACK;
+    const focus={title:'次回の一点: リバーで降りる力',body:'WTSDを締めます。'};
+    try{
+      storeSessionFocusHistory([
+        {title:'リバーで降りる力',state:'good',sample:'前回後: 10ハンド'},
+        {title:'リバーで降りる力',state:'warn',sample:'前回後: 10ハンド'}
+      ]);
+      const recovered=sessionPracticeRecommendation(focus,{hands:12,wtsdSaw:10,wtsdWent:3});
+      storeSessionFocusHistory([
+        {title:'リバーで降りる力',state:'warn',sample:'前回後: 10ハンド'},
+        {title:'リバーで降りる力',state:'improving',sample:'前回後: 10ハンド'}
+      ]);
+      const repeat=sessionPracticeRecommendation(focus,{hands:12,wtsdSaw:10,wtsdWent:7});
+      return recovered&&recovered.status==='卒業確認'
+        &&/別テーマへ広げる準備/.test(recovered.reason)
+        &&repeat&&repeat.status==='一点集中'
+        &&/新しい課題へ広げず/.test(repeat.reason);
+    }finally{
+      SESSION_FOCUS_HISTORY_FALLBACK=oldFallback||[];
+      if(old==null)localStorage.removeItem(SESSION_FOCUS_HISTORY_KEY);
+      else localStorage.setItem(SESSION_FOCUS_HISTORY_KEY,old);
+    }
   });
   add('セッションチェック: 設定したおすすめ練習の狙いを開始前に残す',function(){
     if(typeof storeAppliedPractice!=='function'||typeof renderAppliedPracticeNote!=='function')return false;
