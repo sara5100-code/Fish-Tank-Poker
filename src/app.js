@@ -1987,19 +1987,36 @@ function sessionTextHTML(txt){
     return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch];
   });
 }
-function sessionPracticeRecommendation(focus){
+function sessionPracticeRecommendation(focus,stats){
   const txt=((focus&&focus.title)||'')+' '+((focus&&focus.body)||'');
-  if(/BB防衛|BBディフェンス|defend/i.test(txt))return{mode:'トーナメント局面別',modeValue:'tournament',focus:'BBディフェンス練習',focusValue:'bb_defend',presetValue:'middle',reason:'BB防衛はポットオッズだけでなく、OOPで払いすぎない感覚まで一緒に練習できます。'};
-  if(/リバー|ワンペア|ショーダウン|WTSD/.test(txt))return{mode:'リングゲーム',modeValue:'normal',focus:'リバー判断',reason:'ライブ$2/$5で差が出る、ワンペアの受けすぎと薄バリューの切り分けを重点的に見ます。'};
-  if(/ポストフロップ|フロップ|ターン|PostF/.test(txt))return{mode:'フロップトレーニング',modeValue:'scenario',focus:'ポストフロップ判断',reason:'ボード、ポジション、ベット目的を短い反復で確認できます。'};
-  if(/リンプ|入口|VPIP|参加|フロップ前/.test(txt))return{mode:'リングゲーム',modeValue:'normal',focus:'フロップ前の入口整理',reason:'参加する手と降りる手を整理し、難しいワンペア判断を最初から減らします。'};
-  if(/ミス|テーマ|振り返り/.test(txt))return{mode:'リングゲーム',modeValue:'normal',focus:'主テーマ確認',reason:'まずは通常ハンドで、レビューの主テーマを一つずつ潰していきます。'};
-  return null;
+  let rec=null;
+  if(/BB防衛|BBディフェンス|defend/i.test(txt))rec={mode:'トーナメント局面別',modeValue:'tournament',focus:'BBディフェンス練習',focusValue:'bb_defend',presetValue:'middle',reason:'BB防衛はポットオッズだけでなく、OOPで払いすぎない感覚まで一緒に練習できます。'};
+  else if(/リバー|ワンペア|ショーダウン|WTSD/.test(txt))rec={mode:'リングゲーム',modeValue:'normal',focus:'リバー判断',reason:'ライブ$2/$5で差が出る、ワンペアの受けすぎと薄バリューの切り分けを重点的に見ます。'};
+  else if(/ポストフロップ|フロップ|ターン|PostF/.test(txt))rec={mode:'フロップトレーニング',modeValue:'scenario',focus:'ポストフロップ判断',reason:'ボード、ポジション、ベット目的を短い反復で確認できます。'};
+  else if(/リンプ|入口|VPIP|参加|フロップ前/.test(txt))rec={mode:'リングゲーム',modeValue:'normal',focus:'フロップ前の入口整理',reason:'参加する手と降りる手を整理し、難しいワンペア判断を最初から減らします。'};
+  else if(/ミス|テーマ|振り返り/.test(txt))rec={mode:'リングゲーム',modeValue:'normal',focus:'主テーマ確認',reason:'まずは通常ハンドで、レビューの主テーマを一つずつ潰していきます。'};
+  if(!rec)return null;
+  const r=sessionFocusActionResult(focus,stats||sessionStats);
+  if(r&&r.state==='warn'){
+    rec.status='継続推奨';
+    rec.reason='前回の行動チェックは「継続」です。'+rec.reason;
+  }else if(r&&r.state==='improving'){
+    rec.status='あと少し';
+    rec.reason='前回は改善途中です。もう一度だけ同じ型で反復すると、判断がかなり固まります。'+rec.reason;
+  }else if(r&&r.state==='good'){
+    rec.status='確認練習';
+    rec.reason='前回はかなり守れています。崩れないか確認する練習として使えます。'+rec.reason;
+  }else if(r&&r.state==='pending'){
+    rec.status='サンプル集め';
+    rec.reason='まだ判定材料が少ないため、まずは同じテーマのハンドを増やします。'+rec.reason;
+  }
+  return rec;
 }
-function renderSessionPracticeRecommendation(focus){
-  const rec=sessionPracticeRecommendation(focus);
+function renderSessionPracticeRecommendation(focus,stats){
+  const rec=sessionPracticeRecommendation(focus,stats);
   if(!rec)return '';
-  return '<div class="session-recommend"><div class="session-recommend-title">おすすめ練習: '+sessionTextHTML(rec.mode)+' / '+sessionTextHTML(rec.focus)+'</div><div class="session-recommend-body">'+sessionTextHTML(rec.reason)+'</div><button type="button" class="session-apply-practice" data-mode="'+sessionTextHTML(rec.modeValue||'normal')+'" data-focus="'+sessionTextHTML(rec.focusValue||'')+'" data-preset="'+sessionTextHTML(rec.presetValue||'')+'">この練習を設定</button></div>';
+  const label=rec.status?'（'+rec.status+'）':'';
+  return '<div class="session-recommend"><div class="session-recommend-title">おすすめ練習'+sessionTextHTML(label)+': '+sessionTextHTML(rec.mode)+' / '+sessionTextHTML(rec.focus)+'</div><div class="session-recommend-body">'+sessionTextHTML(rec.reason)+'</div><button type="button" class="session-apply-practice" data-mode="'+sessionTextHTML(rec.modeValue||'normal')+'" data-focus="'+sessionTextHTML(rec.focusValue||'')+'" data-preset="'+sessionTextHTML(rec.presetValue||'')+'">この練習を設定</button></div>';
 }
 function sessionFocusActionChecklist(focus){
   const txt=((focus&&focus.title)||'')+' '+((focus&&focus.body)||'');
@@ -5028,6 +5045,17 @@ function runFishTankRegressionTests(){
       &&/data-focus="bb_defend"/.test(bbHtml)
       &&/data-preset="middle"/.test(bbHtml)
       &&/data-mode="normal"/.test(riverHtml);
+  });
+  add('セッションチェック: おすすめ練習は行動チェック結果で温度差を出す',function(){
+    if(typeof renderSessionPracticeRecommendation!=='function'||typeof sessionPracticeRecommendation!=='function')return false;
+    const bb={title:'次回の一点: BB防衛',body:'BBディフェンスを整理します。'};
+    const river={title:'次回の一点: リバーで降りる力',body:'WTSDを締めます。'};
+    const bbWarn=renderSessionPracticeRecommendation(bb,{hands:12,totalDec:20,badDec:8});
+    const riverGood=sessionPracticeRecommendation(river,{hands:12,wtsdSaw:10,wtsdWent:3});
+    return /おすすめ練習（継続推奨）/.test(bbWarn)
+      &&/前回の行動チェックは「継続」/.test(bbWarn)
+      &&riverGood&&riverGood.status==='確認練習'
+      &&/崩れないか確認/.test(riverGood.reason);
   });
   add('セッションチェック: 前回テーマの現在地を短く判定する',function(){
     if(typeof sessionFocusProgress!=='function'||typeof renderSessionFocusProgress!=='function')return false;
