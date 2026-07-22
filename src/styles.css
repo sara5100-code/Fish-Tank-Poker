@@ -46,6 +46,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,'Hiragino 
 .session-focus-result-good b{color:var(--green);}
 .session-focus-result-improving b{color:var(--accent);}
 .session-focus-result-warn b{color:var(--orange);}
+.session-closing-note{margin-bottom:7px;background:#fff;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:9px;padding:7px 9px;font-size:10.5px;line-height:1.55;color:var(--text);font-weight:700;}
 .session-history{background:var(--panel2);border:1px solid var(--border);border-radius:12px;padding:9px 10px;margin-bottom:10px;}
 .session-history-title{font-size:11px;font-weight:900;color:var(--text);margin-bottom:6px;}
 .session-history-item{display:grid;grid-template-columns:52px 1fr;gap:3px 7px;align-items:start;border-top:1px solid var(--border);padding-top:6px;margin-top:6px;font-size:10px;line-height:1.35;color:var(--dim);}

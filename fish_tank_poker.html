@@ -53,6 +53,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,'Hiragino 
 .session-focus-result-good b{color:var(--green);}
 .session-focus-result-improving b{color:var(--accent);}
 .session-focus-result-warn b{color:var(--orange);}
+.session-closing-note{margin-bottom:7px;background:#fff;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:9px;padding:7px 9px;font-size:10.5px;line-height:1.55;color:var(--text);font-weight:700;}
 .session-history{background:var(--panel2);border:1px solid var(--border);border-radius:12px;padding:9px 10px;margin-bottom:10px;}
 .session-history-title{font-size:11px;font-weight:900;color:var(--text);margin-bottom:6px;}
 .session-history-item{display:grid;grid-template-columns:52px 1fr;gap:3px 7px;align-items:start;border-top:1px solid var(--border);padding-top:6px;margin-top:6px;font-size:10px;line-height:1.35;color:var(--dim);}
@@ -5877,6 +5878,20 @@ function sessionEndCarryoverResult(focus,stats){
   const label=p.state==='good'?'今回テーマ: 達成':p.state==='improving'?'今回テーマ: もう少し':p.state==='warn'?'今回テーマ: 継続':'今回テーマ: 判定待ち';
   return '<div class="session-focus-result session-focus-result-'+(p.state||'pending')+'"><b>'+sessionTextHTML(label)+'</b><span>'+sessionTextHTML(p.text)+'</span><small>'+sessionTextHTML(sample)+'</small></div>';
 }
+function sessionFocusClosingNote(focus,stats){
+  if(!focus)return '';
+  const p=sessionEndCarryoverProgress(focus,stats||sessionStats);
+  const title=sessionFocusTitleText(focus);
+  if(p.state==='good')return title+'はかなり守れました。次回は同じ型を軽く確認して、別の弱点へ広げてもよい段階です。';
+  if(p.state==='improving')return title+'は前より良くなっています。あと数ハンドだけ同じ見方で反復すると、かなり自分の感覚になります。';
+  if(p.state==='warn')return title+'はまだ残っています。次回も新しい課題へ散らさず、この一点だけを最初の数ハンドで確認しましょう。';
+  return title+'はまだ判断材料が少なめです。次回はまず同じ場面を増やして、良し悪しを見える形にします。';
+}
+function renderSessionFocusClosingNote(focus,stats){
+  const txt=sessionFocusClosingNote(focus,stats);
+  if(!txt)return '';
+  return '<div class="session-closing-note">'+sessionTextHTML(txt)+'</div>';
+}
 function sessionFocusHistoryEntry(focus,stats){
   if(!focus)return null;
   const p=sessionEndCarryoverProgress(focus,stats||sessionStats);
@@ -5913,7 +5928,7 @@ function renderSessionEndSummary(stats,carryFocus){
   const score=p.hands>0
     ? '<div class="session-summary-grid"><div><b>'+p.hands+'</b><span>Hands</span></div><div><b>'+(p.avgScore||'--')+'</b><span>Avg</span></div><div><b>'+(p.avgPF||'--')+'</b><span>PF</span></div><div><b>'+(p.poN?p.avgPO:'--')+'</b><span>PostF</span></div></div>'
     : '<div class="session-check-note">まだハンドがないので、終了前の自己確認だけ表示します。</div>';
-  return '<div class="session-summary" style="border-left-color:'+color+'"><div class="session-summary-title">'+p.focus.title+'</div><div class="session-summary-body">'+p.focus.body+'</div>'+sessionEndCarryoverResult(carry,stats)+renderSessionFocusActionResult(carry,stats)+'<div class="session-focus-good">'+sessionTextHTML(sessionEndPositiveNote(p))+'</div><div class="session-focus-reason">'+sessionTextHTML(sessionEndFocusReason(p))+'</div>'+score+'</div>'+renderSessionFocusHistory();
+  return '<div class="session-summary" style="border-left-color:'+color+'"><div class="session-summary-title">'+p.focus.title+'</div><div class="session-summary-body">'+p.focus.body+'</div>'+renderSessionFocusClosingNote(carry,stats)+sessionEndCarryoverResult(carry,stats)+renderSessionFocusActionResult(carry,stats)+'<div class="session-focus-good">'+sessionTextHTML(sessionEndPositiveNote(p))+'</div><div class="session-focus-reason">'+sessionTextHTML(sessionEndFocusReason(p))+'</div>'+score+'</div>'+renderSessionFocusHistory();
 }
 function renderSessionEndChecklist(carryFocus){
   return renderSessionEndSummary(undefined,carryFocus)+renderSessionChecklist(SESSION_END_CHECKS,'点数よりも、次回に一つ直せる形で終えることを優先します。');
@@ -11487,6 +11502,18 @@ function runFishTankRegressionTests(){
         localStorage.setItem(SESSION_NEXT_FOCUS_KEY,old);
       }
     }
+  });
+  add('session checklist: end summary adds player-facing closing note',function(){
+    if(typeof sessionFocusClosingNote!=='function'||typeof renderSessionEndSummary!=='function')return false;
+    const base=sessionStatsSnapshot({hands:20,wtsdSaw:20,wtsdWent:12});
+    const focus={title:'次回の一点: リバーで降りる力',body:'WTSDを締めます。',tone:'warn',baseline:base};
+    const good=sessionFocusClosingNote(focus,{hands:30,wtsdSaw:30,wtsdWent:15});
+    const warn=sessionFocusClosingNote(focus,{hands:30,wtsdSaw:30,wtsdWent:25});
+    const html=renderSessionEndSummary({hands:30,wtsdSaw:30,wtsdWent:15},focus);
+    return /かなり守れました/.test(good)
+      &&/まだ残っています/.test(warn)
+      &&/session-closing-note/.test(html)
+      &&/別の弱点へ広げてもよい/.test(html);
   });
   add('session checklist: action result uses mode specific metrics',function(){
     if(typeof sessionFocusActionResult!=='function'||typeof sessionFocusModeKey!=='function')return false;
