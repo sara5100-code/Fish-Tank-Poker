@@ -100,6 +100,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,'Hiragino 
 #hud{display:flex;align-items:center;justify-content:space-between;padding:8px 16px;background:var(--panel);border-bottom:1px solid var(--border);flex-shrink:0;height:46px;box-shadow:0 1px 6px rgba(26,40,80,.07);}
 #hud .hud-title{font-weight:800;color:var(--text);font-size:14px;letter-spacing:.04em;}
 #hud-info{font-size:12px;color:var(--dim);}
+#hud-practice-focus{display:none;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:4px 8px;border-radius:999px;background:rgba(61,108,240,.08);border:1px solid rgba(61,108,240,.18);color:var(--accent);font-size:10px;font-weight:800;}
 .hud-btns{display:flex;gap:6px;}
 .hud-btn{padding:5px 12px;background:var(--panel2);border:1px solid var(--border);border-radius:8px;color:var(--dim);font-size:12px;cursor:pointer;font-family:inherit;transition:all .15s;}
 .hud-btn:hover{border-color:var(--accent);color:var(--accent);}
@@ -332,6 +333,7 @@ body.codex-dev .dev-btn{display:inline-flex;}
   #hud{padding:6px 8px;height:auto;min-height:44px;gap:6px;align-items:center;}
   #hud .hud-title{font-size:12px;line-height:1.15;max-width:112px;white-space:normal;flex:0 0 auto;}
   #hud-info{font-size:11px;line-height:1.2;min-width:46px;text-align:center;flex:1 1 auto;}
+  #hud-practice-focus{max-width:92px;padding:3px 6px;font-size:9px;}
   .hud-btns{gap:4px;flex-shrink:0;}
   .hud-btn{padding:5px 7px;font-size:11px;border-radius:7px;min-width:0;}
   #main-area{overflow:visible;flex:none;}
@@ -390,6 +392,7 @@ body.codex-dev .dev-btn{display:inline-flex;}
 @media(max-width:380px){
   #hud .hud-title{max-width:96px;font-size:11px;}
   #hud-info{font-size:10px;min-width:40px;}
+  #hud-practice-focus{max-width:74px;}
   .hud-btn{padding:5px 6px;font-size:10px;}
   #table-container{width:min(calc(100% - 34px),480px);}
   .seat{width:54px;}
@@ -483,6 +486,7 @@ body.codex-dev .dev-btn{display:inline-flex;}
   <div id="hud">
     <div class="hud-title">🐟 Fish Tank Poker</div>
     <div id="hud-info">Hand #1 | SB 2 / BB 5</div>
+    <div id="hud-practice-focus"></div>
     <div class="hud-btns">
       <button class="hud-btn" data-tab="history">履歴</button>
       <button class="hud-btn" data-tab="trends">傾向</button>
@@ -5529,6 +5533,21 @@ function renderAppliedPracticeNote(rec){
 function refreshAppliedPracticeNote(){
   const el=$('session-practice-note');
   if(el)el.innerHTML=renderAppliedPracticeNote();
+  refreshHudPracticeFocus();
+}
+function appliedPracticeHudText(rec){
+  rec=rec||getStoredAppliedPractice();
+  if(!rec)return '';
+  const focus=String(rec.focus||'テーマ確認').replace(/練習$/,'').replace(/判断$/,'判断');
+  const status=rec.status?String(rec.status).replace('推奨',''):'';
+  return '今日: '+focus+(status?' / '+status:'');
+}
+function refreshHudPracticeFocus(){
+  const el=$('hud-practice-focus');
+  if(!el)return;
+  const txt=appliedPracticeHudText();
+  el.textContent=txt;
+  el.style.display=txt?'block':'none';
 }
 function sessionFocusActionChecklist(focus){
   const txt=((focus&&focus.title)||'')+' '+((focus&&focus.body)||'');
@@ -11283,6 +11302,22 @@ function runFishTankRegressionTests(){
       }
     }
   });
+  add('セッションチェック: 今日のテーマをHUD用に短くする',function(){
+    if(typeof storeAppliedPractice!=='function'||typeof appliedPracticeHudText!=='function')return false;
+    const old=localStorage.getItem(SESSION_APPLIED_PRACTICE_KEY);
+    try{
+      storeAppliedPractice({mode:'リングゲーム',focus:'リバー判断',status:'確認練習',reason:'リバーを確認します。'});
+      const txt=appliedPracticeHudText();
+      return txt==='今日: リバー判断 / 確認練習';
+    }finally{
+      SESSION_APPLIED_PRACTICE_FALLBACK=null;
+      if(old==null)localStorage.removeItem(SESSION_APPLIED_PRACTICE_KEY);
+      else{
+        try{SESSION_APPLIED_PRACTICE_FALLBACK=JSON.parse(old);}catch(e){}
+        localStorage.setItem(SESSION_APPLIED_PRACTICE_KEY,old);
+      }
+    }
+  });
   add('セッションチェック: 前回テーマの現在地を短く判定する',function(){
     if(typeof sessionFocusProgress!=='function'||typeof renderSessionFocusProgress!=='function')return false;
     const river=sessionFocusProgress({title:'次回の一点: リバーで降りる力',body:'ワンペアの受けを少し締めます。'},{hands:12,wtsdSaw:10,wtsdWent:3});
@@ -15305,6 +15340,7 @@ function renderTable(){
   $('stage-label').textContent=game.street.toUpperCase()+(activePl?' / '+(activePl.isHuman?'あなた':activePl.name)+'['+activePos+']':'');
   const tctx=game.tournamentContext;
   $('hud-info').textContent='Hand #'+game.handNum+' | SB '+game.sb+' / BB '+game.bb+(tctx&&tctx.enabled?' / BBA '+tctx.bbAnte+' | '+tctx.phase+' '+tctx.stackBB+'BB':'');
+  refreshHudPracticeFocus();
   const h=game.players.find(p=>p.isHuman);
   $('human-cards').innerHTML=h.holeCards.map(c=>cardHTML(c,true)).join('');
   $('human-hand-name').textContent=h.holeCards.length&&game.community.length>=3
@@ -17816,6 +17852,7 @@ function _initGame(mode){
   // HUDにモード表示
   const hudTitle=document.querySelector('#hud .hud-title');
   if(hudTitle)hudTitle.textContent=_scenarioMode?'🎯 Fish Tank — フロップトレーナー':(mode==='tournament'?'🏆 Fish Tank — Tournament':'🐟 Fish Tank Poker');
+  refreshHudPracticeFocus();
   startNewHand();
 }
 // [Claude fix 2026-05-23] ゲームモードプルダウンから起動モードを取得

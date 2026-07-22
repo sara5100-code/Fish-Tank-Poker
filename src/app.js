@@ -2053,6 +2053,21 @@ function renderAppliedPracticeNote(rec){
 function refreshAppliedPracticeNote(){
   const el=$('session-practice-note');
   if(el)el.innerHTML=renderAppliedPracticeNote();
+  refreshHudPracticeFocus();
+}
+function appliedPracticeHudText(rec){
+  rec=rec||getStoredAppliedPractice();
+  if(!rec)return '';
+  const focus=String(rec.focus||'テーマ確認').replace(/練習$/,'').replace(/判断$/,'判断');
+  const status=rec.status?String(rec.status).replace('推奨',''):'';
+  return '今日: '+focus+(status?' / '+status:'');
+}
+function refreshHudPracticeFocus(){
+  const el=$('hud-practice-focus');
+  if(!el)return;
+  const txt=appliedPracticeHudText();
+  el.textContent=txt;
+  el.style.display=txt?'block':'none';
 }
 function sessionFocusActionChecklist(focus){
   const txt=((focus&&focus.title)||'')+' '+((focus&&focus.body)||'');
@@ -5105,6 +5120,22 @@ function runFishTankRegressionTests(){
       return /今日の狙い（継続推奨）/.test(html)
         &&/トーナメント局面別 \/ BBディフェンス練習/.test(html)
         &&/前回の行動チェック/.test(html);
+    }finally{
+      SESSION_APPLIED_PRACTICE_FALLBACK=null;
+      if(old==null)localStorage.removeItem(SESSION_APPLIED_PRACTICE_KEY);
+      else{
+        try{SESSION_APPLIED_PRACTICE_FALLBACK=JSON.parse(old);}catch(e){}
+        localStorage.setItem(SESSION_APPLIED_PRACTICE_KEY,old);
+      }
+    }
+  });
+  add('セッションチェック: 今日のテーマをHUD用に短くする',function(){
+    if(typeof storeAppliedPractice!=='function'||typeof appliedPracticeHudText!=='function')return false;
+    const old=localStorage.getItem(SESSION_APPLIED_PRACTICE_KEY);
+    try{
+      storeAppliedPractice({mode:'リングゲーム',focus:'リバー判断',status:'確認練習',reason:'リバーを確認します。'});
+      const txt=appliedPracticeHudText();
+      return txt==='今日: リバー判断 / 確認練習';
     }finally{
       SESSION_APPLIED_PRACTICE_FALLBACK=null;
       if(old==null)localStorage.removeItem(SESSION_APPLIED_PRACTICE_KEY);
@@ -9136,6 +9167,7 @@ function renderTable(){
   $('stage-label').textContent=game.street.toUpperCase()+(activePl?' / '+(activePl.isHuman?'あなた':activePl.name)+'['+activePos+']':'');
   const tctx=game.tournamentContext;
   $('hud-info').textContent='Hand #'+game.handNum+' | SB '+game.sb+' / BB '+game.bb+(tctx&&tctx.enabled?' / BBA '+tctx.bbAnte+' | '+tctx.phase+' '+tctx.stackBB+'BB':'');
+  refreshHudPracticeFocus();
   const h=game.players.find(p=>p.isHuman);
   $('human-cards').innerHTML=h.holeCards.map(c=>cardHTML(c,true)).join('');
   $('human-hand-name').textContent=h.holeCards.length&&game.community.length>=3
@@ -10750,6 +10782,7 @@ function _initGame(mode){
   // HUDにモード表示
   const hudTitle=document.querySelector('#hud .hud-title');
   if(hudTitle)hudTitle.textContent=_scenarioMode?'🎯 Fish Tank — フロップトレーナー':(mode==='tournament'?'🏆 Fish Tank — Tournament':'🐟 Fish Tank Poker');
+  refreshHudPracticeFocus();
   startNewHand();
 }
 // [Claude fix 2026-05-23] ゲームモードプルダウンから起動モードを取得
