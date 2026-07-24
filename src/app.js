@@ -5091,6 +5091,14 @@ function runFishTankRegressionTests(){
       &&mobile.indexOf('#hud-practice-focus{order:3;flex:11100%')>=0
       &&mobile.indexOf('.hud-btns{gap:4px;flex-shrink:0;margin-left:auto')>=0;
   });
+  add('UI audit: mobile setup is compact',function(){
+    const css=[].slice.call(document.querySelectorAll('style')).map(function(s){return s.textContent||'';}).join('\n').replace(/\s+/g,'');
+    if(!css)return true;
+    const mobile=css.split('@media(max-width:600px)').pop()||'';
+    return mobile.indexOf('#setup-screen{gap:10px;justify-content:flex-start;padding:8px8px12px')>=0
+      &&mobile.indexOf('.setup-card{padding:14px14px')>=0
+      &&mobile.indexOf('.session-check{padding:8px10px;margin:0010px')>=0;
+  });
   add('ライブ実戦教材: 主要トピックをタブ用HTMLに描画する',function(){
     if(typeof renderLivePractice!=='function')return false;
     const html=renderLivePractice();
