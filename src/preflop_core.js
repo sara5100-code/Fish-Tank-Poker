@@ -82,7 +82,8 @@ function preflopSizePlan(hr,d,limpCount,is3bet,isISO,pos){
     return{target,label:'推奨: '+target+'T 前後の3BET（'+(ip?'IPは約3倍':'OOPは約3.5〜4倍')+'）'};
   }
   if(isISO){
-    const bbMult=3.5+limpCount;
+    // [Codex fix 2026-07-26] リンプ過多卓のアイソ基準は 3BB + 1BB/リンパーで教える。
+    const bbMult=3.0+limpCount;
     const target=Math.round(bb*bbMult);
     return{target,label:'推奨: '+target+'T 前後のISOレイズ（'+limpCount+'リンパーに対して約'+bbMult+'BB）'};
   }

@@ -40,6 +40,20 @@ function calcLiveCashRake(pot,cfg,community){
   if(!community||community.length<3)return 0;
   return Math.max(0,Math.min(cfg.cap||0,Math.floor(pot*(cfg.rate||0))));
 }
+// [Codex fix 2026-07-26] テーブルタイプはAI難易度と独立させ、ライブ特有のリンプ過多卓を再現する。
+function liveCashTableProfileFromValue(v){
+  if(v==='limp_heavy')return{
+    id:'limp_heavy',
+    label:'パッシブ・リンプ過多',
+    openLimpMult:2.25,
+    overLimpMult:1.55,
+    isolateCalliness:1.12
+  };
+  return{id:'standard',label:'標準',openLimpMult:1.0,overLimpMult:1.0,isolateCalliness:1.0};
+}
+function liveCashTableProfileLabel(profile){
+  return profile&&profile.label?profile.label:'標準';
+}
 const RANK_JP={A:'エース',K:'キング',Q:'クイーン',J:'ジャック',T:'テン',
   '9':'ナイン','8':'エイト','7':'セブン','6':'シックス','5':'ファイブ','4':'フォー','3':'スリー','2':'デュース'};
 const HAND_NAMES=['ハイカード','ワンペア','ツーペア','スリーオブアカインド',
@@ -1014,6 +1028,27 @@ function aiSizedAction(target,chips,currentBet){
   if(rt>=chips+currentBet)return{action:'allin'};
   return{action:'raise',amount:rt};
 }
+function aiLimpHeavyOpenDecision(handFrac,ri,pos,openChart,effOpenPctN,prof,game){
+  const table=game&&game.tableProfile;
+  if(!table||table.id!=='limp_heavy'||getRangeMode()!=='live')return null;
+  if(pos==='BB')return null;
+  const bb=game.bigBlind||1;
+  const toCall=Math.max(0,(game.currentBet||0)-(game.players[game.actionIdx]?.currentBet||0));
+  if(toCall<=0)return null;
+  const limpers=game.currentHandDecisions.filter(function(d){return d.street==='preflop'&&d.action==='call'&&!d.facingRaise;}).length;
+  const playable=ri.pair||ri.suited||ri.hi>=12||Math.abs(ri.hi-ri.lo)<=2;
+  if(!playable)return null;
+  const premiumBand=Math.max(0.05,effOpenPctN*0.42);
+  if(handFrac<=premiumBand)return null;
+  const baseCap=Math.min(0.62,Math.max(effOpenPctN*1.55,live25OpenPct(pos,game.players.length)+0.16));
+  const limpCap=Math.min(0.68,baseCap+(limpers?0.10*table.overLimpMult:0)+(prof.openWidthMult>1.3?0.04:0));
+  const chartOk=openChart.status!=='out'||ri.suited||ri.pair||limpers>0;
+  if(!chartOk||handFrac>limpCap)return null;
+  const baseFreq=limpers?0.72:0.54;
+  const freq=Math.min(0.88,baseFreq*table.openLimpMult*(prof.callBias?1.08:1.0));
+  if(Math.random()<freq)return{action:'call',tableLimp:true};
+  return null;
+}
 // [Codex fix 2026-05-27] TモードのAIもショート帯ではcallを減らし、open jam / reshove / foldへ寄せる。
 function aiTournamentPreflopDecision(player,game,handFrac,ri,pos,isRaisedPot,toCall,pot,prof){
   const tctx=game.tournamentContext;
@@ -1211,6 +1246,8 @@ function aiDecide(player,game,baseLevel){
       const openChartForAI=preflopChartLookup('open',ht,pos,game.players.length,{});
       const mixFreqBase=aiPfModeOpen==='gto'?(prof.openWidthMult>1.4?0.70:0.50):(prof.openWidthMult>1.4?0.50:0.28);
       const openMixOk=openChartForAI.status==='pure'||(openChartForAI.status==='mix'&&Math.random()<mixFreqBase);
+      const tableLimp=aiLimpHeavyOpenDecision(handFrac,ri,pos,openChartForAI,effOpenPctN,prof,game);
+      if(tableLimp)return{action:'call'};
       if(handFrac<=effOpenPctN&&openMixOk){
         const mult=2.3+Math.random()*0.5;
         const amt=Math.round(Math.min(bb*mult*prof.betSizeMult,chips));
@@ -1460,6 +1497,7 @@ class GameEngine{
     // [Codex fix 2026-05-26] トーナメント局面別モード用の文脈。BBアンティや通過枠を評価に渡す。
     this.tournamentContext=cfg.tournamentContext||null;
     this.rakeConfig=(this.tournamentContext&&this.tournamentContext.enabled)?{enabled:false,rate:0,cap:0,label:'トーナメントはレーキなし'}:(cfg.rakeConfig||liveCashRakeConfigFromValue('live',this.bb));
+    this.tableProfile=(this.tournamentContext&&this.tournamentContext.enabled)?liveCashTableProfileFromValue('standard'):(cfg.tableProfile||liveCashTableProfileFromValue(cfg.tableType||'standard'));
     // [Codex fix 2026-05-28] TモードではstackBBをチップ量ではなくBB数として扱い、プリセットBBから開始チップを復元する。
     this.startingChips=(this.tournamentContext&&this.tournamentContext.enabled)
       ?Math.round(this.bb*(this.tournamentContext.stackBB||25))
@@ -1778,6 +1816,7 @@ class GameEngine{
       })),
       decisions:[...this.currentHandDecisions],pot:this.pot,street:this.street,
       rake:{amount:rakeAmount,grossPot:this.pot,netPot:netPot,config:this.rakeConfig?{...this.rakeConfig}:null},
+      tableProfile:this.tableProfile?{...this.tableProfile}:null,
       dealerIndex:this.dealerIndex,bigBlind:this.bb,
       numActive:this.nonFolded().length+this.players.filter(p=>p.active&&p.folded).length,
       scenario:this._scenario||null,pfStory:this._pfStory||null,
@@ -5093,6 +5132,7 @@ function regressionHand(opts){
     numActive:opts.numActive||players.filter(p=>p.active!==false).length,
     rake:opts.rake||null,
     rakeConfig:opts.rakeConfig||null,
+    tableProfile:opts.tableProfile||null,
     scenario:null,
     pfStory:opts.pfStory||null,
     tournamentContext:opts.tournamentContext||null
@@ -8873,6 +8913,41 @@ function runFishTankRegressionTests(){
     return !!(evOff&&evOn&&offCap!=null&&onCap!=null&&onCap<offCap&&evOn.liveCashSpotProfile.rakeActive&&/レーキ/.test(txt));
   });
 
+  add('ライブ環境: リンプ過多テーブルで平均リンプ数が増える',function(){
+    if(typeof GameEngine!=='function'||typeof aiDecide!=='function')return true;
+    const oldRandom=Math.random;
+    function seeded(seed){
+      let s=seed;
+      return function(){s=(s*16807)%2147483647;return(s-1)/2147483646;};
+    }
+    function sample(tableType,seed){
+      Math.random=seeded(seed);
+      let limps=0,hands=0;
+      for(let i=0;i<36;i++){
+        const g=new GameEngine({numPlayers:9,sb:2,bb:5,startingChips:500,aiLevel:'medium',tableProfile:liveCashTableProfileFromValue(tableType),rakeConfig:liveCashRakeConfigFromValue('live',5)});
+        g.startHand();
+        playAuditGame(g,80);
+        const hr=g.handHistory[0];
+        if(!hr)continue;
+        hands++;
+        limps+=hr.decisions.filter(function(d){return d.street==='preflop'&&!d.isHuman&&d.action==='call'&&!d.facingRaise&&d.position!=='BB';}).length;
+      }
+      return hands?limps/hands:0;
+    }
+    try{
+      const standard=sample('standard',12345);
+      const limpHeavy=sample('limp_heavy',12345);
+      return limpHeavy>=0.85&&limpHeavy>standard+0.45;
+    }finally{
+      Math.random=oldRandom;
+    }
+  });
+
+  add('ライブ環境: アイソレイズサイズは3BB+1BB/リンパーを基準にする',function(){
+    const plan=preflopSizePlan({bigBlind:5},{toCall:5},2,false,true,'CO');
+    return !!(plan&&plan.target===25&&/2リンパー/.test(plan.label)&&/5BB/.test(plan.label));
+  });
+
   const results=tests.map(function(t){
     try{return{name:t.name,pass:!!t.fn()};}
     catch(e){return{name:t.name,pass:false,error:e&&e.message?e.message:String(e)};}
@@ -9750,6 +9825,9 @@ function buildHandHistoryText(includeContext){
   // [Codex fix 2026-05-26] 外部レビュー用の文脈は目的だけを簡潔に渡す。
   if(includeContext)txt+='ゲーム文脈: '+(hr.tournamentContext&&hr.tournamentContext.enabled?'国内アミューズメント・チケット獲得トーナメント訓練':'海外ライブキャッシュ $2/$5 勝ち越し訓練')+'\n';
   txt+='プレイヤー数: '+totalP+'人 / BB: '+hr.bigBlind+'T / 想定スタック: '+(hr.tournamentContext&&hr.tournamentContext.enabled?hr.tournamentContext.stackBB+'BB':'約50BB以上')+'\n';
+  if(hr.tableProfile&&hr.tableProfile.id&&hr.tableProfile.id!=='standard'){
+    txt+='テーブルタイプ: '+liveCashTableProfileLabel(hr.tableProfile)+'\n';
+  }
   if(hr.rake&&hr.rake.config&&hr.rake.config.enabled){
     txt+='レーキ: '+liveCashRakeLabel(hr.rake.config)+' / 控除 '+(hr.rake.amount||0)+'T / 精算ポット '+(hr.rake.netPot||hr.pot)+'T\n';
   }
@@ -10954,7 +11032,9 @@ function _initGame(mode){
   if(bb>=20&&aiLevel!=='hard'){aiLevel='hard';$('cfg-ai').value='hard';}
   const rakeEl=$('cfg-rake');
   const rakeConfig=tctx&&tctx.enabled?liveCashRakeConfigFromValue('off',bb):liveCashRakeConfigFromValue(rakeEl?rakeEl.value:'live',bb);
-  game=new GameEngine({numPlayers:n,sb:sb,bb:bb,startingChips:bb*stackBB,aiLevel:aiLevel,tournamentContext:tctx,rakeConfig:rakeConfig});
+  const tableEl=$('cfg-table-type');
+  const tableProfile=tctx&&tctx.enabled?liveCashTableProfileFromValue('standard'):liveCashTableProfileFromValue(tableEl?tableEl.value:'standard');
+  game=new GameEngine({numPlayers:n,sb:sb,bb:bb,startingChips:bb*stackBB,aiLevel:aiLevel,tournamentContext:tctx,rakeConfig:rakeConfig,tableProfile:tableProfile});
   _scenarioMode=(mode==='scenario');
   showScreen('game-screen');
   // HUDにモード表示
@@ -11134,7 +11214,7 @@ document.addEventListener('click',function(e){
   }
 });
 
-window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,runFishTankAuditBatch,fishTankAuditBatchReportText,buildFishTankAuditRepairQueue,fishTankAuditRepairPlanText,auditIssuesForHand,playAuditGame,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,boardTextureProfile,boardTextureProfileText,representativeBoardProfile,boardTextureFrequencyAdjustment,boardTextureSizePlan,boardTextureTransitionProfile,boardTextureTransitionProfileText,rangeNutAdvantageProfile,rangeNutAdvantageProfileText,rangeActionUpdateProfile,rangeActionUpdateProfileText,postflopBetPurposeProfile,postflopBetPurposeProfileText,postflopRaisePlanProfile,postflopRaisePlanProfileText,postflopBarrelPlanProfile,postflopBarrelPlanProfileText,postflopDefensePlanProfile,postflopDefensePlanProfileText,postflopCallFuturePlanProfile,postflopCallFuturePlanProfileText,standardBetSizePct,preflopOpenQuickOptions,raiseOverBetQuickOptions,postflopQuickBetOptions,liveCashRangeProfile,liveCashSpotProfile,liveCashSpotProfileText,liveCashSprProfile,liveCashSprProfileText,liveCashInitiativeProfile,liveCashInitiativeProfileText,liveCashReraisedPotProfile,liveCashReraisedPotProfileText,liveCashMultiwayProfile,liveCashMultiwayProfileText,liveCashRiverDecisionProfile,liveCashRiverDecisionProfileText,tournamentRangeProfile,tournamentFinalTableProfile,tournamentFinalTableStackRole,tournamentFinalTableCollisionProfile,tournamentFinalTableRangeProfile,tournamentFinalTableRangeProfileText,tournamentFinalTablePostflopProfile,tournamentFinalTablePostflopProfileText,tournamentFinalTableLearningPoint,tournamentFinalTableLearningPointText,tournamentHeadsUpProfile};
+window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,runFishTankAuditBatch,fishTankAuditBatchReportText,buildFishTankAuditRepairQueue,fishTankAuditRepairPlanText,auditIssuesForHand,playAuditGame,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,boardTextureProfile,boardTextureProfileText,representativeBoardProfile,boardTextureFrequencyAdjustment,boardTextureSizePlan,boardTextureTransitionProfile,boardTextureTransitionProfileText,rangeNutAdvantageProfile,rangeNutAdvantageProfileText,rangeActionUpdateProfile,rangeActionUpdateProfileText,postflopBetPurposeProfile,postflopBetPurposeProfileText,postflopRaisePlanProfile,postflopRaisePlanProfileText,postflopBarrelPlanProfile,postflopBarrelPlanProfileText,postflopDefensePlanProfile,postflopDefensePlanProfileText,postflopCallFuturePlanProfile,postflopCallFuturePlanProfileText,standardBetSizePct,preflopOpenQuickOptions,raiseOverBetQuickOptions,postflopQuickBetOptions,liveCashRakeConfigFromValue,liveCashTableProfileFromValue,liveCashRangeProfile,liveCashSpotProfile,liveCashSpotProfileText,liveCashSprProfile,liveCashSprProfileText,liveCashInitiativeProfile,liveCashInitiativeProfileText,liveCashReraisedPotProfile,liveCashReraisedPotProfileText,liveCashMultiwayProfile,liveCashMultiwayProfileText,liveCashRiverDecisionProfile,liveCashRiverDecisionProfileText,tournamentRangeProfile,tournamentFinalTableProfile,tournamentFinalTableStackRole,tournamentFinalTableCollisionProfile,tournamentFinalTableRangeProfile,tournamentFinalTableRangeProfileText,tournamentFinalTablePostflopProfile,tournamentFinalTablePostflopProfileText,tournamentFinalTableLearningPoint,tournamentFinalTableLearningPointText,tournamentHeadsUpProfile};
 // [Codex fix 2026-06-05] Query-gated regression output for browser verification without exposing debug UI during normal play.
 if(new URLSearchParams(location.search).has('codex_regression')){
   setTimeout(function(){
