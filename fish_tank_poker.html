@@ -486,6 +486,9 @@ body.codex-dev .dev-btn{display:inline-flex;}
     <div class="form-row"><label>レンジ判定</label>
       <select id="cfg-range-mode"><option value="live" selected>ライブ$2/$5（ブラフ不足を加味）</option><option value="gto">GTO（均衡・EV基準）</option></select>
     </div>
+    <div class="form-row"><label>レーキ</label>
+      <select id="cfg-rake"><option value="live" selected>ライブ標準 5% / cap 2BB</option><option value="off">OFF</option></select>
+    </div>
     <div id="session-check-wrap" class="session-check">
       <label class="check-toggle"><input type="checkbox" id="cfg-session-check" checked> セッション前後チェックを使う</label>
       <div id="session-start-check"></div>
@@ -644,6 +647,22 @@ function relaxPressureForMode(factor){
 function aiBluffModeMult(isRiver){
   if(getRangeMode()!=='live')return 1.0;
   return isRiver?0.45:0.65;
+}
+// [Codex fix 2026-07-25] ライブ$2/$5の小ポット参加はレーキの影響を受けるため、設定と評価に渡す。
+function liveCashRakeConfigFromValue(v,bb){
+  if(v==='off')return{enabled:false,rate:0,cap:0,label:'レーキOFF'};
+  const cap=Math.max(1,Math.round((bb||5)*2));
+  return{enabled:true,rate:0.05,cap:cap,label:'ライブ標準 5% / cap '+cap+'T'};
+}
+function liveCashRakeLabel(cfg){
+  if(!cfg||!cfg.enabled)return'レーキOFF';
+  return Math.round((cfg.rate||0)*100)+'% / cap '+(cfg.cap||0)+'T';
+}
+function calcLiveCashRake(pot,cfg,community){
+  if(!cfg||!cfg.enabled||!pot)return 0;
+  // ノーフロップ・ノードロップ寄り。フロップ以降まで進んだポットだけ控除する。
+  if(!community||community.length<3)return 0;
+  return Math.max(0,Math.min(cfg.cap||0,Math.floor(pot*(cfg.rate||0))));
 }
 const RANK_JP={A:'エース',K:'キング',Q:'クイーン',J:'ジャック',T:'テン',
   '9':'ナイン','8':'エイト','7':'セブン','6':'シックス','5':'ファイブ','4':'フォー','3':'スリー','2':'デュース'};
@@ -2279,6 +2298,14 @@ function liveCashRangeProfile(hr,d,holeCards,pos){
     // リンプは「チャート内の強い手だから許容」ではなく、強い手ほどレイズしない損失が大きい。
     cap=0.06;
   }
+  // [Codex fix 2026-07-25] レーキがあるリングゲームでは、小ポットの限界参加を少し締める。
+  const rakeCfg=hr&&hr.rake&&hr.rake.config?hr.rake.config:hr&&hr.rakeConfig?hr.rakeConfig:null;
+  const rakeActive=!!(rakeCfg&&rakeCfg.enabled&&_pfMode==='live');
+  const rakeSensitive=['limp','flat','sbFlat','bbDefend'].includes(lane);
+  if(rakeActive&&rakeSensitive){
+    const trim=lane==='bbDefend'?0.025:lane==='limp'?0.03:0.04;
+    cap=Math.max(0.01,cap-trim);
+  }
   const margin=cap-handFrac;
   let verdict='自然',severity='good';
   if(lane==='openFold'){
@@ -2303,8 +2330,9 @@ function liveCashRangeProfile(hr,d,holeCards,pos){
   if(lane==='flat'&&shape.dominatedOffsuit)notes.push('オフスートブロードウェイはドミネートされやすい');
   if(lane==='sbFlat')notes.push('SBは全ストリートOOPで実現率が低い');
   if(lane==='fiveBet')notes.push('4BET後は元の3BETレンジより大幅に締める');
+  if(rakeActive&&rakeSensitive)notes.push('レーキがあるので小ポットの限界参加は少し締める');
   if(chart&&chart.label)notes.push('参照レンジ: '+chart.label+' / '+chart.status);
-  return{handType:ht,handPercent:pct(handFrac),position:pos,lane,actionLabel,baseline,capPercent:pct(cap),marginPercent:Math.round(margin*100),verdict,severity,openerPos,notes,mode:_pfMode,callersBetween,chart};
+  return{handType:ht,handPercent:pct(handFrac),position:pos,lane,actionLabel,baseline,capPercent:pct(cap),marginPercent:Math.round(margin*100),verdict,severity,openerPos,notes,mode:_pfMode,callersBetween,chart,rakeActive:rakeActive};
 }
 function rangeProfileText(profile){
   if(!profile)return'';
@@ -2354,9 +2382,11 @@ function liveCashSpotProfile(hr,d,holeCards,role,tex,nOpponents,lineContext){
   const multiway=(nOpponents||1)>=2;
   const villainBetsBefore=before.filter(function(x){return !x.isHuman&&(x.action==='raise'||x.action==='bet'||x.action==='allin')&&x.street!=='preflop';}).length;
   let lane='',label='',axis='',verdict='自然',severity='good',policy='',risk='',suggest='',mix='';
+  let rangeProfileForReturn=null;
 
   if(street==='preflop'){
     const rp=liveCashRangeProfile(hr,d,holeCards,pos);
+    rangeProfileForReturn=rp;
     const rpBad=rp&&rp.severity==='bad';
     if(lineContext==='オープンリンプ'||(action==='call'&&!facing&&(d.toCall||0)>0&&pos!=='SB'&&pos!=='BB')){
       lane='openLimp';label='オープンリンプ';axis='リング参加レンジ';
@@ -2496,7 +2526,7 @@ function liveCashSpotProfile(hr,d,holeCards,role,tex,nOpponents,lineContext){
     }
   }
   if(!lane)return null;
-  return{lane,label,axis,verdict,severity,policy,risk,suggest,mix,sizePct,position:pos,multiway,limpIso,is3BetPot,onePair,strongOnePair,dynamic,villainBetsBefore};
+  return{lane,label,axis,verdict,severity,policy,risk,suggest,mix,sizePct,position:pos,multiway,limpIso,is3BetPot,onePair,strongOnePair,dynamic,villainBetsBefore,rakeActive:!!(rangeProfileForReturn&&rangeProfileForReturn.rakeActive),capPercent:rangeProfileForReturn?rangeProfileForReturn.capPercent:null};
 }
 function liveCashSpotProfileText(profile){
   if(!profile)return'';
@@ -4936,6 +4966,7 @@ class GameEngine{
     this.sb=cfg.sb;this.bb=cfg.bb;this.aiLevel=cfg.aiLevel;
     // [Codex fix 2026-05-26] トーナメント局面別モード用の文脈。BBアンティや通過枠を評価に渡す。
     this.tournamentContext=cfg.tournamentContext||null;
+    this.rakeConfig=(this.tournamentContext&&this.tournamentContext.enabled)?{enabled:false,rate:0,cap:0,label:'トーナメントはレーキなし'}:(cfg.rakeConfig||liveCashRakeConfigFromValue('live',this.bb));
     // [Codex fix 2026-05-28] TモードではstackBBをチップ量ではなくBB数として扱い、プリセットBBから開始チップを復元する。
     this.startingChips=(this.tournamentContext&&this.tournamentContext.enabled)
       ?Math.round(this.bb*(this.tournamentContext.stackBB||25))
@@ -5233,13 +5264,15 @@ class GameEngine{
   _end(){
     const nf=this.nonFolded();
     let winners;
-    if(nf.length===1){winners=[{player:nf[0],playerIdx:this.players.indexOf(nf[0]),amount:this.pot,byFold:true}];}
+    const rakeAmount=calcLiveCashRake(this.pot,this.rakeConfig,this.community);
+    const netPot=Math.max(0,this.pot-rakeAmount);
+    if(nf.length===1){winners=[{player:nf[0],playerIdx:this.players.indexOf(nf[0]),amount:netPot,byFold:true}];}
     else{
       const res=nf.map(p=>({player:p,ev:HandEval.evaluate([...p.holeCards,...this.community])}));
       res.sort((a,b)=>b.ev.score-a.ev.score);
       const top=res[0].ev.score;
       const ws=res.filter(r=>r.ev.score===top);
-      const share=Math.floor(this.pot/ws.length);
+      const share=Math.floor(netPot/ws.length);
       winners=ws.map(w=>({player:w.player,playerIdx:this.players.indexOf(w.player),amount:share,eval:w.ev,byFold:false}));
     }
     for(const w of winners)w.player.chips+=w.amount;
@@ -5251,6 +5284,7 @@ class GameEngine{
         handResult:p.holeCards.length&&this.community.length?HandEval.evaluate([...p.holeCards,...this.community]):null
       })),
       decisions:[...this.currentHandDecisions],pot:this.pot,street:this.street,
+      rake:{amount:rakeAmount,grossPot:this.pot,netPot:netPot,config:this.rakeConfig?{...this.rakeConfig}:null},
       dealerIndex:this.dealerIndex,bigBlind:this.bb,
       numActive:this.nonFolded().length+this.players.filter(p=>p.active&&p.folded).length,
       scenario:this._scenario||null,pfStory:this._pfStory||null,
@@ -11257,6 +11291,8 @@ function regressionHand(opts){
     dealerIndex:opts.dealerIndex==null?0:opts.dealerIndex,
     bigBlind:opts.bigBlind||5,
     numActive:opts.numActive||players.filter(p=>p.active!==false).length,
+    rake:opts.rake||null,
+    rakeConfig:opts.rakeConfig||null,
     scenario:null,
     pfStory:opts.pfStory||null,
     tournamentContext:opts.tournamentContext||null
@@ -15000,6 +15036,43 @@ function runFishTankRegressionTests(){
     return !!(ev&&ev.postflopBetPurposeProfile&&ev.postflopBetPurposeProfile.opponentType&&ev.postflopBetPurposeProfile.opponentType.label==='コール多め'&&ev.postflopBetPurposeProfile.severity!=='bad'&&/薄いバリュー|コール多め/.test(txt));
   });
 
+  add('ライブ環境: レーキを精算ポットから控除する',function(){
+    const g=new GameEngine({numPlayers:2,sb:2,bb:5,startingChips:500,aiLevel:'hard',rakeConfig:liveCashRakeConfigFromValue('live',5)});
+    g.startHand();
+    g.community=regressionCards(['As','Kd','7c','2h','3d']);
+    g.pot=200;
+    g.players[0].folded=false;g.players[1].folded=false;
+    g.players[0].holeCards=regressionCards(['Ah','Ad']);
+    g.players[1].holeCards=regressionCards(['Qh','Qs']);
+    const before=g.players[0].chips;
+    g._end();
+    const hr=g.handHistory[0];
+    return !!(hr&&hr.rake&&hr.rake.amount===10&&hr.rake.netPot===190&&hr.winners[0].amount===190&&g.players[0].chips===before+190);
+  });
+
+  add('ライブ環境: レーキありは限界参加レンジを少し締める',function(){
+    const d=regressionDecision({street:'preflop',action:'call',amount:11,pot:21,toCall:11,potOdds:11/32,facingRaise:true,position:'BB',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:500});
+    const base={
+      heroHole:['Jc','7c'],
+      villainHole:['Ah','Kd'],
+      board:[],
+      bigBlind:5,
+      pot:32,
+      decisions:[
+        regressionDecision({street:'preflop',action:'raise',amount:16,pot:7,toCall:5,facingRaise:false,position:'UTG',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:500,pfRaiseCountBefore:0,pfFacingBetLevel:0,pfActionBetLevel:2}),
+        d
+      ]
+    };
+    const off=regressionHand(Object.assign({},base,{rakeConfig:liveCashRakeConfigFromValue('off',5)}));
+    const on=regressionHand(Object.assign({},base,{rakeConfig:liveCashRakeConfigFromValue('live',5),rake:{amount:0,grossPot:32,netPot:32,config:liveCashRakeConfigFromValue('live',5)}}));
+    const evOff=humanEval(analyzeHand(off),function(e){return e.street==='preflop'&&e.action==='call';});
+    const evOn=humanEval(analyzeHand(on),function(e){return e.street==='preflop'&&e.action==='call';});
+    const offCap=evOff&&evOff.liveCashSpotProfile&&evOff.liveCashSpotProfile.capPercent;
+    const onCap=evOn&&evOn.liveCashSpotProfile&&evOn.liveCashSpotProfile.capPercent;
+    const txt=evOn?coachReviewText(evOn):'';
+    return !!(evOff&&evOn&&offCap!=null&&onCap!=null&&onCap<offCap&&evOn.liveCashSpotProfile.rakeActive&&/レーキ/.test(txt));
+  });
+
   const results=tests.map(function(t){
     try{return{name:t.name,pass:!!t.fn()};}
     catch(e){return{name:t.name,pass:false,error:e&&e.message?e.message:String(e)};}
@@ -16154,6 +16227,7 @@ function preflopCoachSummaryText(ev,action,rec){
   const isLimp=/limp|Limp|リンプ/.test(lane+' '+label+' '+comment);
   const recText=cleanPreflopRecText(rec);
   const mixText=readableStrategyMixText(ev);
+  const rakeText=p.rakeActive?'レーキがある卓では、小さいコールやリンプで作る薄い利益が削られるため、境界の手は少しフォールド寄りにします。':'';
   let head='';
   let reason='';
   let advice='';
@@ -16188,7 +16262,7 @@ function preflopCoachSummaryText(ev,action,rec){
     else reason='GTOでは頻度が割れることがあります。実戦では相手の広さ、後ろのプレイヤー、サイズを見て寄せます。';
     advice=recText?('今回の目安は '+recText+' です。'):'相手傾向で頻度を寄せる場面です。';
   }
-  return [head,reason,mixText,advice].filter(Boolean).join(' ').replace(/\s+/g,' ').trim();
+  return [head,reason,rakeText,mixText,advice].filter(Boolean).join(' ').replace(/\s+/g,' ').trim();
 }
 function recommendationClose(action,quality,rec,hasSuggest){
   rec=naturalRecommendationText(rec);
@@ -16774,6 +16848,9 @@ function buildHandHistoryText(includeContext){
   // [Codex fix 2026-05-26] 外部レビュー用の文脈は目的だけを簡潔に渡す。
   if(includeContext)txt+='ゲーム文脈: '+(hr.tournamentContext&&hr.tournamentContext.enabled?'国内アミューズメント・チケット獲得トーナメント訓練':'海外ライブキャッシュ $2/$5 勝ち越し訓練')+'\n';
   txt+='プレイヤー数: '+totalP+'人 / BB: '+hr.bigBlind+'T / 想定スタック: '+(hr.tournamentContext&&hr.tournamentContext.enabled?hr.tournamentContext.stackBB+'BB':'約50BB以上')+'\n';
+  if(hr.rake&&hr.rake.config&&hr.rake.config.enabled){
+    txt+='レーキ: '+liveCashRakeLabel(hr.rake.config)+' / 控除 '+(hr.rake.amount||0)+'T / 精算ポット '+(hr.rake.netPot||hr.pot)+'T\n';
+  }
   if(hr.tournamentContext&&hr.tournamentContext.enabled){
     txt+='トーナメント文脈: '+tournamentContextText(hr.tournamentContext)+'\n';
     txt+='評価軸: '+tournamentAxisSummary(hr.tournamentContext,hr.tournamentContext.stackBB)+'\n';
@@ -16821,6 +16898,7 @@ function buildHandHistoryText(includeContext){
     const wPos=hr.dealerIndex!=null?posLabel(w.playerIdx!=null?w.playerIdx:hr.players.findIndex(p=>p.name===w.player.name),hr.dealerIndex,totalP):'?';
     txt+=(w.player.isHuman?'あなた':w.player.name+'['+wPos+']')+' +'+w.amount+(w.byFold?' (相手フォールド)':'')+'  ';
   }
+  if(hr.rake&&hr.rake.amount>0)txt+=' レーキ控除 '+hr.rake.amount+'T ';
   txt+='\nスコア: '+an.score+'/100 ('+an.grade+') — '+an.gradeLabel+'\n';
   if(an.liveCashScores&&an.liveCashScores.length){
     txt+='リングスキル: '+an.liveCashScores.map(function(s){return s.label+' '+s.grade+'('+s.score+'pt: '+s.note+')';}).join(' / ')+'\n';
@@ -17972,7 +18050,9 @@ function _initGame(mode){
   const stackBB=tctx&&tctx.enabled?+(tctx.stackBB||25):+$('cfg-stack').value;
   if(tctx&&tctx.enabled){n=+(tctx.players||n);sb=+(tctx.sb||sb);bb=+(tctx.bb||bb);}
   if(bb>=20&&aiLevel!=='hard'){aiLevel='hard';$('cfg-ai').value='hard';}
-  game=new GameEngine({numPlayers:n,sb:sb,bb:bb,startingChips:bb*stackBB,aiLevel:aiLevel,tournamentContext:tctx});
+  const rakeEl=$('cfg-rake');
+  const rakeConfig=tctx&&tctx.enabled?liveCashRakeConfigFromValue('off',bb):liveCashRakeConfigFromValue(rakeEl?rakeEl.value:'live',bb);
+  game=new GameEngine({numPlayers:n,sb:sb,bb:bb,startingChips:bb*stackBB,aiLevel:aiLevel,tournamentContext:tctx,rakeConfig:rakeConfig});
   _scenarioMode=(mode==='scenario');
   showScreen('game-screen');
   // HUDにモード表示

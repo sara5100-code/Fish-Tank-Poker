@@ -102,6 +102,14 @@ function liveCashRangeProfile(hr,d,holeCards,pos){
     // リンプは「チャート内の強い手だから許容」ではなく、強い手ほどレイズしない損失が大きい。
     cap=0.06;
   }
+  // [Codex fix 2026-07-25] レーキがあるリングゲームでは、小ポットの限界参加を少し締める。
+  const rakeCfg=hr&&hr.rake&&hr.rake.config?hr.rake.config:hr&&hr.rakeConfig?hr.rakeConfig:null;
+  const rakeActive=!!(rakeCfg&&rakeCfg.enabled&&_pfMode==='live');
+  const rakeSensitive=['limp','flat','sbFlat','bbDefend'].includes(lane);
+  if(rakeActive&&rakeSensitive){
+    const trim=lane==='bbDefend'?0.025:lane==='limp'?0.03:0.04;
+    cap=Math.max(0.01,cap-trim);
+  }
   const margin=cap-handFrac;
   let verdict='自然',severity='good';
   if(lane==='openFold'){
@@ -126,8 +134,9 @@ function liveCashRangeProfile(hr,d,holeCards,pos){
   if(lane==='flat'&&shape.dominatedOffsuit)notes.push('オフスートブロードウェイはドミネートされやすい');
   if(lane==='sbFlat')notes.push('SBは全ストリートOOPで実現率が低い');
   if(lane==='fiveBet')notes.push('4BET後は元の3BETレンジより大幅に締める');
+  if(rakeActive&&rakeSensitive)notes.push('レーキがあるので小ポットの限界参加は少し締める');
   if(chart&&chart.label)notes.push('参照レンジ: '+chart.label+' / '+chart.status);
-  return{handType:ht,handPercent:pct(handFrac),position:pos,lane,actionLabel,baseline,capPercent:pct(cap),marginPercent:Math.round(margin*100),verdict,severity,openerPos,notes,mode:_pfMode,callersBetween,chart};
+  return{handType:ht,handPercent:pct(handFrac),position:pos,lane,actionLabel,baseline,capPercent:pct(cap),marginPercent:Math.round(margin*100),verdict,severity,openerPos,notes,mode:_pfMode,callersBetween,chart,rakeActive:rakeActive};
 }
 function rangeProfileText(profile){
   if(!profile)return'';
@@ -177,9 +186,11 @@ function liveCashSpotProfile(hr,d,holeCards,role,tex,nOpponents,lineContext){
   const multiway=(nOpponents||1)>=2;
   const villainBetsBefore=before.filter(function(x){return !x.isHuman&&(x.action==='raise'||x.action==='bet'||x.action==='allin')&&x.street!=='preflop';}).length;
   let lane='',label='',axis='',verdict='自然',severity='good',policy='',risk='',suggest='',mix='';
+  let rangeProfileForReturn=null;
 
   if(street==='preflop'){
     const rp=liveCashRangeProfile(hr,d,holeCards,pos);
+    rangeProfileForReturn=rp;
     const rpBad=rp&&rp.severity==='bad';
     if(lineContext==='オープンリンプ'||(action==='call'&&!facing&&(d.toCall||0)>0&&pos!=='SB'&&pos!=='BB')){
       lane='openLimp';label='オープンリンプ';axis='リング参加レンジ';
@@ -319,7 +330,7 @@ function liveCashSpotProfile(hr,d,holeCards,role,tex,nOpponents,lineContext){
     }
   }
   if(!lane)return null;
-  return{lane,label,axis,verdict,severity,policy,risk,suggest,mix,sizePct,position:pos,multiway,limpIso,is3BetPot,onePair,strongOnePair,dynamic,villainBetsBefore};
+  return{lane,label,axis,verdict,severity,policy,risk,suggest,mix,sizePct,position:pos,multiway,limpIso,is3BetPot,onePair,strongOnePair,dynamic,villainBetsBefore,rakeActive:!!(rangeProfileForReturn&&rangeProfileForReturn.rakeActive),capPercent:rangeProfileForReturn?rangeProfileForReturn.capPercent:null};
 }
 function liveCashSpotProfileText(profile){
   if(!profile)return'';
