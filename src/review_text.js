@@ -854,7 +854,10 @@ function coachReviewText(ev){
   }
   rec=naturalRecommendationText(rec);
   const preflopCompact=preflopCoachSummaryText(ev,action,rec);
-  if(preflopCompact)return polishCoachReviewText(preflopCompact,ev);
+  if(preflopCompact){
+    const compactPolished=polishCoachReviewText(preflopCompact,ev);
+    return typeof scrubOpponentReadTrainingText==='function'?scrubOpponentReadTrainingText(compactPolished):compactPolished;
+  }
   const close=recommendationClose(action,ev.quality,rec,!!ev.suggest);
   const mixedLineExtra=mixedLineExplanationText(ev);
   const postflopExtra=postflopCoachExtraText(ev);
@@ -865,7 +868,8 @@ function coachReviewText(ev){
     .replace(/\s+/g,' ')
     .replace(/。。+/g,'。')
     .trim();
-  return polishCoachReviewText(rawText,ev);
+  const polished=polishCoachReviewText(rawText,ev);
+  return typeof scrubOpponentReadTrainingText==='function'?scrubOpponentReadTrainingText(polished):polished;
 }
 function compactReviewDetailsHTML(ev,metaHTML){
   if(!metaHTML)return'';

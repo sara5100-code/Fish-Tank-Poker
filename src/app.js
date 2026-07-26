@@ -1925,6 +1925,125 @@ function renderGlossary(){
   }).join('');
 }
 
+// ===== 相手リード訓練 (ROADMAP Phase 3-1) =====
+const OPPONENT_READ_KEY='fish_tank_opponent_read_enabled';
+const OPPONENT_READ_GUESS_KEY='fish_tank_opponent_read_guesses_v1';
+let OPPONENT_READ_ENABLED_FALLBACK=false;
+const OPPONENT_READ_LABELS=[
+  {value:'',label:'未推定'},
+  {value:'標準的',label:'標準'},
+  {value:'コール多め',label:'コール多め'},
+  {value:'ブラフ不足',label:'ブラフ不足'},
+  {value:'ブラフ多め',label:'ブラフ多め'}
+];
+function opponentReadTrainingEnabled(){
+  try{
+    const el=document&&document.getElementById?document.getElementById('cfg-opponent-read'):null;
+    if(el&&typeof el.checked==='boolean'&&el.checked)return true;
+    const saved=localStorage.getItem(OPPONENT_READ_KEY);
+    return saved==null?OPPONENT_READ_ENABLED_FALLBACK:saved==='1';
+  }catch(e){return false;}
+}
+function setOpponentReadTrainingEnabled(on){
+  OPPONENT_READ_ENABLED_FALLBACK=!!on;
+  try{localStorage.setItem(OPPONENT_READ_KEY,on?'1':'0');}catch(e){}
+  try{
+    const el=document&&document.getElementById?document.getElementById('cfg-opponent-read'):null;
+    if(el)el.checked=!!on;
+  }catch(e){}
+}
+function opponentReadGuesses(){
+  try{
+    const raw=localStorage.getItem(OPPONENT_READ_GUESS_KEY);
+    const parsed=raw?JSON.parse(raw):{};
+    return parsed&&typeof parsed==='object'?parsed:{};
+  }catch(e){return{};}
+}
+function setOpponentReadGuess(name,value){
+  const guesses=opponentReadGuesses();
+  guesses[name]=value||'';
+  try{localStorage.setItem(OPPONENT_READ_GUESS_KEY,JSON.stringify(guesses));}catch(e){}
+}
+function opponentReadActualLabel(player){
+  const p=liveCashOpponentTypeProfile(player);
+  return p&&p.label?p.label:'標準的';
+}
+function opponentReadGuessOptions(current){
+  return OPPONENT_READ_LABELS.map(function(o){
+    return '<option value="'+escapeHTML(o.value)+'" '+(o.value===current?'selected':'')+'>'+escapeHTML(o.label)+'</option>';
+  }).join('');
+}
+function opponentReadEvidenceForName(name){
+  const hands=game&&game.handHistory?game.handHistory:[];
+  const ev={hands:0,folds:0,calls:0,bets:0,raises:0,showdowns:0,bigBets:0,totalBets:0};
+  hands.forEach(function(h){
+    const seen=(h.players||[]).some(function(p){return p.name===name;});
+    if(!seen)return;
+    ev.hands++;
+    (h.decisions||[]).forEach(function(d){
+      if(d.playerName!==name)return;
+      if(d.action==='fold')ev.folds++;
+      if(d.action==='call')ev.calls++;
+      if(d.action==='bet'||d.action==='raise'||d.action==='allin'){
+        ev.bets++;
+        if(d.action==='raise'||d.action==='allin')ev.raises++;
+        const pct=d.pot?Math.round((d.amount||0)/(d.pot||1)*100):0;
+        if(pct>=65)ev.bigBets++;
+        ev.totalBets++;
+      }
+    });
+    if((h.winners||[]).some(function(w){return w.player&&w.player.name===name&&!w.byFold;}))ev.showdowns++;
+    else if((h.players||[]).some(function(p){return p.name===name&&p.holeCards&&p.holeCards.length>=2&&!p.folded;}))ev.showdowns++;
+  });
+  const clues=[];
+  if(ev.calls>=3)clues.push('コール '+ev.calls+'回');
+  if(ev.folds>=3)clues.push('フォールド '+ev.folds+'回');
+  if(ev.bets>=2)clues.push('ベット/レイズ '+ev.bets+'回');
+  if(ev.bigBets>=1)clues.push('大きめベット '+ev.bigBets+'回');
+  if(ev.showdowns>=1)clues.push('ショーダウン '+ev.showdowns+'回');
+  if(!clues.length)clues.push('まだ材料不足');
+  return{stats:ev,clues:clues};
+}
+function opponentReadAnswerSummary(players,guesses){
+  let total=0,correct=0;
+  const rows=(players||[]).map(function(p){
+    const actual=opponentReadActualLabel(p);
+    const guess=guesses[p.name]||'';
+    if(guess){total++;if(guess===actual)correct++;}
+    return{player:p,actual:actual,guess:guess};
+  });
+  return{rows:rows,total:total,correct:correct,rate:total?Math.round(correct/total*100):0};
+}
+function scrubOpponentReadTrainingText(txt){
+  if(!opponentReadTrainingEnabled())return txt||'';
+  return String(txt||'')
+    .replace(/相手は(コール多め|ブラフ不足|ブラフ多め|標準的)寄りです。?/g,'相手傾向は推定中です。')
+    .replace(/相手は(コール多め|ブラフ不足|ブラフ多め|標準的)寄り、/g,'相手傾向は推定中で、')
+    .replace(/相手タイプ=(コール多め|ブラフ不足|ブラフ多め|標準的)/g,'相手タイプ=非公開')
+    .replace(/(コール多め|ブラフ不足|ブラフ多め)寄り/g,'相手傾向推定中')
+    .replace(/相手は相手傾向推定中です。?/g,'相手傾向は推定中です。');
+}
+function renderOpponentReadTrainer(){
+  if(!game)return '<div class="gto-tip"><div class="tip-title">相手リード訓練</div>ゲーム開始後に相手推定を表示します。</div>';
+  const enabled=opponentReadTrainingEnabled();
+  const ais=game.players.filter(function(p){return !p.isHuman&&p.active&&p.profile;});
+  const guesses=opponentReadGuesses();
+  const summary=opponentReadAnswerSummary(ais,guesses);
+  const header='<div class="op-read-head"><div><div class="tip-title">相手リード訓練</div><div class="op-read-sub">'+(enabled?'本当のタイプは非公開です。行動から推定してください。':'OFFです。ONにするとAIタイプを隠して推定できます。')+'</div></div><button class="op-read-check" data-op-read-check="1">答え合わせ</button></div>';
+  const score=enabled&&summary.total?'<div class="op-read-score">現在の推定: '+summary.correct+'/'+summary.total+' 正解候補（'+summary.rate+'%）</div>':'';
+  const rows=ais.map(function(p){
+    const actual=opponentReadActualLabel(p);
+    const guess=guesses[p.name]||'';
+    const ev=opponentReadEvidenceForName(p.name);
+    const revealed=window.__fishTankOpponentReadReveal===true;
+    const result=revealed&&guess?'<span class="'+(guess===actual?'op-read-good':'op-read-bad')+'">'+(guess===actual?'正解':'ズレ')+'</span>':'';
+    const actualText=revealed?'<div class="op-read-answer">正解: '+escapeHTML(actual)+'。根拠: '+escapeHTML(ev.clues.join(' / '))+'</div>':'<div class="op-read-answer">根拠候補: '+escapeHTML(ev.clues.join(' / '))+'</div>';
+    const styleText=enabled?'タイプ非公開':(p.profile.style+' / '+p.profile.desc);
+    return '<div class="op-read-row"><div class="op-read-main"><div class="ai-dot" style="background:'+p.profile.color+'"></div><div><div class="ai-row-name" style="color:'+p.profile.color+'">'+escapeHTML(p.profile.displayName)+'</div><div class="op-read-style">'+escapeHTML(styleText)+'</div></div></div><div class="op-read-control"><select data-op-read-name="'+escapeHTML(p.name)+'">'+opponentReadGuessOptions(guess)+'</select>'+result+'</div>'+actualText+'</div>';
+  }).join('');
+  return '<div class="gto-tip op-read-panel">'+header+score+'<div class="op-read-list">'+rows+'</div></div>';
+}
+
 // ===== ライブ実戦教材 (Phase 6-1) =====
 const LIVE_PRACTICE_GUIDES=[
   {title:'テーブル/シート選択',
@@ -1942,7 +2061,7 @@ const LIVE_PRACTICE_GUIDES=[
 ];
 function renderLivePractice(){
   const intro='<div class="gto-tip"><div class="tip-title">ライブ実戦メモ</div>ハンド単体の正解だけでなく、良いゲームを選び、崩れた状態で打たないことも勝率の一部です。ここでは$2/$5ライブで特に差が出る習慣だけを短くまとめます。</div>';
-  return intro+LIVE_PRACTICE_GUIDES.map(function(g){
+  return renderOpponentReadTrainer()+intro+LIVE_PRACTICE_GUIDES.map(function(g){
     return '<div class="gto-tip"><div class="tip-title">'+g.title+'</div>'+g.text+'</div>';
   }).join('');
 }
@@ -8838,6 +8957,9 @@ function runFishTankRegressionTests(){
   });
 
   add('リングリバー相手傾向: ブラフ不足タイプのリバーベットへワンペア受けを締める',function(){
+    const oldEnabled=opponentReadTrainingEnabled();
+    setOpponentReadTrainingEnabled(false);
+    try{
     const players=[
       regressionPlayer('あなた',true,['Ks','Qs'],{chips:500}),
       regressionPlayer('bitts',false,['Ad','Td'],{chips:500,profile:AI_PROFILES.bitts})
@@ -8854,6 +8976,9 @@ function runFishTankRegressionTests(){
     const ev=humanEval(analyzeHand(hr),function(e){return e.street==='river'&&e.action==='call';});
     const txt=ev?coachReviewText(ev):'';
     return !!(ev&&ev.liveCashRiverDecisionProfile&&ev.liveCashRiverDecisionProfile.opponentTendency&&ev.liveCashRiverDecisionProfile.opponentTendency.label==='ブラフ不足'&&ev.liveCashRiverDecisionProfile.severity==='bad'&&/ブラフ不足/.test(txt));
+    }finally{
+      setOpponentReadTrainingEnabled(oldEnabled);
+    }
   });
 
   add('リングリバー相手傾向: ブラフ多めタイプには境界コールを戻す',function(){
@@ -8875,6 +9000,9 @@ function runFishTankRegressionTests(){
   });
 
   add('リングリバー相手傾向: コール多め相手への空振りブラフを抑える',function(){
+    const oldEnabled=opponentReadTrainingEnabled();
+    setOpponentReadTrainingEnabled(false);
+    try{
     const players=[
       regressionPlayer('あなた',true,['As','Qd'],{chips:500}),
       regressionPlayer('yu',false,['7c','7d'],{chips:500,profile:AI_PROFILES.yu})
@@ -8890,6 +9018,9 @@ function runFishTankRegressionTests(){
     const ev=humanEval(analyzeHand(hr),function(e){return e.street==='river'&&e.action==='bet';});
     const txt=ev?coachReviewText(ev):'';
     return !!(ev&&ev.liveCashRiverDecisionProfile&&ev.liveCashRiverDecisionProfile.opponentTendency&&ev.liveCashRiverDecisionProfile.opponentTendency.label==='コール多め'&&ev.liveCashRiverDecisionProfile.severity==='bad'&&/コール多め/.test(txt));
+    }finally{
+      setOpponentReadTrainingEnabled(oldEnabled);
+    }
   });
 
   add('ポストフロップ相手タイプ: コール多め相手への空ブラフを抑える',function(){
@@ -8998,6 +9129,44 @@ function runFishTankRegressionTests(){
   add('ライブ環境: アイソレイズサイズは3BB+1BB/リンパーを基準にする',function(){
     const plan=preflopSizePlan({bigBlind:5},{toCall:5},2,false,true,'CO');
     return !!(plan&&plan.target===25&&/2リンパー/.test(plan.label)&&/5BB/.test(plan.label));
+  });
+
+  add('相手リード訓練: ONではロスター説明に本当のタイプを出さない',function(){
+    const oldGame=game,oldReveal=window.__fishTankOpponentReadReveal;
+    const oldEnabled=opponentReadTrainingEnabled();
+    try{
+      setOpponentReadTrainingEnabled(true);
+      window.__fishTankOpponentReadReveal=false;
+      game={players:[
+        regressionPlayer('あなた',true,['As','Ad'],{chips:500}),
+        regressionPlayer('yu',false,['7c','7d'],{chips:500,profile:AI_PROFILES.yu})
+      ],handHistory:[]};
+      const html=renderOpponentReadTrainer();
+      return /タイプ非公開/.test(html)&&!/Loose Passive|Call Station|降りにくい相手です/.test(html);
+    }finally{
+      game=oldGame;window.__fishTankOpponentReadReveal=oldReveal;setOpponentReadTrainingEnabled(oldEnabled);
+    }
+  });
+
+  add('相手リード訓練: レビュー文から相手タイプ名を伏せる',function(){
+    const oldEnabled=opponentReadTrainingEnabled();
+    try{
+      setOpponentReadTrainingEnabled(true);
+      const txt=scrubOpponentReadTrainingText('相手はコール多め寄りです。相手タイプ=ブラフ不足。ブラフ多め寄りも確認。');
+      return !/(コール多め|ブラフ不足|ブラフ多め)寄り|相手タイプ=ブラフ不足/.test(txt)&&/推定中|非公開/.test(txt);
+    }finally{
+      setOpponentReadTrainingEnabled(oldEnabled);
+    }
+  });
+
+  add('相手リード訓練: 推定ラベルの答え合わせを採点できる',function(){
+    const players=[
+      regressionPlayer('yu',false,['7c','7d'],{chips:500,profile:AI_PROFILES.yu}),
+      regressionPlayer('nt',false,['As','Kd'],{chips:500,profile:AI_PROFILES.nt})
+    ];
+    const guesses={yu:opponentReadActualLabel(players[0]),nt:'コール多め'};
+    const summary=opponentReadAnswerSummary(players,guesses);
+    return !!(summary&&summary.total===2&&summary.correct===1&&summary.rate===50&&summary.rows[0].actual===guesses.yu);
   });
 
   const results=tests.map(function(t){
@@ -10283,6 +10452,25 @@ document.addEventListener('click',function(e){
   var rec=game&&game.handHistory.find(function(h){return h.handNum===+item.dataset.hand;});
   if(rec)showAnalysis(rec,true); // fromHistory=true → 閉じるだけ（新ハンドなし）
 });
+document.addEventListener('change',function(e){
+  var sel=e.target&&e.target.closest?e.target.closest('[data-op-read-name]'):null;
+  if(!sel)return;
+  setOpponentReadGuess(sel.getAttribute('data-op-read-name'),sel.value);
+  window.__fishTankOpponentReadReveal=false;
+  var html=renderLivePractice();
+  var a=$('tab-live'),b=$('stab-live');
+  if(a&&!a.classList.contains('hidden'))a.innerHTML=html;
+  if(b&&!b.classList.contains('hidden'))b.innerHTML=html;
+});
+document.addEventListener('click',function(e){
+  var btn=e.target&&e.target.closest?e.target.closest('[data-op-read-check]'):null;
+  if(!btn)return;
+  window.__fishTankOpponentReadReveal=true;
+  var html=renderLivePractice();
+  var a=$('tab-live'),b=$('stab-live');
+  if(a&&!a.classList.contains('hidden'))a.innerHTML=html;
+  if(b&&!b.classList.contains('hidden'))b.innerHTML=html;
+});
 
 // ========== セッション統計 & 傾向分析 (Deep Analysis v2) ==========
 var _STATS_KEY='yohe_holdem_stats_v3';
@@ -10580,11 +10768,12 @@ function renderRoster(){
   if(!rt)return;
   if(!game){rt.innerHTML='';return;}
   const ais=game.players.filter(p=>!p.isHuman&&p.active&&p.profile);
+  const hide=opponentReadTrainingEnabled();
   rt.innerHTML='<div style="font-size:11px;color:var(--dim);margin-bottom:8px;">今回のテーブルのAI</div><div class="ai-roster">'
     +ais.map(p=>'<div class="ai-row"><div class="ai-dot" style="background:'+p.profile.color+'"></div>'
       +'<div><div class="ai-row-name" style="color:'+p.profile.color+'">'+p.profile.displayName+'</div>'
-      +'<div class="ai-row-style">'+p.profile.style+'</div>'
-      +'<div class="ai-row-desc">'+p.profile.desc+'</div></div></div>').join('')
+      +'<div class="ai-row-style">'+(hide?'タイプ非公開':p.profile.style)+'</div>'
+      +'<div class="ai-row-desc">'+(hide?'実戦タブで行動から推定してください。':p.profile.desc)+'</div></div></div>').join('')
     +'</div>';
 }
 
@@ -11086,6 +11275,7 @@ function _initGame(mode){
   const rakeConfig=tctx&&tctx.enabled?liveCashRakeConfigFromValue('off',bb):liveCashRakeConfigFromValue(rakeEl?rakeEl.value:'live',bb);
   const tableEl=$('cfg-table-type');
   const tableProfile=tctx&&tctx.enabled?liveCashTableProfileFromValue('standard'):liveCashTableProfileFromValue(tableEl?tableEl.value:'standard');
+  window.__fishTankOpponentReadReveal=false;
   game=new GameEngine({numPlayers:n,sb:sb,bb:bb,startingChips:bb*stackBB,aiLevel:aiLevel,tournamentContext:tctx,rakeConfig:rakeConfig,tableProfile:tableProfile});
   _scenarioMode=(mode==='scenario');
   showScreen('game-screen');
@@ -11118,6 +11308,15 @@ function applyTournamentPresetToSetup(){
 $('cfg-mode').addEventListener('change',applyTournamentPresetToSetup);
 // [feature 2026-06-10] レンジ判定モード(GTO/Live)の初期化と切替。localStorageに永続化。
 (function(){var el=$('cfg-range-mode');if(!el)return;try{var sv=localStorage.getItem('fish_tank_range_mode');if(sv==='gto'||sv==='live'){setRangeMode(sv);el.value=getRangeMode();}else{setRangeMode(el.value);}}catch(e){setRangeMode(el.value);}el.addEventListener('change',function(){setRangeMode(el.value);try{localStorage.setItem('fish_tank_range_mode',getRangeMode());}catch(e){}});})();
+(function(){
+  var el=$('cfg-opponent-read');
+  if(!el)return;
+  try{el.checked=localStorage.getItem(OPPONENT_READ_KEY)==='1';}catch(e){}
+  el.addEventListener('change',function(){
+    setOpponentReadTrainingEnabled(!!el.checked);
+    window.__fishTankOpponentReadReveal=false;
+  });
+})();
 initSessionChecklistUI();
 $('cfg-tournament-preset').addEventListener('change',applyTournamentPresetToSetup);
 $('cfg-tournament-focus').addEventListener('change',applyTournamentPresetToSetup);
