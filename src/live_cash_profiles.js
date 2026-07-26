@@ -162,6 +162,8 @@ function liveCashSpotProfile(hr,d,holeCards,role,tex,nOpponents,lineContext){
   const pos=d.position||'';
   const facing=!!((d.toCall||0)>0&&(street!=='preflop'||d.facingRaise));
   const betLike=action==='raise'||action==='bet'||action==='allin';
+  const stackBBPre=Math.round(((d.playerChipsBefore||0)/(hr.bigBlind||1))*10)/10;
+  const callStackPctPre=(d.playerChipsBefore||0)>0?Math.round(((d.toCall||0)/(d.playerChipsBefore||1))*100):0;
   const betBase=d.toCall>0?Math.max(1,(d.pot||0)-d.toCall):(d.pot||0);
   const sizePct=betLike&&d.pot?Math.round((d.amount||0)/(d.pot||1)*100):(d.toCall&&betBase?Math.round(d.toCall/betBase*100):0);
   const pref=(hr.decisions||[]).filter(function(x){return x.street==='preflop';});
@@ -191,8 +193,19 @@ function liveCashSpotProfile(hr,d,holeCards,role,tex,nOpponents,lineContext){
   if(street==='preflop'){
     const rp=liveCashRangeProfile(hr,d,holeCards,pos);
     rangeProfileForReturn=rp;
+    const pairPre=holeCards[0]&&holeCards[1]&&holeCards[0].rank===holeCards[1].rank;
+    const pairValuePre=pairPre?(RANK_VAL[holeCards[0].rank]||0):0;
+    const deepSetMine=pairPre&&pairValuePre<=9&&facing&&action==='call'&&pos!=='SB'&&pos!=='BB'&&stackBBPre>=200&&callStackPctPre<=3&&!is3BetPot;
     const rpBad=rp&&rp.severity==='bad';
-    if(lineContext==='オープンリンプ'||(action==='call'&&!facing&&(d.toCall||0)>0&&pos!=='SB'&&pos!=='BB')){
+    if(deepSetMine){
+      lane='deepSetMine';label='ディープセットマイン';axis='ディープスタック/インプライド';
+      verdict='条件付きで自然';
+      severity='good';
+      policy='200BBを超える深さでは、小〜中ポケットのコールはセットを引いた時のインプライドが増えます。';
+      risk='ただしセットにならないフロップでワンペアとして粘ると、深いスタックでは一気に損失が大きくなります。';
+      suggest='推奨: 安くIPで入れる時だけコール候補。外したら早めに撤退し、セット時だけ大きく取りに行く';
+      mix='Call 40-70% / Fold 20-50% / 3bet 0-10%';
+    }else if(lineContext==='オープンリンプ'||(action==='call'&&!facing&&(d.toCall||0)>0&&pos!=='SB'&&pos!=='BB')){
       lane='openLimp';label='オープンリンプ';axis='リング参加レンジ';
       verdict=rpBad?'リンプ癖':'レイズ/フォールド整理';
       severity=rpBad?'bad':'border';
@@ -330,7 +343,7 @@ function liveCashSpotProfile(hr,d,holeCards,role,tex,nOpponents,lineContext){
     }
   }
   if(!lane)return null;
-  return{lane,label,axis,verdict,severity,policy,risk,suggest,mix,sizePct,position:pos,multiway,limpIso,is3BetPot,onePair,strongOnePair,dynamic,villainBetsBefore,rakeActive:!!(rangeProfileForReturn&&rangeProfileForReturn.rakeActive),capPercent:rangeProfileForReturn?rangeProfileForReturn.capPercent:null};
+  return{lane,label,axis,verdict,severity,policy,risk,suggest,mix,sizePct,position:pos,multiway,limpIso,is3BetPot,onePair,strongOnePair,dynamic,villainBetsBefore,rakeActive:!!(rangeProfileForReturn&&rangeProfileForReturn.rakeActive),capPercent:rangeProfileForReturn?rangeProfileForReturn.capPercent:null,stackBB:stackBBPre,callStackPct:callStackPctPre};
 }
 function liveCashSpotProfileText(profile){
   if(!profile)return'';
@@ -359,18 +372,20 @@ function liveCashSprProfile(hr,d,role,tex,nOpponents){
   let lane='',verdict='',severity='border',policy='',risk='',suggest='';
   if(spr>=7&&onePair&&!strongMade&&(action==='call'||action==='fold')&&facing){
     lane='deepSprOnePairCall';
-    const heavy=sizePct>=55||dynamic||multiway||weakPair;
-    verdict=heavy?'深いSPRでは受けすぎ注意':'相手依存のブラフキャッチ';
+    const ultraDeep=stackBB>=200;
+    const heavy=sizePct>=55||dynamic||multiway||weakPair||ultraDeep&&sizePct>=40;
+    verdict=heavy?(ultraDeep?'300BB級では受けすぎ注意':'深いSPRでは受けすぎ注意'):'相手依存のブラフキャッチ';
     severity=heavy&&action==='call'?'bad':action==='fold'?'good':'border';
-    policy='深いSPRではワンペアの絶対価値が下がります。大きなポットを作るほど、相手の強いレンジに捕まりやすくなります。';
+    policy=ultraDeep?'300BB級ではワンペアの絶対価値がさらに下がります。スタックが深いほど、相手のセット・ツーペア・強いドロー完成に大きく払うリスクが増えます。':'深いSPRではワンペアの絶対価値が下がります。大きなポットを作るほど、相手の強いレンジに捕まりやすくなります。';
     risk='トップペアでもクラブなし・ストレート完成カード・マルチウェイなどが重なると、必要勝率だけではコールを正当化しにくいです。';
     suggest=heavy?'推奨: 相手が強く打つラインではフォールド寄り。コールするなら相手がブラフを作れるタイプに限定':'推奨: 小さめのベットにはコール可。大きいサイズや複数ストリートの圧力には慎重に';
   }else if(spr>=7&&onePair&&!strongMade&&betLike){
     lane='deepSprOnePairBet';
-    const tooBig=sizePct>=65||(dynamic&&sizePct>=50)||weakPair;
-    verdict=tooBig?'深いSPRのワンペアで大きく打ちすぎ':'薄いバリューはサイズ選び';
+    const ultraDeep=stackBB>=200;
+    const tooBig=sizePct>=65||(dynamic&&sizePct>=50)||weakPair||(ultraDeep&&sizePct>=55);
+    verdict=tooBig?(ultraDeep?'300BB級のワンペアで大きく打ちすぎ':'深いSPRのワンペアで大きく打ちすぎ'):'薄いバリューはサイズ選び';
     severity=tooBig?'bad':'border';
-    policy='深いSPRのワンペアは、バリューよりもポット管理の価値が上がります。打つなら下のペアやドローに払わせる小〜中サイズが中心です。';
+    policy=ultraDeep?'300BB級のワンペアは、取り切りよりもポット管理をかなり重く見ます。打つなら下のペアやドローから薄く取る小〜中サイズが中心です。':'深いSPRのワンペアは、バリューよりもポット管理の価値が上がります。打つなら下のペアやドローに払わせる小〜中サイズが中心です。';
     risk='大きく打つほど弱いハンドは降り、強いハンドだけに続けられやすくなります。';
     suggest=tooBig?'推奨: チェック、または25〜40%potの薄いバリュー/プロテクション':'推奨: 小〜中サイズで薄く取る。レイズされたらかなり慎重に';
   }else if(spr>=7&&onePair&&!strongMade&&action==='check'){

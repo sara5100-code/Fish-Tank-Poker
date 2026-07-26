@@ -6809,6 +6809,39 @@ function runFishTankRegressionTests(){
     });
   }
 
+  function ultraDeepSetMineCallHand(){
+    const players=[
+      regressionPlayer('hero',true,['5s','5d'],{chips:1500}),
+      regressionPlayer('utg',false,['Ah','Kc'],{chips:1500}),
+      regressionPlayer('bb',false,['Qs','Jc'],{chips:1500})
+    ];
+    return regressionHand({
+      players:players,
+      bigBlind:5,
+      pot:37,
+      decisions:[
+        regressionDecision({street:'preflop',action:'raise',amount:15,pot:7,toCall:5,facingRaise:false,position:'UTG',playerName:'utg',isHuman:false,playerIdx:1,playerChipsBefore:1500,pfRaiseCountBefore:0,pfFacingBetLevel:0,pfActionBetLevel:2}),
+        regressionDecision({street:'preflop',action:'call',amount:15,pot:22,toCall:15,potOdds:15/37,facingRaise:true,position:'BTN',playerName:'hero',isHuman:true,playerIdx:0,playerChipsBefore:1500,pfRaiseCountBefore:1,pfFacingBetLevel:2,pfActionBetLevel:2})
+      ]
+    });
+  }
+
+  function ultraDeepTopPairBigBetHand(){
+    const players=[
+      regressionPlayer('hero',true,['As','Td'],{chips:1500}),
+      regressionPlayer('bb',false,['Kh','Qh'],{chips:1500})
+    ];
+    return regressionHand({
+      players:players,
+      board:['Ts','9s','4d'],
+      bigBlind:5,
+      pot:50,
+      decisions:[
+        regressionDecision({street:'flop',action:'raise',amount:35,pot:50,toCall:0,facingRaise:false,position:'BTN',playerName:'hero',isHuman:true,playerIdx:0,playerChipsBefore:1500})
+      ]
+    });
+  }
+
   function initiativeOopCheckHand(){
     const players=[
       regressionPlayer('あなた',true,['Qs','Td'],{chips:500}),
@@ -7031,6 +7064,25 @@ function runFishTankRegressionTests(){
     const an=analyzeHand(hr);
     const snap=evaluationSnapshot(hr,an);
     return !!(snap&&snap.evaluations&&snap.evaluations.some(function(e){return e.liveCashSprProfile&&e.liveCashSprProfile.lane==='deepSprOnePairCall';}));
+  });
+
+  add('ring deepstack: 300BB starting stack is accepted',function(){
+    const g=new GameEngine({numPlayers:6,sb:2,bb:5,startingChips:1500,aiLevel:'hard'});
+    return !!(g&&g.startingChips===1500&&g.players&&g.players.every(function(p){return p.chips===1500;}));
+  });
+
+  add('ring deepstack: small pair IP call can be set-mine at 300BB',function(){
+    const an=analyzeHand(ultraDeepSetMineCallHand());
+    const ev=humanEval(an,function(e){return e.street==='preflop'&&e.action==='call'&&e.isHuman;});
+    const p=ev&&ev.liveCashSpotProfile;
+    return !!(p&&p.lane==='deepSetMine'&&p.severity==='good'&&p.stackBB>=200&&/Call 40-70/.test(p.mix||''));
+  });
+
+  add('ring deepstack: 300BB one-pair large bet is stricter',function(){
+    const an=analyzeHand(ultraDeepTopPairBigBetHand());
+    const ev=humanEval(an,function(e){return e.street==='flop'&&(e.action==='raise'||e.action==='bet');});
+    const p=ev&&ev.liveCashSprProfile;
+    return !!(p&&p.lane==='deepSprOnePairBet'&&p.severity==='bad'&&p.stackBB>=200&&p.sizePct>=55);
   });
 
   add('リング主導権: 主導権なしOOPチェックを自然な受けにする',function(){
