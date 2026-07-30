@@ -110,6 +110,13 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,'Hiragino 
 .op-read-answer{font-size:10px;color:var(--dim);line-height:1.45;margin-top:5px;}
 .op-read-good{color:var(--green);font-size:10px;font-weight:900;}
 .op-read-bad{color:var(--red);font-size:10px;font-weight:900;}
+.opponent-notes-panel{border-left:3px solid var(--green);}
+.op-note-list{display:grid;gap:8px;margin-top:8px;}
+.op-note-row{border:1px solid var(--border);background:#fff;border-radius:9px;padding:8px;}
+.op-note-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:6px;}
+.op-note-saved{font-size:9px;font-weight:900;color:var(--green);white-space:nowrap;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.18);border-radius:999px;padding:2px 6px;}
+.op-note-input{width:100%;min-height:72px;resize:vertical;border:1px solid var(--border);border-radius:8px;background:var(--panel2);padding:7px 8px;font-family:inherit;font-size:11px;line-height:1.5;color:var(--text);outline:none;}
+.op-note-input:focus{border-color:rgba(61,108,240,.45);box-shadow:0 0 0 2px rgba(61,108,240,.08);}
 
 /* ===== HUD ===== */
 #game-screen{flex-direction:column;overflow:hidden;}
@@ -583,6 +590,7 @@ body.codex-dev .dev-btn{display:inline-flex;}
         <div class="side-tab" data-tab="trends">傾向</div>
         <div class="side-tab" data-tab="glossary">用語</div>
         <div class="side-tab" data-tab="live">実戦</div>
+        <div class="side-tab" data-tab="notes">ノート</div>
       </div>
       <div id="side-content">
         <div id="tab-history"><p style="color:var(--dim);font-size:11px;">ハンドが終わると表示されます</p></div>
@@ -592,6 +600,7 @@ body.codex-dev .dev-btn{display:inline-flex;}
         </div>
         <div id="tab-glossary" class="hidden"></div>
         <div id="tab-live" class="hidden"></div>
+        <div id="tab-notes" class="hidden"></div>
       </div>
     </div>
   </div>
@@ -627,6 +636,7 @@ body.codex-dev .dev-btn{display:inline-flex;}
         <div class="stab" data-stab="trends">傾向</div>
         <div class="stab" data-stab="glossary">用語</div>
         <div class="stab" data-stab="live">実戦</div>
+        <div class="stab" data-stab="notes">ノート</div>
       </div>
       <button id="sheet-close-btn">✕</button>
     </div>
@@ -638,6 +648,7 @@ body.codex-dev .dev-btn{display:inline-flex;}
       </div>
       <div id="stab-glossary" class="hidden"></div>
       <div id="stab-live" class="hidden"></div>
+      <div id="stab-notes" class="hidden"></div>
     </div>
   </div>
 </div>
@@ -5520,7 +5531,9 @@ function renderGlossary(){
 // ===== 相手リード訓練 (ROADMAP Phase 3-1) =====
 const OPPONENT_READ_KEY='fish_tank_opponent_read_enabled';
 const OPPONENT_READ_GUESS_KEY='fish_tank_opponent_read_guesses_v1';
+const OPPONENT_NOTE_KEY='fish_tank_opponent_notes_v1';
 let OPPONENT_READ_ENABLED_FALLBACK=false;
+let OPPONENT_NOTES_FALLBACK={};
 const OPPONENT_READ_LABELS=[
   {value:'',label:'未推定'},
   {value:'標準的',label:'標準'},
@@ -5555,6 +5568,34 @@ function setOpponentReadGuess(name,value){
   const guesses=opponentReadGuesses();
   guesses[name]=value||'';
   try{localStorage.setItem(OPPONENT_READ_GUESS_KEY,JSON.stringify(guesses));}catch(e){}
+}
+function opponentNoteKeyFor(playerOrName){
+  if(!playerOrName)return'unknown';
+  if(typeof playerOrName==='string')return playerOrName;
+  if(playerOrName.profile&&playerOrName.profile.displayName)return playerOrName.profile.displayName;
+  return playerOrName.name||'unknown';
+}
+function opponentNotes(){
+  const fallback=Object.assign({},OPPONENT_NOTES_FALLBACK);
+  try{
+    const raw=localStorage.getItem(OPPONENT_NOTE_KEY);
+    const parsed=raw?JSON.parse(raw):{};
+    if(parsed&&typeof parsed==='object')return Object.assign(fallback,parsed);
+    return fallback;
+  }catch(e){return fallback;}
+}
+function opponentNoteText(playerOrName){
+  const notes=opponentNotes();
+  return notes[opponentNoteKeyFor(playerOrName)]||'';
+}
+function setOpponentNote(playerOrName,value){
+  const key=opponentNoteKeyFor(playerOrName);
+  const notes=opponentNotes();
+  const txt=String(value||'').slice(0,1200);
+  if(txt)notes[key]=txt;
+  else delete notes[key];
+  OPPONENT_NOTES_FALLBACK=Object.assign({},notes);
+  try{localStorage.setItem(OPPONENT_NOTE_KEY,JSON.stringify(notes));}catch(e){}
 }
 function opponentReadActualLabel(player){
   const p=liveCashOpponentTypeProfile(player);
@@ -5645,6 +5686,19 @@ function renderOpponentReadTrainer(){
     return '<div class="op-read-row"><div class="op-read-main"><div class="ai-dot" style="background:'+p.profile.color+'"></div><div><div class="ai-row-name" style="color:'+p.profile.color+'">'+escapeHTML(p.profile.displayName)+'</div><div class="op-read-style">'+escapeHTML(styleText)+'</div></div></div><div class="op-read-control"><select data-op-read-name="'+escapeHTML(p.name)+'">'+opponentReadGuessOptions(guess)+'</select>'+result+'</div>'+actualText+'</div>';
   }).join('');
   return '<div class="gto-tip op-read-panel">'+header+score+'<div class="op-read-list">'+rows+'</div></div>';
+}
+function renderOpponentNotesPanel(){
+  if(!game)return '<div class="gto-tip opponent-notes-panel"><div class="tip-title">相手ノート</div>ゲーム開始後に相手ごとのメモを表示します。</div>';
+  const ais=game.players.filter(function(p){return !p.isHuman&&p.active&&p.profile;});
+  if(!ais.length)return '<div class="gto-tip opponent-notes-panel"><div class="tip-title">相手ノート</div>メモ対象のAIがいません。</div>';
+  const rows=ais.map(function(p){
+    const key=opponentNoteKeyFor(p);
+    const ev=opponentReadEvidenceForName(p.name);
+    const hint=ev.clues&&ev.clues.length?ev.clues.join(' / '):'まだ材料不足';
+    const note=opponentNoteText(p);
+    return '<div class="op-note-row"><div class="op-note-head"><div class="op-read-main"><div class="ai-dot" style="background:'+p.profile.color+'"></div><div><div class="ai-row-name" style="color:'+p.profile.color+'">'+escapeHTML(p.profile.displayName)+'</div><div class="op-read-style">'+escapeHTML(hint)+'</div></div></div><span class="op-note-saved" data-op-note-saved="'+escapeHTML(key)+'">保存済み</span></div><textarea class="op-note-input" data-op-note-name="'+escapeHTML(key)+'" placeholder="例: リバー大サイズはかなり強い。小さいベットは薄いバリュー多め。">'+escapeHTML(note)+'</textarea></div>';
+  }).join('');
+  return '<div class="gto-tip opponent-notes-panel"><div class="tip-title">相手ノート</div><div class="op-read-sub">相手の癖を自分の言葉で残します。同じ表示名のAIが再登場した時にも引き継がれます。</div><div class="op-note-list">'+rows+'</div></div>';
 }
 
 // ===== ライブ実戦教材 (Phase 6-1) =====
@@ -15527,6 +15581,41 @@ function runFishTankRegressionTests(){
     }
   });
 
+  add('相手ノート: 表示名ごとに保存して再表示できる',function(){
+    const old=localStorage.getItem(OPPONENT_NOTE_KEY);
+    try{
+      localStorage.removeItem(OPPONENT_NOTE_KEY);
+      const p=regressionPlayer('seat-a',false,['7c','7d'],{chips:500,profile:AI_PROFILES.yu});
+      setOpponentNote(p,'リバー大サイズは強め。');
+      const p2=regressionPlayer('別席',false,['8c','8d'],{chips:500,profile:AI_PROFILES.yu});
+      return opponentNoteText(p2)==='リバー大サイズは強め。';
+    }finally{
+      if(old==null)localStorage.removeItem(OPPONENT_NOTE_KEY);
+      else localStorage.setItem(OPPONENT_NOTE_KEY,old);
+    }
+  });
+
+  add('相手ノート: ノートパネルに保存済みメモを描画する',function(){
+    const oldGame=game;
+    const old=localStorage.getItem(OPPONENT_NOTE_KEY);
+    try{
+      localStorage.removeItem(OPPONENT_NOTE_KEY);
+      const p=regressionPlayer('seat-a',false,['7c','7d'],{chips:500,profile:AI_PROFILES.yu});
+      game={players:[regressionPlayer('あなた',true,['As','Ad'],{chips:500}),p],handHistory:[]};
+      setOpponentNote(p,'小さいベットは薄め。');
+      const html=renderOpponentNotesPanel();
+      return /相手ノート/.test(html)&&/yu/.test(html)&&/小さいベットは薄め。/.test(html)&&/data-op-note-name="yu"/.test(html);
+    }finally{
+      game=oldGame;
+      if(old==null)localStorage.removeItem(OPPONENT_NOTE_KEY);
+      else localStorage.setItem(OPPONENT_NOTE_KEY,old);
+    }
+  });
+
+  add('相手ノート: サイドとボトムシートにノートタブを持つ',function(){
+    return !!(document.querySelector('[data-tab="notes"]')&&document.querySelector('[data-stab="notes"]')&&document.getElementById('tab-notes')&&document.getElementById('stab-notes'));
+  });
+
   const results=tests.map(function(t){
     try{return{name:t.name,pass:!!t.fn()};}
     catch(e){return{name:t.name,pass:false,error:e&&e.message?e.message:String(e)};}
@@ -17731,6 +17820,15 @@ document.addEventListener('click',function(e){
   if(a&&!a.classList.contains('hidden'))a.innerHTML=html;
   if(b&&!b.classList.contains('hidden'))b.innerHTML=html;
 });
+document.addEventListener('input',function(e){
+  var ta=e.target&&e.target.closest?e.target.closest('[data-op-note-name]'):null;
+  if(!ta)return;
+  var key=ta.getAttribute('data-op-note-name');
+  setOpponentNote(key,ta.value);
+  document.querySelectorAll('[data-op-note-saved="'+key+'"]').forEach(function(el){
+    el.textContent=ta.value?'保存済み':'未記入';
+  });
+});
 
 // ========== セッション統計 & 傾向分析 (Deep Analysis v2) ==========
 var _STATS_KEY='yohe_holdem_stats_v3';
@@ -18610,7 +18708,7 @@ function isLandscape(){return window.matchMedia('(min-width:860px) and (orientat
 function openSheet(tab){
   // シートのタブを切り替え
   document.querySelectorAll('.stab').forEach(function(s){s.classList.toggle('active',s.dataset.stab===tab);});
-  ['history','trends','glossary','live'].forEach(function(id){
+  ['history','trends','glossary','live','notes'].forEach(function(id){
     var el=$('stab-'+id);if(el)el.classList.toggle('hidden',id!==tab);
   });
   // コンテンツをリフレッシュ
@@ -18618,6 +18716,7 @@ function openSheet(tab){
   if(tab==='history'){var html=_historyHTML();var sh=$('stab-history');if(sh)sh.innerHTML=html;}
   if(tab==='glossary'){var sg=$('stab-glossary');if(sg)sg.innerHTML=renderGlossary();}
   if(tab==='live'){var sl=$('stab-live');if(sl)sl.innerHTML=renderLivePractice();}
+  if(tab==='notes'){var sn=$('stab-notes');if(sn)sn.innerHTML=renderOpponentNotesPanel();}
   $('sheet-overlay').classList.add('open');
 }
 function closeSheet(){$('sheet-overlay').classList.remove('open');}
@@ -18639,9 +18738,10 @@ document.querySelectorAll('[data-tab]').forEach(function(btn){
     // 横画面デスクトップ → サイドパネルで切り替え
     document.querySelectorAll('.side-tab').forEach(function(s){s.classList.remove('active');});
     document.querySelectorAll('.side-tab[data-tab="'+t+'"]').forEach(function(s){s.classList.add('active');});
-    ['history','trends','glossary','live'].forEach(function(id){var el=$('tab-'+id);if(el)el.classList.toggle('hidden',id!==t);});
+    ['history','trends','glossary','live','notes'].forEach(function(id){var el=$('tab-'+id);if(el)el.classList.toggle('hidden',id!==t);});
     if(t==='glossary'){var tg=$('tab-glossary');if(tg)tg.innerHTML=renderGlossary();}
     if(t==='live'){var tl=$('tab-live');if(tl)tl.innerHTML=renderLivePractice();}
+    if(t==='notes'){var tn=$('tab-notes');if(tn)tn.innerHTML=renderOpponentNotesPanel();}
     if(t==='trends')renderTrends();
   });
 });
@@ -18725,7 +18825,7 @@ document.addEventListener('click',function(e){
   }
 });
 
-window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,runFishTankAuditBatch,fishTankAuditBatchReportText,buildFishTankAuditRepairQueue,fishTankAuditRepairPlanText,auditIssuesForHand,playAuditGame,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,boardTextureProfile,boardTextureProfileText,representativeBoardProfile,boardTextureFrequencyAdjustment,boardTextureSizePlan,boardTextureTransitionProfile,boardTextureTransitionProfileText,rangeNutAdvantageProfile,rangeNutAdvantageProfileText,rangeActionUpdateProfile,rangeActionUpdateProfileText,postflopBetPurposeProfile,postflopBetPurposeProfileText,postflopRaisePlanProfile,postflopRaisePlanProfileText,postflopBarrelPlanProfile,postflopBarrelPlanProfileText,postflopDefensePlanProfile,postflopDefensePlanProfileText,postflopCallFuturePlanProfile,postflopCallFuturePlanProfileText,standardBetSizePct,preflopOpenQuickOptions,raiseOverBetQuickOptions,postflopQuickBetOptions,aiSizingTellAdjustedTarget,aiSizingTellLabel,opponentReadSizingTellLabel,liveCashRakeConfigFromValue,liveCashTableProfileFromValue,liveCashRangeProfile,liveCashSpotProfile,liveCashSpotProfileText,liveCashSprProfile,liveCashSprProfileText,liveCashInitiativeProfile,liveCashInitiativeProfileText,liveCashReraisedPotProfile,liveCashReraisedPotProfileText,liveCashMultiwayProfile,liveCashMultiwayProfileText,liveCashRiverDecisionProfile,liveCashRiverDecisionProfileText,tournamentRangeProfile,tournamentFinalTableProfile,tournamentFinalTableStackRole,tournamentFinalTableCollisionProfile,tournamentFinalTableRangeProfile,tournamentFinalTableRangeProfileText,tournamentFinalTablePostflopProfile,tournamentFinalTablePostflopProfileText,tournamentFinalTableLearningPoint,tournamentFinalTableLearningPointText,tournamentHeadsUpProfile};
+window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,runFishTankAuditBatch,fishTankAuditBatchReportText,buildFishTankAuditRepairQueue,fishTankAuditRepairPlanText,auditIssuesForHand,playAuditGame,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,boardTextureProfile,boardTextureProfileText,representativeBoardProfile,boardTextureFrequencyAdjustment,boardTextureSizePlan,boardTextureTransitionProfile,boardTextureTransitionProfileText,rangeNutAdvantageProfile,rangeNutAdvantageProfileText,rangeActionUpdateProfile,rangeActionUpdateProfileText,postflopBetPurposeProfile,postflopBetPurposeProfileText,postflopRaisePlanProfile,postflopRaisePlanProfileText,postflopBarrelPlanProfile,postflopBarrelPlanProfileText,postflopDefensePlanProfile,postflopDefensePlanProfileText,postflopCallFuturePlanProfile,postflopCallFuturePlanProfileText,standardBetSizePct,preflopOpenQuickOptions,raiseOverBetQuickOptions,postflopQuickBetOptions,aiSizingTellAdjustedTarget,aiSizingTellLabel,opponentReadSizingTellLabel,opponentNoteText,setOpponentNote,renderOpponentNotesPanel,liveCashRakeConfigFromValue,liveCashTableProfileFromValue,liveCashRangeProfile,liveCashSpotProfile,liveCashSpotProfileText,liveCashSprProfile,liveCashSprProfileText,liveCashInitiativeProfile,liveCashInitiativeProfileText,liveCashReraisedPotProfile,liveCashReraisedPotProfileText,liveCashMultiwayProfile,liveCashMultiwayProfileText,liveCashRiverDecisionProfile,liveCashRiverDecisionProfileText,tournamentRangeProfile,tournamentFinalTableProfile,tournamentFinalTableStackRole,tournamentFinalTableCollisionProfile,tournamentFinalTableRangeProfile,tournamentFinalTableRangeProfileText,tournamentFinalTablePostflopProfile,tournamentFinalTablePostflopProfileText,tournamentFinalTableLearningPoint,tournamentFinalTableLearningPointText,tournamentHeadsUpProfile};
 // [Codex fix 2026-06-05] Query-gated regression output for browser verification without exposing debug UI during normal play.
 if(new URLSearchParams(location.search).has('codex_regression')){
   setTimeout(function(){
