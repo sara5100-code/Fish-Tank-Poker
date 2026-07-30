@@ -798,15 +798,18 @@ const AI_PROFILES={
   yu:{displayName:'yu',color:'#c25008',style:'ルーズ｜フォールドできない',
     desc:'肝心な場面でフォールドできない。若干ルーズ。ペアがあれば大抵コール。',
     openWidthMult:1.35,bbDefenseWidth:1.1,foldToBetBase:0.42,bluffFreq:0.14,
-    betSizeMult:1.0,donkFreq:0.04,posAware:0.65,noise:0.13,cantFoldMadeHand:true},
+    betSizeMult:1.0,donkFreq:0.04,posAware:0.65,noise:0.13,cantFoldMadeHand:true,
+    sizingTell:{type:'thin_small',label:'薄い手は小さめ',desc:'ワンペア級のベットが小さくなりやすい。'}},
   bitts:{displayName:'bitts',color:'#1e3a8a',style:'タイトパッシブ｜ブラフなし',
     desc:'非常にタイト。プリフロップはプレミアム中心。ブラフはほぼせず、ベットしたら強い。',
     openWidthMult:0.65,bbDefenseWidth:0.75,foldToBetBase:0.72,bluffFreq:0.04,
-    betSizeMult:0.75,donkFreq:0.0,posAware:0.82,noise:0.06,cantFoldMadeHand:false},
+    betSizeMult:0.75,donkFreq:0.0,posAware:0.82,noise:0.06,cantFoldMadeHand:false,
+    sizingTell:{type:'value_big',label:'強い時に大きめ',desc:'大きく打った時ほどバリュー寄り。'}},
   bun:{displayName:'bun',color:'#b91c1c',style:'ルーズアグレッシブ｜フィッシュ',
     desc:'非常にルーズ。何でもプレーし、ドンクベット多用。ポジション意識低め。',
     openWidthMult:2.00,bbDefenseWidth:1.35,foldToBetBase:0.32,bluffFreq:0.38,
-    betSizeMult:1.25,donkFreq:0.22,posAware:0.28,noise:0.28,cantFoldMadeHand:false},
+    betSizeMult:1.25,donkFreq:0.22,posAware:0.28,noise:0.28,cantFoldMadeHand:false,
+    sizingTell:{type:'splashy_large',label:'広く大きめ',desc:'強弱に関係なく大きいサイズを使いやすい。'}},
   kan:{displayName:'kan',color:'#6d28d9',style:'読めない｜アンプレディクタブル',
     desc:'何を考えているか読めない。ランダム性が高く、強い手でもフォールドすることも。',
     openWidthMult:1.30,bbDefenseWidth:1.0,foldToBetBase:0.52,bluffFreq:0.22,
@@ -822,11 +825,13 @@ const AI_PROFILES={
   nt:{displayName:'nt',color:'#dc2626',style:'ブラフ過多｜マルチウェイでも押す',
     desc:'ブラフ頻度が異常に高い。複数の相手がいてもピュアブラフで押してくることがある。',
     openWidthMult:1.70,bbDefenseWidth:1.1,foldToBetBase:0.48,bluffFreq:0.58,
-    betSizeMult:1.2,donkFreq:0.12,posAware:0.42,noise:0.20,cantFoldMadeHand:false,ignoreMultiway:true},
+    betSizeMult:1.2,donkFreq:0.12,posAware:0.42,noise:0.20,cantFoldMadeHand:false,ignoreMultiway:true,
+    sizingTell:{type:'round_bluff',label:'ブラフが丸い額',desc:'弱いベットほど切りの良い額になりやすい。'}},
   m:{displayName:'m',color:'#1d4ed8',style:'均衡｜若干強気',
     desc:'GTOベースだが若干アグレッシブ寄り。バリューベットのサイジングが大きめ。',
     openWidthMult:0.95,bbDefenseWidth:1.0,foldToBetBase:0.57,bluffFreq:0.18,
-    betSizeMult:1.18,donkFreq:0.02,posAware:0.88,noise:0.07,cantFoldMadeHand:false},
+    betSizeMult:1.18,donkFreq:0.02,posAware:0.88,noise:0.07,cantFoldMadeHand:false,
+    sizingTell:{type:'value_big',label:'強い時に大きめ',desc:'強い完成役ではサイズが上がりやすい。'}},
   dai:{displayName:'dai',color:'#374151',style:'ニット｜超タイト',
     desc:'極端にタイト。AA/KK/QQ/AKs程度しか遊ばない。ベットしたら確実にナッツ級。',
     openWidthMult:0.45,bbDefenseWidth:0.60,foldToBetBase:0.82,bluffFreq:0.02,
@@ -834,7 +839,8 @@ const AI_PROFILES={
   yohe:{displayName:'yohe',color:'#065f46',style:'タイト気味｜コール多め',
     desc:'若干タイトで堅実。ブラフよりコールを選びがちなパッシブ寄り。強いハンドには固執する。',
     openWidthMult:0.75,bbDefenseWidth:0.88,foldToBetBase:0.52,bluffFreq:0.08,
-    betSizeMult:0.88,donkFreq:0.02,posAware:0.75,noise:0.10,cantFoldMadeHand:false,callBias:true},
+    betSizeMult:0.88,donkFreq:0.02,posAware:0.75,noise:0.10,cantFoldMadeHand:false,callBias:true,
+    sizingTell:{type:'thin_small',label:'薄い手は小さめ',desc:'弱めのバリューは小さく打ちやすい。'}},
   world:{displayName:'world',color:'#78350f',style:'日本代表プロ｜理論精通',
     desc:'日本を代表するプロプレイヤー。GTO・エクスプロイト双方に精通。弱点が少なく、状況判断が鋭い。',
     openWidthMult:1.05,bbDefenseWidth:1.05,foldToBetBase:0.61,bluffFreq:0.21,
@@ -1155,6 +1161,44 @@ function aiHasNutFlushBlocker(holeCards,comm){
   const flushSuit=Object.keys(suits).find(s=>suits[s]>=3);
   return !!flushSuit&&holeCards.some(c=>c.suit===flushSuit&&c.rank==='A');
 }
+function aiSizingTellEnabled(game,profile){
+  return !!(game&&profile&&profile.sizingTell&&getRangeMode()==='live'&&!(game.tournamentContext&&game.tournamentContext.enabled));
+}
+function aiSizingTellLabel(profile){
+  return profile&&profile.sizingTell&&profile.sizingTell.label?profile.sizingTell.label:'なし';
+}
+function aiSizingTellBucket(role,str){
+  const roleName=role&&role.role||'unknown';
+  if(roleName==='nutted'||roleName==='strong'||(role&&role.madeClass==='set_plus'))return'strong';
+  if(roleName==='air')return'air';
+  if(roleName==='draw'||(role&&role.draw&&role.draw.outs>=8))return'draw';
+  if(roleName==='value'||roleName==='medium'||str>=0.42)return'made';
+  return'weak';
+}
+function roundAISizingTellAmount(target,bb){
+  const step=Math.max(10,(bb||1)*5);
+  return Math.max(1,Math.round(target/step)*step);
+}
+function aiSizingTellAdjustedTarget(target,player,game,profile,role,str){
+  if(!aiSizingTellEnabled(game,profile))return target;
+  if(!player||!isFinite(target))return target;
+  const tell=profile.sizingTell;
+  const bucket=aiSizingTellBucket(role,str);
+  let next=target;
+  if(tell.type==='value_big'){
+    if(bucket==='strong')next=target*1.24;
+    else if(bucket==='air'||bucket==='draw')next=target*0.92;
+  }else if(tell.type==='round_bluff'){
+    if(bucket==='air'||bucket==='draw'||str<0.36)next=roundAISizingTellAmount(target,game.bigBlind||1);
+  }else if(tell.type==='thin_small'){
+    if(bucket==='made'&&str<0.68)next=target*0.82;
+  }else if(tell.type==='splashy_large'){
+    if(bucket==='strong'||bucket==='draw'||bucket==='air')next=target*1.16;
+  }
+  const max=player.chips+player.currentBet;
+  const min=player.currentBet+(game.bigBlind||1);
+  return Math.round(Math.max(min,Math.min(next,max)));
+}
 
 // ---- AI DECISION ----
 function aiDecide(player,game,baseLevel){
@@ -1338,6 +1382,9 @@ function aiDecide(player,game,baseLevel){
   const strongMadeDraw=!!(role.draw&&role.draw.outs>=8&&comm.length<5);
   const isWeakMade=(roleName==='medium'||pairTier==='bottom_pair'||pairTier==='low_pair'||pairTier==='under_pair'||pairTier==='board_pair')&&!strongMadeDraw;
   const hasRealDraw=(roleName==='draw'||strongMadeDraw)&&comm.length<5;
+  const aiPostSized=function(target){
+    return aiSizedAction(aiSizingTellAdjustedTarget(target,player,game,prof,role,str),chips,currentBet);
+  };
 
   if(toCall===0){
     const myPos=posLabel(player.seatIndex,game.dealerIndex,game.players.length);
@@ -1348,18 +1395,18 @@ function aiDecide(player,game,baseLevel){
     if(isRiver){
       if(roleName==='nutted'||ev.cat>=5){
         const f=(0.70+Math.random()*0.35)*prof.betSizeMult;
-        return aiSizedAction(pot*f,chips,currentBet);
+        return aiPostSized(pot*f);
       }
       if(roleName==='strong'&&!isWeakMade&&Math.random()<0.68){
         const f=(role.isVuln?0.42:0.55)+Math.random()*0.18;
-        return aiSizedAction(pot*f*prof.betSizeMult,chips,currentBet);
+        return aiPostSized(pot*f*prof.betSizeMult);
       }
       if(roleName==='value'&&!isWeakMade&&Math.random()<0.34&&!multi){
         const f=0.33+Math.random()*0.14;
-        return aiSizedAction(pot*f*prof.betSizeMult,chips,currentBet);
+        return aiPostSized(pot*f*prof.betSizeMult);
       }
       if(roleName==='air'&&Math.random()<bFreq*0.22&&aiHasNutFlushBlocker(holeCards,comm)&&!multi){
-        return aiSizedAction(pot*(0.55+Math.random()*0.18)*prof.betSizeMult,chips,currentBet);
+        return aiPostSized(pot*(0.55+Math.random()*0.18)*prof.betSizeMult);
       }
       return{action:'check'};
     }
@@ -1369,14 +1416,14 @@ function aiDecide(player,game,baseLevel){
     if(isOOP&&wasPFR){
       if(roleName==='strong'||roleName==='nutted'||ev.cat>=3){
         const f=(multi?0.38:0.52)+Math.random()*0.16;
-        return aiSizedAction(pot*f*prof.betSizeMult,chips,currentBet);
+        return aiPostSized(pot*f*prof.betSizeMult);
       }
       if(roleName==='value'&&!isWeakMade&&Math.random()<(multi?0.28:0.52)){
         const f=0.34+Math.random()*0.14;
-        return aiSizedAction(pot*f*prof.betSizeMult,chips,currentBet);
+        return aiPostSized(pot*f*prof.betSizeMult);
       }
       if(hasRealDraw&&Math.random()<bFreq*0.55){
-        return aiSizedAction(pot*(0.38+Math.random()*0.16)*prof.betSizeMult,chips,currentBet);
+        return aiPostSized(pot*(0.38+Math.random()*0.16)*prof.betSizeMult);
       }
     }
 
@@ -1391,12 +1438,12 @@ function aiDecide(player,game,baseLevel){
         // サイズは小さめ (33-50%ポット): 大きいドンクは読まれやすい
         const f=(0.33+Math.random()*0.17)*prof.betSizeMult;
         const amt=Math.round(Math.min(pot*f,chips));
-        if(amt>0)return aiSizedAction(amt,chips,currentBet);
+        if(amt>0)return aiPostSized(amt);
       }
       // ピュアブラフドンク: エア×ブロッカー狙い、非常に稀
       if(ev.cat===0&&str<0.12&&Math.random()<prof.donkFreq*prof.bluffFreq*aiBluffModeMult(comm.length>=5)*0.35){
         const amt=Math.round(Math.min(pot*0.38*prof.betSizeMult,chips));
-        if(amt>0)return aiSizedAction(amt,chips,currentBet);
+        if(amt>0)return aiPostSized(amt);
       }
       // OOP: それ以外は全てチェック → 相手のCベットを待つ
       return{action:'check'};
@@ -1407,18 +1454,18 @@ function aiDecide(player,game,baseLevel){
     // マルチウェイ・OOP・弱ペアは据え置き。リバーのみ thin value を抑制。
     if(str>0.62){
       const f=(0.48+Math.random()*0.35)*prof.betSizeMult;
-      return aiSizedAction(pot*f,chips,currentBet);
+      return aiPostSized(pot*f);
     }
     if(str>0.42){
       // マルチウェイ or 弱made: 低頻度ベット。IP単独ポット: 積極的にCbet
       const _cbetFreq=isWeakMade||multi?0.18:(isRiver?0.30:0.52);
       if(Math.random()<_cbetFreq){
         const f=(0.33+Math.random()*0.22)*prof.betSizeMult;
-        return aiSizedAction(pot*f,chips,currentBet);
+        return aiPostSized(pot*f);
       }
     }
     if(Math.random()<(hasRealDraw?bFreq:bFreq*0.45)){
-      return aiSizedAction(pot*(0.45+Math.random()*0.2)*prof.betSizeMult,chips,currentBet);
+      return aiPostSized(pot*(0.45+Math.random()*0.2)*prof.betSizeMult);
     }
     return{action:'check'};
   } else {
@@ -1443,15 +1490,15 @@ function aiDecide(player,game,baseLevel){
       const _drawSB=hasRealDraw&&role.draw&&role.draw.outs>=10&&!multi;
       if(_isNutTurn&&Math.random()<0.55*prof.betSizeMult){
         const target=game.currentBet+toCall*(1.9+Math.random()*0.6)*prof.betSizeMult;
-        return aiSizedAction(target,chips,currentBet);
+        return aiPostSized(target);
       }
       if(_isStrongTurn&&Math.random()<0.28){
         const target=game.currentBet+toCall*(1.6+Math.random()*0.5)*prof.betSizeMult;
-        return aiSizedAction(target,chips,currentBet);
+        return aiPostSized(target);
       }
       if(_drawSB&&Math.random()<bFreq*0.60){
         const target=game.currentBet+toCall*(1.5+Math.random()*0.4)*prof.betSizeMult;
-        return aiSizedAction(target,chips,currentBet);
+        return aiPostSized(target);
       }
       return{action:'call'};
     }
@@ -1464,7 +1511,7 @@ function aiDecide(player,game,baseLevel){
       const _raiseFreq=_isNutRiv?0.70:(_isStrongRiv?0.45:(_isValueRiv?0.20:0));
       if(str>0.65&&_raiseFreq>0&&Math.random()<_raiseFreq){
         const _sz=_isNutRiv?(2.0+Math.random()*0.6):(1.7+Math.random()*0.5);
-        return aiSizedAction(game.currentBet+toCall*_sz*prof.betSizeMult,chips,currentBet);
+        return aiPostSized(game.currentBet+toCall*_sz*prof.betSizeMult);
       }
       if(toCall>=chips)return{action:'call'};
       return{action:'call'};
@@ -1472,7 +1519,7 @@ function aiDecide(player,game,baseLevel){
     if(toCall>=chips)return{action:'fold'};
     if(hasRealDraw&&Math.random()<bFreq*0.35){
       const amt=Math.round(Math.min(pot*0.55*prof.betSizeMult,chips));
-      if(amt>0)return aiSizedAction(game.currentBet+amt,chips,currentBet);
+      if(amt>0)return aiPostSized(game.currentBet+amt);
     }
     if(str>po*(1-ft*0.3)&&Math.random()>ft){
       if(toCall>=chips)return{action:'call'};
@@ -1968,6 +2015,10 @@ function opponentReadActualLabel(player){
   const p=liveCashOpponentTypeProfile(player);
   return p&&p.label?p.label:'標準的';
 }
+function opponentReadSizingTellLabel(player){
+  if(!player||!player.profile||!player.profile.sizingTell)return'なし';
+  return aiSizingTellLabel(player.profile);
+}
 function opponentReadGuessOptions(current){
   return OPPONENT_READ_LABELS.map(function(o){
     return '<option value="'+escapeHTML(o.value)+'" '+(o.value===current?'selected':'')+'>'+escapeHTML(o.label)+'</option>';
@@ -1975,7 +2026,7 @@ function opponentReadGuessOptions(current){
 }
 function opponentReadEvidenceForName(name){
   const hands=game&&game.handHistory?game.handHistory:[];
-  const ev={hands:0,folds:0,calls:0,bets:0,raises:0,showdowns:0,bigBets:0,totalBets:0};
+  const ev={hands:0,folds:0,calls:0,bets:0,raises:0,showdowns:0,bigBets:0,totalBets:0,roundBets:0,smallBets:0};
   hands.forEach(function(h){
     const seen=(h.players||[]).some(function(p){return p.name===name;});
     if(!seen)return;
@@ -1989,6 +2040,10 @@ function opponentReadEvidenceForName(name){
         if(d.action==='raise'||d.action==='allin')ev.raises++;
         const pct=d.pot?Math.round((d.amount||0)/(d.pot||1)*100):0;
         if(pct>=65)ev.bigBets++;
+        if(pct>0&&pct<=40)ev.smallBets++;
+        const bb=(h.bigBlind||game&&game.bigBlind||1);
+        const step=Math.max(10,bb*5);
+        if(d.amount&&Math.abs(d.amount-Math.round(d.amount/step)*step)<=1)ev.roundBets++;
         ev.totalBets++;
       }
     });
@@ -2000,6 +2055,8 @@ function opponentReadEvidenceForName(name){
   if(ev.folds>=3)clues.push('フォールド '+ev.folds+'回');
   if(ev.bets>=2)clues.push('ベット/レイズ '+ev.bets+'回');
   if(ev.bigBets>=1)clues.push('大きめベット '+ev.bigBets+'回');
+  if(ev.smallBets>=2)clues.push('小さめベット '+ev.smallBets+'回');
+  if(ev.roundBets>=2)clues.push('切りの良い額 '+ev.roundBets+'回');
   if(ev.showdowns>=1)clues.push('ショーダウン '+ev.showdowns+'回');
   if(!clues.length)clues.push('まだ材料不足');
   return{stats:ev,clues:clues};
@@ -2033,11 +2090,12 @@ function renderOpponentReadTrainer(){
   const score=enabled&&summary.total?'<div class="op-read-score">現在の推定: '+summary.correct+'/'+summary.total+' 正解候補（'+summary.rate+'%）</div>':'';
   const rows=ais.map(function(p){
     const actual=opponentReadActualLabel(p);
+    const tell=opponentReadSizingTellLabel(p);
     const guess=guesses[p.name]||'';
     const ev=opponentReadEvidenceForName(p.name);
     const revealed=window.__fishTankOpponentReadReveal===true;
     const result=revealed&&guess?'<span class="'+(guess===actual?'op-read-good':'op-read-bad')+'">'+(guess===actual?'正解':'ズレ')+'</span>':'';
-    const actualText=revealed?'<div class="op-read-answer">正解: '+escapeHTML(actual)+'。根拠: '+escapeHTML(ev.clues.join(' / '))+'</div>':'<div class="op-read-answer">根拠候補: '+escapeHTML(ev.clues.join(' / '))+'</div>';
+    const actualText=revealed?'<div class="op-read-answer">正解: '+escapeHTML(actual)+' / サイズテル: '+escapeHTML(tell)+'。根拠: '+escapeHTML(ev.clues.join(' / '))+'</div>':'<div class="op-read-answer">根拠候補: '+escapeHTML(ev.clues.join(' / '))+'</div>';
     const styleText=enabled?'タイプ非公開':(p.profile.style+' / '+p.profile.desc);
     return '<div class="op-read-row"><div class="op-read-main"><div class="ai-dot" style="background:'+p.profile.color+'"></div><div><div class="ai-row-name" style="color:'+p.profile.color+'">'+escapeHTML(p.profile.displayName)+'</div><div class="op-read-style">'+escapeHTML(styleText)+'</div></div></div><div class="op-read-control"><select data-op-read-name="'+escapeHTML(p.name)+'">'+opponentReadGuessOptions(guess)+'</select>'+result+'</div>'+actualText+'</div>';
   }).join('');
@@ -9169,6 +9227,68 @@ function runFishTankRegressionTests(){
     return !!(summary&&summary.total===2&&summary.correct===1&&summary.rate===50&&summary.rows[0].actual===guesses.yu);
   });
 
+  add('相手リード訓練: 答え合わせにサイズテルを含める',function(){
+    const oldGame=game,oldReveal=window.__fishTankOpponentReadReveal;
+    const oldEnabled=opponentReadTrainingEnabled();
+    try{
+      setOpponentReadTrainingEnabled(true);
+      window.__fishTankOpponentReadReveal=true;
+      const p=regressionPlayer('bitts',false,['As','Ad'],{chips:500,profile:AI_PROFILES.bitts});
+      game={players:[regressionPlayer('あなた',true,['Ks','Kh'],{chips:500}),p],handHistory:[{
+        bigBlind:5,
+        players:[{name:'bitts',holeCards:[{rank:'A',suit:'s'},{rank:'A',suit:'d'}],folded:false}],
+        decisions:[
+          {street:'flop',playerName:'bitts',action:'raise',amount:75,pot:100},
+          {street:'river',playerName:'bitts',action:'raise',amount:120,pot:140}
+        ],
+        winners:[]
+      }]};
+      const html=renderOpponentReadTrainer();
+      return /サイズテル: 強い時に大きめ/.test(html)&&/大きめベット/.test(html);
+    }finally{
+      game=oldGame;window.__fishTankOpponentReadReveal=oldReveal;setOpponentReadTrainingEnabled(oldEnabled);
+    }
+  });
+
+  add('サイジングテル: Liveでは強手大きめ型の強手平均サイズが弱手より大きい',function(){
+    const oldMode=getRangeMode();
+    try{
+      setRangeMode('live');
+      const p={chips:1000,currentBet:0,profile:AI_PROFILES.bitts};
+      const g={bigBlind:5,currentBet:0,tournamentContext:null};
+      const strong=[70,80,90].map(function(x){return aiSizingTellAdjustedTarget(x,p,g,p.profile,{role:'strong'},0.82);});
+      const weak=[70,80,90].map(function(x){return aiSizingTellAdjustedTarget(x,p,g,p.profile,{role:'air'},0.22);});
+      const avg=function(a){return a.reduce(function(s,x){return s+x;},0)/a.length;};
+      return avg(strong)>avg(weak)*1.22;
+    }finally{
+      setRangeMode(oldMode);
+    }
+  });
+
+  add('サイジングテル: GTOモードではサイズテル補正を入れない',function(){
+    const oldMode=getRangeMode();
+    try{
+      setRangeMode('gto');
+      const p={chips:1000,currentBet:0,profile:AI_PROFILES.bitts};
+      const g={bigBlind:5,currentBet:0,tournamentContext:null};
+      return aiSizingTellAdjustedTarget(80,p,g,p.profile,{role:'strong'},0.85)===80;
+    }finally{
+      setRangeMode(oldMode);
+    }
+  });
+
+  add('サイジングテル: ブラフ丸い額型は弱いベットを切りの良い額へ寄せる',function(){
+    const oldMode=getRangeMode();
+    try{
+      setRangeMode('live');
+      const p={chips:1000,currentBet:0,profile:AI_PROFILES.nt};
+      const g={bigBlind:5,currentBet:0,tournamentContext:null};
+      return aiSizingTellAdjustedTarget(137,p,g,p.profile,{role:'air'},0.20)===125;
+    }finally{
+      setRangeMode(oldMode);
+    }
+  });
+
   const results=tests.map(function(t){
     try{return{name:t.name,pass:!!t.fn()};}
     catch(e){return{name:t.name,pass:false,error:e&&e.message?e.message:String(e)};}
@@ -11465,7 +11585,7 @@ document.addEventListener('click',function(e){
   }
 });
 
-window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,runFishTankAuditBatch,fishTankAuditBatchReportText,buildFishTankAuditRepairQueue,fishTankAuditRepairPlanText,auditIssuesForHand,playAuditGame,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,boardTextureProfile,boardTextureProfileText,representativeBoardProfile,boardTextureFrequencyAdjustment,boardTextureSizePlan,boardTextureTransitionProfile,boardTextureTransitionProfileText,rangeNutAdvantageProfile,rangeNutAdvantageProfileText,rangeActionUpdateProfile,rangeActionUpdateProfileText,postflopBetPurposeProfile,postflopBetPurposeProfileText,postflopRaisePlanProfile,postflopRaisePlanProfileText,postflopBarrelPlanProfile,postflopBarrelPlanProfileText,postflopDefensePlanProfile,postflopDefensePlanProfileText,postflopCallFuturePlanProfile,postflopCallFuturePlanProfileText,standardBetSizePct,preflopOpenQuickOptions,raiseOverBetQuickOptions,postflopQuickBetOptions,liveCashRakeConfigFromValue,liveCashTableProfileFromValue,liveCashRangeProfile,liveCashSpotProfile,liveCashSpotProfileText,liveCashSprProfile,liveCashSprProfileText,liveCashInitiativeProfile,liveCashInitiativeProfileText,liveCashReraisedPotProfile,liveCashReraisedPotProfileText,liveCashMultiwayProfile,liveCashMultiwayProfileText,liveCashRiverDecisionProfile,liveCashRiverDecisionProfileText,tournamentRangeProfile,tournamentFinalTableProfile,tournamentFinalTableStackRole,tournamentFinalTableCollisionProfile,tournamentFinalTableRangeProfile,tournamentFinalTableRangeProfileText,tournamentFinalTablePostflopProfile,tournamentFinalTablePostflopProfileText,tournamentFinalTableLearningPoint,tournamentFinalTableLearningPointText,tournamentHeadsUpProfile};
+window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,runFishTankAuditBatch,fishTankAuditBatchReportText,buildFishTankAuditRepairQueue,fishTankAuditRepairPlanText,auditIssuesForHand,playAuditGame,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,boardTextureProfile,boardTextureProfileText,representativeBoardProfile,boardTextureFrequencyAdjustment,boardTextureSizePlan,boardTextureTransitionProfile,boardTextureTransitionProfileText,rangeNutAdvantageProfile,rangeNutAdvantageProfileText,rangeActionUpdateProfile,rangeActionUpdateProfileText,postflopBetPurposeProfile,postflopBetPurposeProfileText,postflopRaisePlanProfile,postflopRaisePlanProfileText,postflopBarrelPlanProfile,postflopBarrelPlanProfileText,postflopDefensePlanProfile,postflopDefensePlanProfileText,postflopCallFuturePlanProfile,postflopCallFuturePlanProfileText,standardBetSizePct,preflopOpenQuickOptions,raiseOverBetQuickOptions,postflopQuickBetOptions,aiSizingTellAdjustedTarget,aiSizingTellLabel,opponentReadSizingTellLabel,liveCashRakeConfigFromValue,liveCashTableProfileFromValue,liveCashRangeProfile,liveCashSpotProfile,liveCashSpotProfileText,liveCashSprProfile,liveCashSprProfileText,liveCashInitiativeProfile,liveCashInitiativeProfileText,liveCashReraisedPotProfile,liveCashReraisedPotProfileText,liveCashMultiwayProfile,liveCashMultiwayProfileText,liveCashRiverDecisionProfile,liveCashRiverDecisionProfileText,tournamentRangeProfile,tournamentFinalTableProfile,tournamentFinalTableStackRole,tournamentFinalTableCollisionProfile,tournamentFinalTableRangeProfile,tournamentFinalTableRangeProfileText,tournamentFinalTablePostflopProfile,tournamentFinalTablePostflopProfileText,tournamentFinalTableLearningPoint,tournamentFinalTableLearningPointText,tournamentHeadsUpProfile};
 // [Codex fix 2026-06-05] Query-gated regression output for browser verification without exposing debug UI during normal play.
 if(new URLSearchParams(location.search).has('codex_regression')){
   setTimeout(function(){
