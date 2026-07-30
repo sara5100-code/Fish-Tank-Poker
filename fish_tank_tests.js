@@ -55,7 +55,7 @@ function loadSandbox(htmlPath) {
   if (!m) throw new Error('<script> が見つかりません');
   // const/class はvmグローバルに乗らないため、末尾でブリッジ注入
   const code = m[1] +
-    "\n;try{Object.assign(globalThis,{HandEval,Deck,Card,HAND_RANK_169,HAND_COMBO_FRAC,HAND_STRENGTH,RANK_VAL,RANKS,SUITS,GameEngine,AI_PROFILES,regressionPlayer});}catch(e){globalThis.__bridgeErr=e.message;}\n";
+    "\n;try{Object.assign(globalThis,{HandEval,Deck,Card,HAND_RANK_169,HAND_COMBO_FRAC,HAND_STRENGTH,RANK_VAL,RANKS,SUITS,GameEngine,AI_PROFILES,regressionPlayer,adaptiveScenarioWeightPlan,_pickScenarioCat});}catch(e){globalThis.__bridgeErr=e.message;}\n";
   const anyNode = new Proxy(function () {}, {
     get(t, p) {
       if (p === 'style') return {};
@@ -478,6 +478,56 @@ function runAiPreflopModeChecks(s) {
   return fail === 0;
 }
 
+function runAdaptiveScenarioChecks(s) {
+  if (typeof s.adaptiveScenarioWeightPlan !== 'function' || typeof s._pickScenarioCat !== 'function') {
+    console.log('[adaptive scenario] skipped');
+    return true;
+  }
+  let pass = 0, fail = 0; const fails = [];
+  const ok = (n, c, e) => { if (c) pass++; else { fail++; fails.push(n + (e ? '  [' + e + ']' : '')); } };
+  const fakeStats = (category) => ({
+    lessonStats: {
+      categories: {
+        [category]: {
+          category,
+          title: category === 'ring-multiway-discipline' ? 'マルチウェイの打ちすぎ' : 'フロップ前の入口整理',
+          modeLabel: 'リングゲーム',
+          count: 10,
+          bad: 8,
+          border: 1,
+          good: 1,
+          recent: ['bad','bad','border','bad','good','bad','bad','bad','bad','good'],
+          lastHand: 10
+        }
+      },
+      recent: []
+    }
+  });
+  const boardTargets = new Set(['wetCombo', 'flushDraw', 'monotone', 'midConnected']);
+  function sample(stats, adaptive, seed) {
+    s.Math.random = makeSeededRandom(seed);
+    const out = {};
+    for (let i = 0; i < 3000; i++) {
+      const cat = s._pickScenarioCat({ adaptive, stats });
+      out[cat] = (out[cat] || 0) + 1;
+    }
+    return out;
+  }
+  const stats = fakeStats('ring-multiway-discipline');
+  const plan = s.adaptiveScenarioWeightPlan(stats);
+  const base = sample(stats, false, 0x4212);
+  const boosted = sample(stats, true, 0x4212);
+  const baseTarget = Object.keys(base).reduce((a, k) => a + (boardTargets.has(k) ? base[k] : 0), 0);
+  const boostedTarget = Object.keys(boosted).reduce((a, k) => a + (boardTargets.has(k) ? boosted[k] : 0), 0);
+  ok('adaptive scenario: board texture weakness creates active plan', plan && plan.active && plan.categories.includes('ring-multiway-discipline'), JSON.stringify(plan));
+  ok('adaptive scenario: weak board categories are sampled more often', boostedTarget > baseTarget + 450, 'base=' + baseTarget + ' boosted=' + boostedTarget);
+  const preflopOnly = s.adaptiveScenarioWeightPlan(fakeStats('preflop-entry'));
+  ok('adaptive scenario: preflop-only weakness does not bias flop boards', preflopOnly && preflopOnly.active === false, JSON.stringify(preflopOnly));
+  console.log(`\n[adaptive scenario] ${pass} pass / ${fail} fail`);
+  fails.forEach(x => console.log('  FAIL:', x));
+  return fail === 0;
+}
+
 (function main() {
   const htmlPath = pickHtml();
   console.log('target:', htmlPath);
@@ -495,6 +545,7 @@ function runAiPreflopModeChecks(s) {
   allOk = runModeChecks(s) && allOk;
   allOk = runPreflopModeChecks(s) && allOk;
   allOk = runAiPreflopModeChecks(s) && allOk;
+  allOk = runAdaptiveScenarioChecks(s) && allOk;
   console.log('\n===', allOk ? 'ALL GREEN' : 'CHECK FAILS ABOVE', '===');
   process.exit(allOk ? 0 : 1);
 })();
