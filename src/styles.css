@@ -110,6 +110,17 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,'Hiragino 
 .op-note-saved{font-size:9px;font-weight:900;color:var(--green);white-space:nowrap;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.18);border-radius:999px;padding:2px 6px;}
 .op-note-input{width:100%;min-height:72px;resize:vertical;border:1px solid var(--border);border-radius:8px;background:var(--panel2);padding:7px 8px;font-family:inherit;font-size:11px;line-height:1.5;color:var(--text);outline:none;}
 .op-note-input:focus{border-color:rgba(61,108,240,.45);box-shadow:0 0 0 2px rgba(61,108,240,.08);}
+.lesson-weakness-panel{background:#fff;border:1px solid var(--border);border-left:3px solid var(--orange);border-radius:9px;padding:8px;margin:8px 0;font-size:10px;}
+.lesson-weakness-title{font-size:11px;font-weight:900;color:var(--text);margin-bottom:6px;display:flex;justify-content:space-between;gap:8px;}
+.lesson-weakness-title span{font-size:9px;color:var(--dim);font-weight:800;}
+.lesson-weakness-row{display:grid;grid-template-columns:18px minmax(0,1fr) 40px 34px;gap:6px;align-items:center;padding:5px 0;border-top:1px solid rgba(26,40,80,.08);}
+.lesson-weakness-row:first-of-type{border-top:none;}
+.lesson-weakness-rank{width:18px;height:18px;border-radius:50%;background:var(--panel2);display:flex;align-items:center;justify-content:center;font-weight:900;color:var(--dim);}
+.lesson-weakness-name{font-weight:900;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lesson-weakness-meta{font-size:9px;color:var(--dim);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lesson-weakness-rate{font-size:12px;font-weight:900;text-align:right;}
+.lesson-weakness-trend{font-size:9px;font-weight:900;text-align:right;}
+.lesson-weakness-note{margin-top:6px;color:var(--dim);font-size:9.5px;line-height:1.45;background:var(--panel2);border-radius:7px;padding:5px 7px;}
 
 /* ===== HUD ===== */
 #game-screen{flex-direction:column;overflow:hidden;}

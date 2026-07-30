@@ -9367,6 +9367,37 @@ function runFishTankRegressionTests(){
     return !!(document.querySelector('[data-tab="notes"]')&&document.querySelector('[data-stab="notes"]')&&document.getElementById('tab-notes')&&document.getElementById('stab-notes'));
   });
 
+  add('弱点追跡: 主テーマカテゴリを統計へ蓄積する',function(){
+    const stats=Object.assign({},_statsDef,{hands:0,scores:[],pfScores:[],poScores:[],byPos:{},cbet:{opp:0,bet:0},fToCbet:{opp:0,fold:0},lessonStats:emptyLessonStats()});
+    recordPrimaryLessonStats(stats,{category:'ring-river-money',title:'リバーの金額判断を整理する',modeLabel:'リング $2/$5',severity:'bad'},1);
+    recordPrimaryLessonStats(stats,{category:'ring-river-money',title:'リバーの金額判断を整理する',modeLabel:'リング $2/$5',severity:'border'},2);
+    recordPrimaryLessonStats(stats,{category:'preflop-entry',title:'プリフロップの入口を整理する',modeLabel:'リング $2/$5',severity:'good'},3);
+    const rows=lessonWeaknessRows(stats);
+    return rows[0]&&rows[0].category==='ring-river-money'&&rows[0].count===2&&rows[0].bad===1&&rows[0].border===1&&rows[0].missRate>=70;
+  });
+
+  add('弱点追跡: 傾向タブに弱点ランキングを描画する',function(){
+    const stats=Object.assign({},_statsDef,{lessonStats:emptyLessonStats()});
+    recordPrimaryLessonStats(stats,{category:'river-onepair-discipline',title:'リバーでワンペアを受けすぎない',modeLabel:'リング $2/$5',severity:'bad'},1);
+    const html=renderLessonWeaknessRanking(stats);
+    return /弱点ランキング/.test(html)&&/リバーでワンペアを受けすぎない/.test(html)&&/主テーマ別/.test(html);
+  });
+
+  add('弱点追跡: updateSessionStatsがprimaryLessonを保存する',function(){
+    const oldStats=sessionStats;
+    try{
+      sessionStats=Object.assign({},_statsDef,{hands:0,scores:[],pfScores:[],poScores:[],byPos:{},cbet:{opp:0,bet:0},fToCbet:{opp:0,fold:0},lessonStats:emptyLessonStats()});
+      const hr=regressionHand({heroHole:['As','Kd'],decisions:[],players:[regressionPlayer('あなた',true,['As','Kd'],{chips:500})]});
+      hr.handNum=44;
+      hr.winners=[];
+      updateSessionStats(hr,{score:70,evals:[],primaryLesson:{category:'preflop-entry',title:'プリフロップの入口を整理する',modeLabel:'リング $2/$5',severity:'bad'}});
+      const c=sessionStats.lessonStats.categories['preflop-entry'];
+      return !!(c&&c.count===1&&c.bad===1&&c.lastHand===44);
+    }finally{
+      sessionStats=oldStats;
+    }
+  });
+
   const results=tests.map(function(t){
     try{return{name:t.name,pass:!!t.fn()};}
     catch(e){return{name:t.name,pass:false,error:e&&e.message?e.message:String(e)};}
@@ -10702,18 +10733,106 @@ var _statsDef={
   // 3BET
   threeBet:0, threeBetOpp:0,
   // スチール (BTN/CO/SBからのオープン)
-  steal:0, stealOpp:0
+  steal:0, stealOpp:0,
+  // 主テーマ別の長期弱点追跡 (ROADMAP Phase 4-1)
+  lessonStats:{categories:{},recent:[]}
 };
+function emptyLessonStats(){
+  return{categories:{},recent:[]};
+}
+function normalizeLessonStats(raw){
+  raw=raw&&typeof raw==='object'?raw:emptyLessonStats();
+  const cats=raw.categories&&typeof raw.categories==='object'?raw.categories:{};
+  const out={categories:{},recent:Array.isArray(raw.recent)?raw.recent.slice(-60):[]};
+  Object.keys(cats).forEach(function(k){
+    const c=cats[k]||{};
+    out.categories[k]={
+      category:k,
+      title:c.title||k,
+      modeLabel:c.modeLabel||'総合',
+      count:c.count||0,
+      bad:c.bad||0,
+      border:c.border||0,
+      good:c.good||0,
+      recent:Array.isArray(c.recent)?c.recent.slice(-12):[],
+      lastHand:c.lastHand||0
+    };
+  });
+  return out;
+}
+function lessonQualityFromLesson(lesson){
+  const s=lesson&&lesson.severity||'border';
+  if(s==='bad')return'bad';
+  if(s==='good')return'good';
+  return'border';
+}
+function recordPrimaryLessonStats(stats,lesson,handNum){
+  if(!stats||!lesson||!lesson.category)return;
+  stats.lessonStats=normalizeLessonStats(stats.lessonStats);
+  const key=lesson.category;
+  const q=lessonQualityFromLesson(lesson);
+  const cats=stats.lessonStats.categories;
+  const cur=cats[key]||{category:key,title:lesson.title||key,modeLabel:lesson.modeLabel||'総合',count:0,bad:0,border:0,good:0,recent:[],lastHand:0};
+  cur.title=lesson.title||cur.title;
+  cur.modeLabel=lesson.modeLabel||cur.modeLabel;
+  cur.count++;
+  if(q==='bad')cur.bad++;
+  else if(q==='good')cur.good++;
+  else cur.border++;
+  cur.recent=(cur.recent||[]).concat(q).slice(-12);
+  cur.lastHand=handNum||stats.hands||cur.count;
+  cats[key]=cur;
+  stats.lessonStats.recent=(stats.lessonStats.recent||[]).concat({category:key,quality:q,hand:handNum||stats.hands||0,title:cur.title}).slice(-60);
+}
+function lessonWeaknessRows(stats){
+  const ls=normalizeLessonStats(stats&&stats.lessonStats);
+  return Object.keys(ls.categories).map(function(k){
+    const c=ls.categories[k];
+    const miss=c.bad+(c.border*0.45);
+    const missRate=c.count?Math.round(miss/c.count*100):0;
+    const recent=c.recent||[];
+    const recentMiss=recent.length?Math.round(recent.filter(function(q){return q==='bad'||q==='border';}).length/recent.length*100):0;
+    const older=recent.slice(0,Math.max(0,recent.length-4));
+    const newer=recent.slice(-4);
+    const oldMiss=older.length?older.filter(function(q){return q==='bad'||q==='border';}).length/older.length:null;
+    const newMiss=newer.length?newer.filter(function(q){return q==='bad'||q==='border';}).length/newer.length:null;
+    let trend='横ばい';
+    if(oldMiss!=null&&newMiss!=null){
+      if(newMiss<oldMiss-0.18)trend='改善';
+      else if(newMiss>oldMiss+0.18)trend='悪化';
+    }
+    return Object.assign({},c,{missRate,weightedMiss:miss,recentMiss,trend});
+  }).sort(function(a,b){
+    return (b.weightedMiss-a.weightedMiss)||(b.missRate-a.missRate)||(b.count-a.count);
+  });
+}
+function renderLessonWeaknessRanking(stats){
+  const rows=lessonWeaknessRows(stats).filter(function(r){return r.count>0;}).slice(0,5);
+  if(!rows.length)return '';
+  let html='<div class="lesson-weakness-panel"><div class="lesson-weakness-title">弱点ランキング <span>主テーマ別</span></div>';
+  rows.forEach(function(r,i){
+    const color=r.missRate>=60?'var(--red)':r.missRate>=35?'var(--orange)':'var(--green)';
+    const trendColor=r.trend==='改善'?'var(--green)':r.trend==='悪化'?'var(--red)':'var(--dim)';
+    html+='<div class="lesson-weakness-row">';
+    html+='<div class="lesson-weakness-rank">'+(i+1)+'</div>';
+    html+='<div class="lesson-weakness-main"><div class="lesson-weakness-name">'+escapeHTML(r.title)+'</div><div class="lesson-weakness-meta">'+escapeHTML(r.modeLabel)+' / '+r.count+'件 / 直近'+(r.recent||[]).length+'件</div></div>';
+    html+='<div class="lesson-weakness-rate" style="color:'+color+'">'+r.missRate+'%</div>';
+    html+='<div class="lesson-weakness-trend" style="color:'+trendColor+'">'+r.trend+'</div>';
+    html+='</div>';
+  });
+  html+='<div class="lesson-weakness-note">レビューで選ばれた「主テーマ」を蓄積しています。数値が高いほど、同じ種類のミスや境界判断が繰り返されています。</div></div>';
+  return html;
+}
 var sessionStats=(function(){
   try{
     var saved=localStorage.getItem(_STATS_KEY);
     if(saved){
       var parsed=JSON.parse(saved);
       // マージ: 新フィールドがなければデフォルト補完
-      return Object.assign({},_statsDef,parsed,{scores:parsed.scores||[],pfScores:parsed.pfScores||[],poScores:parsed.poScores||[],byPos:parsed.byPos||{},cbet:parsed.cbet||{opp:0,bet:0},fToCbet:parsed.fToCbet||{opp:0,fold:0},limp:parsed.limp||0,limpOpp:parsed.limpOpp||0,threeBet:parsed.threeBet||0,threeBetOpp:parsed.threeBetOpp||0,steal:parsed.steal||0,stealOpp:parsed.stealOpp||0});
+      return Object.assign({},_statsDef,parsed,{scores:parsed.scores||[],pfScores:parsed.pfScores||[],poScores:parsed.poScores||[],byPos:parsed.byPos||{},cbet:parsed.cbet||{opp:0,bet:0},fToCbet:parsed.fToCbet||{opp:0,fold:0},limp:parsed.limp||0,limpOpp:parsed.limpOpp||0,threeBet:parsed.threeBet||0,threeBetOpp:parsed.threeBetOpp||0,steal:parsed.steal||0,stealOpp:parsed.stealOpp||0,lessonStats:normalizeLessonStats(parsed.lessonStats)});
     }
   }catch(e){}
-  return Object.assign({},_statsDef,{scores:[],byPos:{}});
+  return Object.assign({},_statsDef,{scores:[],byPos:{},lessonStats:emptyLessonStats()});
 })();
 
 function _saveStats(){
@@ -10808,6 +10927,9 @@ function updateSessionStats(hr,an){
   if(an&&an.evals){
     sessionStats.badDec+=an.evals.filter(function(e){return e.quality==='bad';}).length;
     sessionStats.totalDec+=an.evals.length;
+  }
+  if(an&&an.primaryLesson){
+    recordPrimaryLessonStats(sessionStats,an.primaryLesson,hr.handNum||sessionStats.hands);
   }
 
   _saveStats();
@@ -10966,7 +11088,8 @@ function renderTrends(){
   });
 
   // ---- ハンド数少 = 注意書きを上部 ----
-  var finalHTML=sampleNote+scoreBand+sparkline+g1+g2+g3+leakHtml;
+  var lessonWeaknessHtml=renderLessonWeaknessRanking(sessionStats);
+  var finalHTML=sampleNote+scoreBand+sparkline+g1+g2+g3+lessonWeaknessHtml+leakHtml;
   targets.forEach(function(t){t.innerHTML=finalHTML;});
 }
 
@@ -11669,12 +11792,13 @@ document.addEventListener('click',function(e){
       Object.keys(_statsDef).forEach(function(k){sessionStats[k]=_statsDef[k];});
       sessionStats.scores=[];sessionStats.pfScores=[];sessionStats.poScores=[];
       sessionStats.byPos={};sessionStats.cbet={opp:0,bet:0};sessionStats.fToCbet={opp:0,fold:0};
+      sessionStats.lessonStats=emptyLessonStats();
       renderTrends();
     }
   }
 });
 
-window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,runFishTankAuditBatch,fishTankAuditBatchReportText,buildFishTankAuditRepairQueue,fishTankAuditRepairPlanText,auditIssuesForHand,playAuditGame,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,boardTextureProfile,boardTextureProfileText,representativeBoardProfile,boardTextureFrequencyAdjustment,boardTextureSizePlan,boardTextureTransitionProfile,boardTextureTransitionProfileText,rangeNutAdvantageProfile,rangeNutAdvantageProfileText,rangeActionUpdateProfile,rangeActionUpdateProfileText,postflopBetPurposeProfile,postflopBetPurposeProfileText,postflopRaisePlanProfile,postflopRaisePlanProfileText,postflopBarrelPlanProfile,postflopBarrelPlanProfileText,postflopDefensePlanProfile,postflopDefensePlanProfileText,postflopCallFuturePlanProfile,postflopCallFuturePlanProfileText,standardBetSizePct,preflopOpenQuickOptions,raiseOverBetQuickOptions,postflopQuickBetOptions,aiSizingTellAdjustedTarget,aiSizingTellLabel,opponentReadSizingTellLabel,opponentNoteText,setOpponentNote,renderOpponentNotesPanel,liveCashRakeConfigFromValue,liveCashTableProfileFromValue,liveCashRangeProfile,liveCashSpotProfile,liveCashSpotProfileText,liveCashSprProfile,liveCashSprProfileText,liveCashInitiativeProfile,liveCashInitiativeProfileText,liveCashReraisedPotProfile,liveCashReraisedPotProfileText,liveCashMultiwayProfile,liveCashMultiwayProfileText,liveCashRiverDecisionProfile,liveCashRiverDecisionProfileText,tournamentRangeProfile,tournamentFinalTableProfile,tournamentFinalTableStackRole,tournamentFinalTableCollisionProfile,tournamentFinalTableRangeProfile,tournamentFinalTableRangeProfileText,tournamentFinalTablePostflopProfile,tournamentFinalTablePostflopProfileText,tournamentFinalTableLearningPoint,tournamentFinalTableLearningPointText,tournamentHeadsUpProfile};
+window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,runFishTankAuditBatch,fishTankAuditBatchReportText,buildFishTankAuditRepairQueue,fishTankAuditRepairPlanText,auditIssuesForHand,playAuditGame,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,boardTextureProfile,boardTextureProfileText,representativeBoardProfile,boardTextureFrequencyAdjustment,boardTextureSizePlan,boardTextureTransitionProfile,boardTextureTransitionProfileText,rangeNutAdvantageProfile,rangeNutAdvantageProfileText,rangeActionUpdateProfile,rangeActionUpdateProfileText,postflopBetPurposeProfile,postflopBetPurposeProfileText,postflopRaisePlanProfile,postflopRaisePlanProfileText,postflopBarrelPlanProfile,postflopBarrelPlanProfileText,postflopDefensePlanProfile,postflopDefensePlanProfileText,postflopCallFuturePlanProfile,postflopCallFuturePlanProfileText,standardBetSizePct,preflopOpenQuickOptions,raiseOverBetQuickOptions,postflopQuickBetOptions,aiSizingTellAdjustedTarget,aiSizingTellLabel,opponentReadSizingTellLabel,opponentNoteText,setOpponentNote,renderOpponentNotesPanel,lessonWeaknessRows,renderLessonWeaknessRanking,recordPrimaryLessonStats,liveCashRakeConfigFromValue,liveCashTableProfileFromValue,liveCashRangeProfile,liveCashSpotProfile,liveCashSpotProfileText,liveCashSprProfile,liveCashSprProfileText,liveCashInitiativeProfile,liveCashInitiativeProfileText,liveCashReraisedPotProfile,liveCashReraisedPotProfileText,liveCashMultiwayProfile,liveCashMultiwayProfileText,liveCashRiverDecisionProfile,liveCashRiverDecisionProfileText,tournamentRangeProfile,tournamentFinalTableProfile,tournamentFinalTableStackRole,tournamentFinalTableCollisionProfile,tournamentFinalTableRangeProfile,tournamentFinalTableRangeProfileText,tournamentFinalTablePostflopProfile,tournamentFinalTablePostflopProfileText,tournamentFinalTableLearningPoint,tournamentFinalTableLearningPointText,tournamentHeadsUpProfile};
 // [Codex fix 2026-06-05] Query-gated regression output for browser verification without exposing debug UI during normal play.
 if(new URLSearchParams(location.search).has('codex_regression')){
   setTimeout(function(){
