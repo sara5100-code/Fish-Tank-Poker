@@ -6303,6 +6303,8 @@ function sessionStatsSnapshot(stats){
     wtsdWent:stats.wtsdWent||0,
     badDec:stats.badDec||0,
     totalDec:stats.totalDec||0,
+    profitBB:Number(stats.profitBB)||0,
+    profitHands:Number(stats.profitHands)||0,
     poCount:poScores.length,
     poSum:poScores.reduce(function(a,b){return a+b;},0)
   };
@@ -6322,6 +6324,8 @@ function sessionStatsSinceBaseline(stats,base){
     wtsdWent:sub(snap.wtsdWent,base.wtsdWent),
     badDec:sub(snap.badDec,base.badDec),
     totalDec:sub(snap.totalDec,base.totalDec),
+    profitBB:(Number(snap.profitBB)||0)-(Number(base.profitBB)||0),
+    profitHands:sub(snap.profitHands,base.profitHands),
     poCount:poCount,
     poAvg:poCount>0?Math.round(poSum/poCount):0
   };
@@ -15912,6 +15916,39 @@ function runFishTankRegressionTests(){
     }
   });
 
+  add('収支/品質分離: 固定ハンド列でbb/100を計算する',function(){
+    const oldStats=sessionStats;
+    try{
+      sessionStats=normalizeProfitStats(Object.assign({},_statsDef,{hands:0,scores:[],pfScores:[],poScores:[],byPos:{},cbet:{opp:0,bet:0},fToCbet:{opp:0,fold:0},lessonStats:emptyLessonStats(),profitBB:0,profitHands:0,profitByHand:[]}));
+      const h1Players=[
+        regressionPlayer('あなた',true,['As','Ah'],{chips:1050,totalInvested:30}),
+        regressionPlayer('villain',false,['Ks','Kh'],{chips:950,totalInvested:50})
+      ];
+      const h1=regressionHand({players:h1Players,bigBlind:10,winners:[{player:h1Players[0],playerIdx:0,amount:80,byFold:false}],decisions:[],pot:80});
+      const h2Players=[
+        regressionPlayer('あなた',true,['Qd','Js'],{chips:960,totalInvested:40,folded:true}),
+        regressionPlayer('villain',false,['9s','9h'],{chips:1040,totalInvested:40})
+      ];
+      const h2=regressionHand({players:h2Players,bigBlind:10,winners:[{player:h2Players[1],playerIdx:1,amount:80,byFold:true}],decisions:[],pot:80});
+      updateSessionStats(h1,{score:90,evals:[]});
+      updateSessionStats(h2,{score:90,evals:[]});
+      return sessionStats.profitHands===2&&Math.round(sessionStats.profitBB*10)/10===1&&Math.round(sessionStatsBb100(sessionStats))===50;
+    }finally{
+      sessionStats=oldStats;
+    }
+  });
+
+  add('収支/品質分離: 傾向タブに実収支と判断品質を並べる',function(){
+    const oldStats=sessionStats;
+    try{
+      sessionStats=normalizeProfitStats(Object.assign({},_statsDef,{hands:6,scores:[82,84,86,83,85,84],pfScores:[80,82],poScores:[84,86],byPos:{},cbet:{opp:0,bet:0},fToCbet:{opp:0,fold:0},lessonStats:emptyLessonStats(),profitBB:-3,profitHands:6,profitByHand:[-1,-1,0,0,-1,0]}));
+      const html=renderQualityMoneyBand(sessionStats,84);
+      return /判断品質/.test(html)&&/実収支/.test(html)&&/bb\/100/.test(html)&&/短期の収支は分散/.test(html);
+    }finally{
+      sessionStats=oldStats;
+    }
+  });
+
   add('プリフロップドリル: UTG K2o openはフォールド正解にする',function(){
     const spot=preflopDrillBuildSpot({base:PREFLOP_DRILL_SPOTS[0],pos:'UTG',ht:'K2o',totalP:6,stackBB:100});
     const fold=preflopDrillEvaluateSpot(spot,'fold');
@@ -18336,6 +18373,8 @@ var _statsDef={
   threeBet:0, threeBetOpp:0,
   // スチール (BTN/CO/SBからのオープン)
   steal:0, stealOpp:0,
+  // 収支と判断品質の分離表示 (ROADMAP Phase 4-5)
+  profitBB:0, profitHands:0, profitByHand:[],
   // 主テーマ別の長期弱点追跡 (ROADMAP Phase 4-1)
   lessonStats:{categories:{},recent:[]}
 };
@@ -18386,6 +18425,50 @@ function recordPrimaryLessonStats(stats,lesson,handNum){
   cats[key]=cur;
   stats.lessonStats.recent=(stats.lessonStats.recent||[]).concat({category:key,quality:q,hand:handNum||stats.hands||0,title:cur.title}).slice(-60);
 }
+function normalizeProfitStats(stats){
+  stats=stats||{};
+  stats.profitBB=Number(stats.profitBB)||0;
+  stats.profitHands=Number(stats.profitHands)||0;
+  stats.profitByHand=Array.isArray(stats.profitByHand)?stats.profitByHand.slice(-80):[];
+  return stats;
+}
+function handProfitChips(hr){
+  if(!hr||!hr.players)return 0;
+  const human=hr.players.find(function(p){return p.isHuman;});
+  if(!human)return 0;
+  const invested=Number(human.totalInvested)||hr.decisions.filter(function(d){return d&&d.isHuman;}).reduce(function(s,d){return s+(Number(d.amount)||0);},0);
+  const won=(hr.winners||[]).filter(function(w){return w&&w.player&&w.player.isHuman;}).reduce(function(s,w){return s+(Number(w.amount)||0);},0);
+  return won-invested;
+}
+function handProfitBB(hr){
+  const bb=(hr&&hr.bigBlind)||5;
+  return bb?handProfitChips(hr)/bb:0;
+}
+function sessionStatsBb100(stats){
+  stats=normalizeProfitStats(stats||sessionStats);
+  return stats.profitHands>0?(stats.profitBB/stats.profitHands*100):0;
+}
+function renderQualityMoneyBand(stats,avgScore){
+  stats=normalizeProfitStats(stats||sessionStats);
+  avgScore=Number(avgScore)||0;
+  const bb100=sessionStatsBb100(stats);
+  const bb100Txt=(bb100>=0?'+':'')+(Math.round(bb100*10)/10)+' bb/100';
+  const profitColor=bb100>=25?'var(--green)':bb100<=-25?'var(--red)':'var(--gold)';
+  const qualityColor=avgScore>=80?'var(--green)':avgScore>=65?'var(--gold)':'var(--red)';
+  let note='';
+  if(stats.profitHands>=5&&avgScore>=78&&bb100<0){
+    note='判断品質は悪くありません。短期の収支は分散に振れます。今はスコアを実力側の指標として見てください。';
+  }else if(stats.profitHands>=5&&avgScore<65&&bb100>0){
+    note='収支は勝っていますが、判断品質はまだ不安定です。短期の勝ちを実力と決めず、レビューのミスを優先して直しましょう。';
+  }else{
+    note='bb/100は100ハンドあたりの獲得BB数です。収支は短期分散、判断スコアは判断品質として分けて見ます。';
+  }
+  let html='<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:6px">';
+  html+='<div style="background:var(--panel2);border-radius:7px;padding:6px 7px;border-left:2px solid '+qualityColor+'"><div style="font-size:9px;color:var(--dim)">判断品質</div><div style="font-size:15px;font-weight:900;color:'+qualityColor+'">'+((stats.scores||[]).length?avgScore+'pt':'--')+'</div></div>';
+  html+='<div style="background:var(--panel2);border-radius:7px;padding:6px 7px;border-left:2px solid '+profitColor+'"><div style="font-size:9px;color:var(--dim)">実収支</div><div style="font-size:15px;font-weight:900;color:'+profitColor+'">'+(stats.profitHands?bb100Txt:'--')+'</div></div>';
+  html+='</div><div style="font-size:10px;color:var(--dim);line-height:1.5;background:var(--panel2);border-radius:7px;padding:6px 8px;margin-bottom:8px">'+note+'</div>';
+  return html;
+}
 function lessonWeaknessRows(stats){
   const ls=normalizeLessonStats(stats&&stats.lessonStats);
   return Object.keys(ls.categories).map(function(k){
@@ -18431,10 +18514,10 @@ var sessionStats=(function(){
     if(saved){
       var parsed=JSON.parse(saved);
       // マージ: 新フィールドがなければデフォルト補完
-      return Object.assign({},_statsDef,parsed,{scores:parsed.scores||[],pfScores:parsed.pfScores||[],poScores:parsed.poScores||[],byPos:parsed.byPos||{},cbet:parsed.cbet||{opp:0,bet:0},fToCbet:parsed.fToCbet||{opp:0,fold:0},limp:parsed.limp||0,limpOpp:parsed.limpOpp||0,threeBet:parsed.threeBet||0,threeBetOpp:parsed.threeBetOpp||0,steal:parsed.steal||0,stealOpp:parsed.stealOpp||0,lessonStats:normalizeLessonStats(parsed.lessonStats)});
+      return normalizeProfitStats(Object.assign({},_statsDef,parsed,{scores:parsed.scores||[],pfScores:parsed.pfScores||[],poScores:parsed.poScores||[],byPos:parsed.byPos||{},cbet:parsed.cbet||{opp:0,bet:0},fToCbet:parsed.fToCbet||{opp:0,fold:0},limp:parsed.limp||0,limpOpp:parsed.limpOpp||0,threeBet:parsed.threeBet||0,threeBetOpp:parsed.threeBetOpp||0,steal:parsed.steal||0,stealOpp:parsed.stealOpp||0,lessonStats:normalizeLessonStats(parsed.lessonStats)}));
     }
   }catch(e){}
-  return Object.assign({},_statsDef,{scores:[],byPos:{},lessonStats:emptyLessonStats()});
+  return normalizeProfitStats(Object.assign({},_statsDef,{scores:[],byPos:{},lessonStats:emptyLessonStats()}));
 })();
 
 function _saveStats(){
@@ -18533,6 +18616,10 @@ function updateSessionStats(hr,an){
   if(an&&an.primaryLesson){
     recordPrimaryLessonStats(sessionStats,an.primaryLesson,hr.handNum||sessionStats.hands);
   }
+  const pbb=handProfitBB(hr);
+  sessionStats.profitBB=(Number(sessionStats.profitBB)||0)+pbb;
+  sessionStats.profitHands=(Number(sessionStats.profitHands)||0)+1;
+  sessionStats.profitByHand=(sessionStats.profitByHand||[]).concat(Math.round(pbb*10)/10).slice(-80);
 
   _saveStats();
   renderTrends();
@@ -18617,6 +18704,7 @@ function renderTrends(){
   scoreBand+='<div style="font-size:9px;color:var(--dim)">PostF スコア ('+poN+'手)</div>';
   scoreBand+='<div style="font-size:14px;font-weight:800;color:'+(poN===0?'var(--dim)':avgPO>=80?'var(--green)':avgPO>=65?'var(--gold)':'var(--red)')+'">'+( poN>0?avgPO+'pt':'--')+'</div></div>';
   scoreBand+='</div>';
+  var qualityMoneyBand=renderQualityMoneyBand(sessionStats,avgScore);
   // 3BET% / Steal% / Limp%
   var threeBetPct=sessionStats.threeBetOpp>0?Math.round(sessionStats.threeBet/sessionStats.threeBetOpp*100):-1;
   var stealPct=sessionStats.stealOpp>0?Math.round(sessionStats.steal/sessionStats.stealOpp*100):-1;
@@ -18691,7 +18779,7 @@ function renderTrends(){
 
   // ---- ハンド数少 = 注意書きを上部 ----
   var lessonWeaknessHtml=renderLessonWeaknessRanking(sessionStats);
-  var finalHTML=sampleNote+scoreBand+sparkline+g1+g2+g3+lessonWeaknessHtml+leakHtml;
+  var finalHTML=sampleNote+qualityMoneyBand+scoreBand+sparkline+g1+g2+g3+lessonWeaknessHtml+leakHtml;
   targets.forEach(function(t){t.innerHTML=finalHTML;});
 }
 
@@ -19481,6 +19569,7 @@ document.addEventListener('click',function(e){
       Object.keys(_statsDef).forEach(function(k){sessionStats[k]=_statsDef[k];});
       sessionStats.scores=[];sessionStats.pfScores=[];sessionStats.poScores=[];
       sessionStats.byPos={};sessionStats.cbet={opp:0,bet:0};sessionStats.fToCbet={opp:0,fold:0};
+      sessionStats.profitBB=0;sessionStats.profitHands=0;sessionStats.profitByHand=[];
       sessionStats.lessonStats=emptyLessonStats();
       renderTrends();
     }
@@ -19488,7 +19577,7 @@ document.addEventListener('click',function(e){
 });
 
 window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,runFishTankAuditBatch,fishTankAuditBatchReportText,buildFishTankAuditRepairQueue,fishTankAuditRepairPlanText,auditIssuesForHand,playAuditGame,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,boardTextureProfile,boardTextureProfileText,representativeBoardProfile,boardTextureFrequencyAdjustment,boardTextureSizePlan,boardTextureTransitionProfile,boardTextureTransitionProfileText,rangeNutAdvantageProfile,rangeNutAdvantageProfileText,rangeActionUpdateProfile,rangeActionUpdateProfileText,postflopBetPurposeProfile,postflopBetPurposeProfileText,postflopRaisePlanProfile,postflopRaisePlanProfileText,postflopBarrelPlanProfile,postflopBarrelPlanProfileText,postflopDefensePlanProfile,postflopDefensePlanProfileText,postflopCallFuturePlanProfile,postflopCallFuturePlanProfileText,standardBetSizePct,preflopOpenQuickOptions,raiseOverBetQuickOptions,postflopQuickBetOptions,aiSizingTellAdjustedTarget,aiSizingTellLabel,opponentReadSizingTellLabel,opponentNoteText,setOpponentNote,renderOpponentNotesPanel,lessonWeaknessRows,renderLessonWeaknessRanking,recordPrimaryLessonStats,adaptiveScenarioWeightPlan,adaptiveScenarioEnabled,setAdaptiveScenarioEnabled,_pickScenarioCat,preflopDrillBuildSpot,preflopDrillEvaluateSpot,startPreflopDrillSession,answerPreflopDrill,finishPreflopDrillSession,liveCashRakeConfigFromValue,liveCashTableProfileFromValue,liveCashRangeProfile,liveCashSpotProfile,liveCashSpotProfileText,liveCashSprProfile,liveCashSprProfileText,liveCashInitiativeProfile,liveCashInitiativeProfileText,liveCashReraisedPotProfile,liveCashReraisedPotProfileText,liveCashMultiwayProfile,liveCashMultiwayProfileText,liveCashRiverDecisionProfile,liveCashRiverDecisionProfileText,tournamentRangeProfile,tournamentFinalTableProfile,tournamentFinalTableStackRole,tournamentFinalTableCollisionProfile,tournamentFinalTableRangeProfile,tournamentFinalTableRangeProfileText,tournamentFinalTablePostflopProfile,tournamentFinalTablePostflopProfileText,tournamentFinalTableLearningPoint,tournamentFinalTableLearningPointText,tournamentHeadsUpProfile};
-Object.assign(window.__fishTankDebug,{buildReplayGameFromHand,startReplayFromDecision,findReplayHand});
+Object.assign(window.__fishTankDebug,{buildReplayGameFromHand,startReplayFromDecision,findReplayHand,handProfitChips,handProfitBB,sessionStatsBb100,renderQualityMoneyBand});
 // [Codex fix 2026-06-05] Query-gated regression output for browser verification without exposing debug UI during normal play.
 if(new URLSearchParams(location.search).has('codex_regression')){
   setTimeout(function(){
