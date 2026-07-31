@@ -16,6 +16,7 @@
       <select id="cfg-mode">
         <option value="normal">🃏 リングゲーム</option>
         <option value="scenario">🎯 フロップトレーニング</option>
+        <option value="preflop_drill">⚡ プリフロップ即答ドリル</option>
         <option value="tournament">🏆 トーナメント局面別</option>
       </select>
     </div>
@@ -107,6 +108,29 @@
     </div>
   </div>
   <div id="main-area">
+    <div id="preflop-drill-panel" class="hidden">
+      <div class="pf-drill-card">
+        <div class="pf-drill-head">
+          <div>
+            <div class="pf-drill-kicker">PRE-FLOP DRILL</div>
+            <h2 id="pf-drill-title">プリフロップ即答</h2>
+          </div>
+          <div id="pf-drill-progress" class="pf-drill-progress">1 / 20</div>
+        </div>
+        <div id="pf-drill-spot" class="pf-drill-spot"></div>
+        <div id="pf-drill-hand" class="pf-drill-hand"></div>
+        <div id="pf-drill-actions" class="pf-drill-actions">
+          <button data-pf-action="fold">フォールド</button>
+          <button data-pf-action="call">コール</button>
+          <button data-pf-action="raise">レイズ</button>
+        </div>
+        <div id="pf-drill-result" class="pf-drill-result"></div>
+        <div class="pf-drill-footer">
+          <button id="pf-drill-next">次の問題</button>
+          <button id="pf-drill-finish">終了</button>
+        </div>
+      </div>
+    </div>
     <div id="table-wrap">
       <div id="scenario-banner"></div>
       <div id="table-container">

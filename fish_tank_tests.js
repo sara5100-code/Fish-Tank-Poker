@@ -55,7 +55,7 @@ function loadSandbox(htmlPath) {
   if (!m) throw new Error('<script> が見つかりません');
   // const/class はvmグローバルに乗らないため、末尾でブリッジ注入
   const code = m[1] +
-    "\n;try{Object.assign(globalThis,{HandEval,Deck,Card,HAND_RANK_169,HAND_COMBO_FRAC,HAND_STRENGTH,RANK_VAL,RANKS,SUITS,GameEngine,AI_PROFILES,regressionPlayer,adaptiveScenarioWeightPlan,_pickScenarioCat});}catch(e){globalThis.__bridgeErr=e.message;}\n";
+    "\n;try{Object.assign(globalThis,{HandEval,Deck,Card,HAND_RANK_169,HAND_COMBO_FRAC,HAND_STRENGTH,RANK_VAL,RANKS,SUITS,GameEngine,AI_PROFILES,regressionPlayer,adaptiveScenarioWeightPlan,_pickScenarioCat,preflopDrillBuildSpot,preflopDrillEvaluateSpot});}catch(e){globalThis.__bridgeErr=e.message;}\n";
   const anyNode = new Proxy(function () {}, {
     get(t, p) {
       if (p === 'style') return {};

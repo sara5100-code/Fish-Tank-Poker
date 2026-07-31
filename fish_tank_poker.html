@@ -333,6 +333,27 @@ body.codex-dev .dev-btn{display:inline-flex;}
 .grade-S{color:#d4a820;}.grade-A{color:#22a46c;}.grade-B{color:#3d6cf0;}.grade-C{color:#d87020;}.grade-D{color:#e04848;}.grade-F{color:#9333ea;}
 .close-analysis{width:100%;margin-top:14px;padding:12px;background:var(--accent);border:none;border-radius:12px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;transition:background .15s;}
 .close-analysis:hover{background:#2d58e0;}
+#preflop-drill-panel{width:100%;display:flex;justify-content:center;align-items:flex-start;padding:18px 12px;}
+#preflop-drill-panel.hidden{display:none!important;}
+.pf-drill-card{width:min(680px,100%);background:var(--panel);border:1px solid var(--border);border-radius:18px;box-shadow:var(--shadow-md);padding:22px;}
+.pf-drill-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:16px;}
+.pf-drill-kicker{font-size:11px;font-weight:900;color:var(--accent);letter-spacing:.08em;}
+.pf-drill-card h2{font-size:20px;font-weight:900;margin-top:2px;}
+.pf-drill-progress{font-size:13px;font-weight:900;color:var(--dim);background:var(--panel2);border:1px solid var(--border);border-radius:999px;padding:6px 10px;white-space:nowrap;}
+.pf-drill-spot{background:var(--panel2);border:1px solid var(--border);border-radius:12px;padding:12px 14px;font-size:13px;line-height:1.55;color:var(--text);margin-bottom:16px;}
+.pf-drill-hand{display:flex;justify-content:center;gap:8px;margin:14px 0 18px;min-height:86px;align-items:center;}
+.pf-drill-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:12px;}
+.pf-drill-actions button,.pf-drill-footer button{border:1px solid var(--border);border-radius:12px;background:var(--panel2);color:var(--text);font-family:inherit;font-weight:900;font-size:14px;padding:13px;cursor:pointer;}
+.pf-drill-actions button:hover,.pf-drill-footer button:hover{border-color:var(--accent);color:var(--accent);}
+.pf-drill-actions button.selected-good{border-color:var(--green);color:var(--green);background:rgba(34,164,108,.08);}
+.pf-drill-actions button.selected-bad{border-color:var(--red);color:var(--red);background:rgba(224,72,72,.08);}
+.pf-drill-result{min-height:72px;border-radius:12px;border:1px solid var(--border);background:var(--panel2);padding:12px 14px;font-size:13px;line-height:1.55;color:var(--text);}
+.pf-drill-result.good{border-left:4px solid var(--green);}
+.pf-drill-result.bad{border-left:4px solid var(--red);}
+.pf-drill-footer{display:flex;gap:10px;margin-top:12px;}
+.pf-drill-footer button{flex:1;}
+.pf-drill-active #table-wrap{display:none!important;}
+.pf-drill-active #side-panel{display:none!important;}
 #session-end-modal{display:none;position:fixed;inset:0;background:rgba(16,24,52,.50);z-index:120;align-items:center;justify-content:center;backdrop-filter:blur(4px);}
 #session-end-modal.open{display:flex;}
 #session-end-box{width:460px;max-width:94vw;background:var(--panel);border:1px solid var(--border);border-radius:18px;padding:20px;box-shadow:var(--shadow-md);}
@@ -434,6 +455,12 @@ body.codex-dev .dev-btn{display:inline-flex;}
   #analysis-content>div[style*="justify-content:center"][style*="flex-wrap:wrap"] button{width:100%!important;}
   #side-panel{max-height:130px;}
   #side-tabs{display:flex;}
+  #preflop-drill-panel{padding:10px 8px;}
+  .pf-drill-card{padding:14px;border-radius:14px;}
+  .pf-drill-card h2{font-size:17px;}
+  .pf-drill-actions{grid-template-columns:1fr;gap:8px;}
+  .pf-drill-actions button,.pf-drill-footer button{padding:12px;font-size:13px;}
+  .pf-drill-footer{flex-direction:column;}
 }
 @media(max-width:380px){
   #hud .hud-title{max-width:96px;font-size:11px;}
@@ -466,6 +493,7 @@ body.codex-dev .dev-btn{display:inline-flex;}
       <select id="cfg-mode">
         <option value="normal">🃏 リングゲーム</option>
         <option value="scenario">🎯 フロップトレーニング</option>
+        <option value="preflop_drill">⚡ プリフロップ即答ドリル</option>
         <option value="tournament">🏆 トーナメント局面別</option>
       </select>
     </div>
@@ -557,6 +585,29 @@ body.codex-dev .dev-btn{display:inline-flex;}
     </div>
   </div>
   <div id="main-area">
+    <div id="preflop-drill-panel" class="hidden">
+      <div class="pf-drill-card">
+        <div class="pf-drill-head">
+          <div>
+            <div class="pf-drill-kicker">PRE-FLOP DRILL</div>
+            <h2 id="pf-drill-title">プリフロップ即答</h2>
+          </div>
+          <div id="pf-drill-progress" class="pf-drill-progress">1 / 20</div>
+        </div>
+        <div id="pf-drill-spot" class="pf-drill-spot"></div>
+        <div id="pf-drill-hand" class="pf-drill-hand"></div>
+        <div id="pf-drill-actions" class="pf-drill-actions">
+          <button data-pf-action="fold">フォールド</button>
+          <button data-pf-action="call">コール</button>
+          <button data-pf-action="raise">レイズ</button>
+        </div>
+        <div id="pf-drill-result" class="pf-drill-result"></div>
+        <div class="pf-drill-footer">
+          <button id="pf-drill-next">次の問題</button>
+          <button id="pf-drill-finish">終了</button>
+        </div>
+      </div>
+    </div>
     <div id="table-wrap">
       <div id="scenario-banner"></div>
       <div id="table-container">
@@ -15662,6 +15713,38 @@ function runFishTankRegressionTests(){
     }
   });
 
+  add('プリフロップドリル: UTG K2o openはフォールド正解にする',function(){
+    const spot=preflopDrillBuildSpot({base:PREFLOP_DRILL_SPOTS[0],pos:'UTG',ht:'K2o',totalP:6,stackBB:100});
+    const fold=preflopDrillEvaluateSpot(spot,'fold');
+    const raise=preflopDrillEvaluateSpot(spot,'raise');
+    return fold.ok&&!raise.ok&&/Fold|フォールド/.test(fold.mix+fold.text);
+  });
+
+  add('プリフロップドリル: vs3BETの継続候補はCall/Raiseを許容する',function(){
+    const spot=preflopDrillBuildSpot({base:PREFLOP_DRILL_SPOTS[2],pos:'BTN',ht:'QQ',totalP:6,stackBB:100});
+    const call=preflopDrillEvaluateSpot(spot,'call');
+    const raise=preflopDrillEvaluateSpot(spot,'raise');
+    const fold=preflopDrillEvaluateSpot(spot,'fold');
+    return call.ok&&raise.ok&&!fold.ok&&/vs3BET|3BET|Call\/4bet/i.test(call.text+call.mix);
+  });
+
+  add('プリフロップドリル: ミスを弱点統計へ流し込める',function(){
+    const oldStats=sessionStats;
+    const oldState=preflopDrillState;
+    try{
+      sessionStats=Object.assign({},_statsDef,{hands:0,scores:[],pfScores:[],poScores:[],byPos:{},cbet:{opp:0,bet:0},fToCbet:{opp:0,fold:0},lessonStats:emptyLessonStats()});
+      const spot=preflopDrillBuildSpot({base:PREFLOP_DRILL_SPOTS[0],pos:'UTG',ht:'K2o',totalP:6,stackBB:100});
+      const ev=preflopDrillEvaluateSpot(spot,'raise');
+      preflopDrillState={index:1,correct:0,answers:[{spot:spot,action:'raise',result:ev}],current:spot,finished:false};
+      finishPreflopDrillSession();
+      const c=sessionStats.lessonStats.categories['preflop-entry'];
+      return !!(c&&c.count===1&&c.bad===1);
+    }finally{
+      sessionStats=oldStats;
+      preflopDrillState=oldState;
+    }
+  });
+
   const results=tests.map(function(t){
     try{return{name:t.name,pass:!!t.fn()};}
     catch(e){return{name:t.name,pass:false,error:e&&e.message?e.message:String(e)};}
@@ -16033,6 +16116,151 @@ function cardHTML(c,big){
 function cHTML(c){
   if(!c)return '<div class="c-card placeholder"></div>';
   return '<div class="c-card '+(c.isRed?'red':'black')+'"><span>'+c.rank+'</span><span>'+c.sym+'</span></div>';
+}
+
+// ============================================================
+// [Codex fix 2026-07-31] Phase 4-3: プリフロップ即答ドリル
+// ============================================================
+var _preflopDrillMode=false;
+const PREFLOP_DRILL_TOTAL=20;
+let preflopDrillState=null;
+const PREFLOP_DRILL_SPOTS=[
+  {type:'open',label:'先入れオープン',kind:'open',positions:['UTG','MP','CO','BTN','SB'],openerPos:''},
+  {type:'flat',label:'オープンへの対応',kind:'flat',positions:['CO','BTN','SB','BB'],openerPos:'CO'},
+  {type:'vs3bet',label:'自分のオープン後に3BETを受けた場面',kind:'vs3bet',positions:['CO','BTN'],openerPos:'BB'},
+  {type:'squeeze',label:'スクイーズ候補',kind:'threeBet',positions:['BTN','SB','BB'],openerPos:'CO',caller:true}
+];
+function preflopDrillCardCode(rank,suit){return new Card(rank,suit);}
+function preflopDrillHandFromType(ht){
+  ht=ht||'AKo';
+  if(ht.length===2)return[preflopDrillCardCode(ht[0],'s'),preflopDrillCardCode(ht[1],'h')];
+  const r1=ht[0],r2=ht[1],suited=ht[2]==='s';
+  return[preflopDrillCardCode(r1,'s'),preflopDrillCardCode(r2,suited?'s':'h')];
+}
+function preflopDrillPickHandType(){
+  const pool=HAND_RANK_169||['AA','AKs','AQo','KQs','77','A5s','KJo','T9s','72o'];
+  return pool[Math.floor(Math.random()*pool.length)]||'AKo';
+}
+function preflopDrillActionLabel(a){return a==='raise'?'レイズ':a==='call'?'コール':'フォールド';}
+function preflopDrillPrimaryAction(spot,chart){
+  if(!chart||chart.status==='out')return'fold';
+  if(spot.kind==='open'||spot.kind==='threeBet')return'raise';
+  if(spot.kind==='vs3bet'||spot.kind==='vs4bet')return'call';
+  return'call';
+}
+function preflopDrillAcceptedActions(spot,chart){
+  const primary=preflopDrillPrimaryAction(spot,chart);
+  if(!chart||chart.status==='out')return['fold'];
+  if(chart.status==='mix'){
+    if(spot.kind==='vs3bet'||spot.kind==='vs4bet')return['fold','call','raise'];
+    return Array.from(new Set([primary,'fold']));
+  }
+  if(spot.kind==='vs3bet'||spot.kind==='vs4bet')return['call','raise'];
+  return[primary];
+}
+function preflopDrillCategory(spot){
+  if(!spot)return'preflop-entry';
+  if(spot.type==='vs3bet'||spot.type==='squeeze')return'ring-reraised-pot';
+  return'preflop-entry';
+}
+function preflopDrillBuildSpot(opts){
+  opts=opts||{};
+  const base=opts.base||PREFLOP_DRILL_SPOTS[Math.floor(Math.random()*PREFLOP_DRILL_SPOTS.length)]||PREFLOP_DRILL_SPOTS[0];
+  const pos=opts.pos||base.positions[Math.floor(Math.random()*base.positions.length)]||'BTN';
+  const totalP=opts.totalP||6;
+  const stackBB=opts.stackBB||100;
+  const ht=opts.ht||preflopDrillPickHandType();
+  const chart=preflopChartLookup(base.kind,ht,pos,totalP,{openerPos:opts.openerPos||base.openerPos,stackBB:stackBB,polar:base.type==='squeeze'});
+  const hand=preflopDrillHandFromType(ht);
+  const actionLine=base.type==='open'
+    ?pos+'で未参加からアクション'
+    :base.type==='flat'
+      ?(base.openerPos||'CO')+'オープンに'+pos+'で対応'
+      :base.type==='vs3bet'
+        ?pos+'でオープン後、3BETを受けた場面'
+        :(base.openerPos||'CO')+'オープン＋1コールに'+pos+'で対応';
+  return{type:base.type,label:base.label,kind:base.kind,pos,totalP,stackBB,ht,hand,chart,actionLine,category:preflopDrillCategory(base)};
+}
+function preflopDrillEvaluateSpot(spot,action){
+  const chart=spot&&spot.chart||null;
+  const accepted=preflopDrillAcceptedActions(spot,chart);
+  const ok=accepted.includes(action);
+  const primary=preflopDrillPrimaryAction(spot,chart);
+  const mix=(chart&&chart.mix)||'参照頻度なし';
+  const line=chart&&chart.status==='mix'
+    ?'複数ラインが成立します。頻度の目安は '+mix+' です。'
+    :chart&&chart.status==='pure'
+      ?'主ラインは '+preflopDrillActionLabel(primary)+' です。頻度の目安は '+mix+' です。'
+      :'レンジ外寄りです。頻度の目安は '+mix+' です。';
+  const reason=spot.type==='open'
+    ?'参加するならリンプではなく、レイズで主導権を取れるかを確認します。'
+    :spot.type==='flat'
+      ?'非BBのコールはドミネートと後続の圧力、BBはOOPの実現率まで見ます。'
+      :spot.type==='vs3bet'
+        ?'3BETを受けた後は、最初のオープンレンジではなくvs3BETレンジで見直します。'
+        :'スクイーズはフォールドエクイティと相手の継続レンジが必要です。弱いコールで済ませない場面です。';
+  return{ok,accepted,primary,mix,quality:ok?'good':'bad',category:spot.category,text:(ok?'良い判断です。':'見直したい判断です。')+' '+line+' '+reason};
+}
+function renderPreflopDrill(){
+  const panel=$('preflop-drill-panel');
+  if(!panel||!preflopDrillState)return;
+  panel.classList.remove('hidden');
+  const spot=preflopDrillState.current;
+  $('pf-drill-progress').textContent=Math.min(preflopDrillState.index+1,PREFLOP_DRILL_TOTAL)+' / '+PREFLOP_DRILL_TOTAL;
+  $('pf-drill-spot').textContent=spot.actionLine+' / '+spot.totalP+'人 / '+spot.stackBB+'BB / ハンド '+spot.ht;
+  $('pf-drill-hand').innerHTML=spot.hand.map(function(c){return cardHTML(c,true);}).join('');
+  $('pf-drill-result').className='pf-drill-result';
+  $('pf-drill-result').textContent='直感で選んでください。判定後にレンジ頻度を表示します。';
+  document.querySelectorAll('#pf-drill-actions button').forEach(function(b){b.disabled=false;b.classList.remove('selected-good','selected-bad');});
+  const next=$('pf-drill-next');if(next)next.disabled=true;
+}
+function preflopDrillNextSpot(){
+  if(!preflopDrillState)return;
+  preflopDrillState.current=preflopDrillBuildSpot({stackBB:+($('cfg-stack')&&$('cfg-stack').value||100),totalP:+($('cfg-players')&&$('cfg-players').value||6)});
+  renderPreflopDrill();
+}
+function startPreflopDrillSession(){
+  _preflopDrillMode=true;_scenarioMode=false;
+  document.body.classList.add('pf-drill-active');
+  const panel=$('preflop-drill-panel');if(panel)panel.classList.remove('hidden');
+  preflopDrillState={index:0,correct:0,answers:[],current:null,finished:false};
+  const hudTitle=document.querySelector('#hud .hud-title');if(hudTitle)hudTitle.textContent='⚡ Fish Tank — プリフロップ即答';
+  const hudInfo=$('hud-info');if(hudInfo)hudInfo.textContent='20問ドリル';
+  refreshHudPracticeFocus();
+  preflopDrillNextSpot();
+}
+function answerPreflopDrill(action){
+  if(!preflopDrillState||preflopDrillState.finished||!preflopDrillState.current)return;
+  const spot=preflopDrillState.current;
+  const ev=preflopDrillEvaluateSpot(spot,action);
+  if(ev.ok)preflopDrillState.correct++;
+  preflopDrillState.answers.push({spot,action,result:ev});
+  const result=$('pf-drill-result');
+  if(result){result.className='pf-drill-result '+(ev.ok?'good':'bad');result.textContent=ev.text+' 推奨: '+ev.accepted.map(preflopDrillActionLabel).join(' / ');}
+  document.querySelectorAll('#pf-drill-actions button').forEach(function(b){
+    const a=b.dataset.pfAction;
+    b.disabled=true;
+    if(a===action)b.classList.add(ev.ok?'selected-good':'selected-bad');
+  });
+  preflopDrillState.index++;
+  const next=$('pf-drill-next');
+  if(next){next.disabled=false;next.textContent=preflopDrillState.index>=PREFLOP_DRILL_TOTAL?'結果を見る':'次の問題';}
+}
+function finishPreflopDrillSession(){
+  if(!preflopDrillState)return;
+  preflopDrillState.finished=true;
+  const total=preflopDrillState.answers.length||1;
+  const misses=preflopDrillState.answers.filter(function(a){return !a.result.ok;});
+  misses.forEach(function(a,i){
+    recordPrimaryLessonStats(sessionStats,{category:a.result.category,title:a.result.category==='ring-reraised-pot'?'3BET/スクイーズ対応を整理する':'フロップ前の入口を整理する',modeLabel:'プリフロップドリル',severity:'bad'},(sessionStats.hands||0)+i+1);
+  });
+  _saveStats();renderTrends();
+  const byCat={};
+  misses.forEach(function(a){byCat[a.result.category]=(byCat[a.result.category]||0)+1;});
+  const weak=Object.keys(byCat).sort(function(a,b){return byCat[b]-byCat[a];})[0]||'なし';
+  const result=$('pf-drill-result');
+  if(result){result.className='pf-drill-result '+(misses.length?'bad':'good');result.textContent='結果: '+preflopDrillState.correct+' / '+total+' 正解。弱点: '+(weak==='ring-reraised-pot'?'3BET/スクイーズ対応':weak==='preflop-entry'?'フロップ前の入口':'なし')+'。傾向タブの弱点ランキングにも反映しました。';}
+  const next=$('pf-drill-next');if(next)next.disabled=true;
 }
 
 function renderTable(){
@@ -18798,6 +19026,7 @@ function startNewHand(){
   if(aiTimeout)clearTimeout(aiTimeout);
   game.waitingForHuman=false;game._lastWinners=[];game._handEnded=false;
   game.players.forEach(p=>p._rebought=false);
+  if(_preflopDrillMode){startPreflopDrillSession();return;}
   // [Claude feature 2026-05-23] シナリオモード分岐
   if(_scenarioMode){startScenarioHand();return;}
   game.startHand();
@@ -18830,10 +19059,13 @@ function _initGame(mode){
   window.__fishTankOpponentReadReveal=false;
   game=new GameEngine({numPlayers:n,sb:sb,bb:bb,startingChips:bb*stackBB,aiLevel:aiLevel,tournamentContext:tctx,rakeConfig:rakeConfig,tableProfile:tableProfile});
   _scenarioMode=(mode==='scenario');
+  _preflopDrillMode=(mode==='preflop_drill');
+  document.body.classList.toggle('pf-drill-active',_preflopDrillMode);
+  const drillPanel=$('preflop-drill-panel');if(drillPanel)drillPanel.classList.toggle('hidden',!_preflopDrillMode);
   showScreen('game-screen');
   // HUDにモード表示
   const hudTitle=document.querySelector('#hud .hud-title');
-  if(hudTitle)hudTitle.textContent=_scenarioMode?'🎯 Fish Tank — フロップトレーナー':(mode==='tournament'?'🏆 Fish Tank — Tournament':'🐟 Fish Tank Poker');
+  if(hudTitle)hudTitle.textContent=_preflopDrillMode?'⚡ Fish Tank — プリフロップ即答':(_scenarioMode?'🎯 Fish Tank — フロップトレーナー':(mode==='tournament'?'🏆 Fish Tank — Tournament':'🐟 Fish Tank Poker'));
   refreshHudPracticeFocus();
   startNewHand();
 }
@@ -18879,6 +19111,22 @@ initSessionChecklistUI();
 $('cfg-tournament-preset').addEventListener('change',applyTournamentPresetToSetup);
 $('cfg-tournament-focus').addEventListener('change',applyTournamentPresetToSetup);
 applyTournamentPresetToSetup();
+
+document.querySelectorAll('#pf-drill-actions button').forEach(function(btn){
+  btn.addEventListener('click',function(){answerPreflopDrill(btn.dataset.pfAction);});
+});
+const pfDrillNext=$('pf-drill-next');
+if(pfDrillNext){
+  pfDrillNext.addEventListener('click',function(){
+    if(!preflopDrillState)return;
+    if(preflopDrillState.index>=PREFLOP_DRILL_TOTAL){finishPreflopDrillSession();return;}
+    preflopDrillNextSpot();
+  });
+}
+const pfDrillFinish=$('pf-drill-finish');
+if(pfDrillFinish){
+  pfDrillFinish.addEventListener('click',function(){finishPreflopDrillSession();});
+}
 
 // SBが変わったらBBを自動で2倍に設定（目安）
 $('cfg-sb').addEventListener('change',function(){
@@ -19026,7 +19274,7 @@ document.addEventListener('click',function(e){
   }
 });
 
-window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,runFishTankAuditBatch,fishTankAuditBatchReportText,buildFishTankAuditRepairQueue,fishTankAuditRepairPlanText,auditIssuesForHand,playAuditGame,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,boardTextureProfile,boardTextureProfileText,representativeBoardProfile,boardTextureFrequencyAdjustment,boardTextureSizePlan,boardTextureTransitionProfile,boardTextureTransitionProfileText,rangeNutAdvantageProfile,rangeNutAdvantageProfileText,rangeActionUpdateProfile,rangeActionUpdateProfileText,postflopBetPurposeProfile,postflopBetPurposeProfileText,postflopRaisePlanProfile,postflopRaisePlanProfileText,postflopBarrelPlanProfile,postflopBarrelPlanProfileText,postflopDefensePlanProfile,postflopDefensePlanProfileText,postflopCallFuturePlanProfile,postflopCallFuturePlanProfileText,standardBetSizePct,preflopOpenQuickOptions,raiseOverBetQuickOptions,postflopQuickBetOptions,aiSizingTellAdjustedTarget,aiSizingTellLabel,opponentReadSizingTellLabel,opponentNoteText,setOpponentNote,renderOpponentNotesPanel,lessonWeaknessRows,renderLessonWeaknessRanking,recordPrimaryLessonStats,adaptiveScenarioWeightPlan,adaptiveScenarioEnabled,setAdaptiveScenarioEnabled,_pickScenarioCat,liveCashRakeConfigFromValue,liveCashTableProfileFromValue,liveCashRangeProfile,liveCashSpotProfile,liveCashSpotProfileText,liveCashSprProfile,liveCashSprProfileText,liveCashInitiativeProfile,liveCashInitiativeProfileText,liveCashReraisedPotProfile,liveCashReraisedPotProfileText,liveCashMultiwayProfile,liveCashMultiwayProfileText,liveCashRiverDecisionProfile,liveCashRiverDecisionProfileText,tournamentRangeProfile,tournamentFinalTableProfile,tournamentFinalTableStackRole,tournamentFinalTableCollisionProfile,tournamentFinalTableRangeProfile,tournamentFinalTableRangeProfileText,tournamentFinalTablePostflopProfile,tournamentFinalTablePostflopProfileText,tournamentFinalTableLearningPoint,tournamentFinalTableLearningPointText,tournamentHeadsUpProfile};
+window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,runFishTankAuditBatch,fishTankAuditBatchReportText,buildFishTankAuditRepairQueue,fishTankAuditRepairPlanText,auditIssuesForHand,playAuditGame,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,boardTextureProfile,boardTextureProfileText,representativeBoardProfile,boardTextureFrequencyAdjustment,boardTextureSizePlan,boardTextureTransitionProfile,boardTextureTransitionProfileText,rangeNutAdvantageProfile,rangeNutAdvantageProfileText,rangeActionUpdateProfile,rangeActionUpdateProfileText,postflopBetPurposeProfile,postflopBetPurposeProfileText,postflopRaisePlanProfile,postflopRaisePlanProfileText,postflopBarrelPlanProfile,postflopBarrelPlanProfileText,postflopDefensePlanProfile,postflopDefensePlanProfileText,postflopCallFuturePlanProfile,postflopCallFuturePlanProfileText,standardBetSizePct,preflopOpenQuickOptions,raiseOverBetQuickOptions,postflopQuickBetOptions,aiSizingTellAdjustedTarget,aiSizingTellLabel,opponentReadSizingTellLabel,opponentNoteText,setOpponentNote,renderOpponentNotesPanel,lessonWeaknessRows,renderLessonWeaknessRanking,recordPrimaryLessonStats,adaptiveScenarioWeightPlan,adaptiveScenarioEnabled,setAdaptiveScenarioEnabled,_pickScenarioCat,preflopDrillBuildSpot,preflopDrillEvaluateSpot,startPreflopDrillSession,answerPreflopDrill,finishPreflopDrillSession,liveCashRakeConfigFromValue,liveCashTableProfileFromValue,liveCashRangeProfile,liveCashSpotProfile,liveCashSpotProfileText,liveCashSprProfile,liveCashSprProfileText,liveCashInitiativeProfile,liveCashInitiativeProfileText,liveCashReraisedPotProfile,liveCashReraisedPotProfileText,liveCashMultiwayProfile,liveCashMultiwayProfileText,liveCashRiverDecisionProfile,liveCashRiverDecisionProfileText,tournamentRangeProfile,tournamentFinalTableProfile,tournamentFinalTableStackRole,tournamentFinalTableCollisionProfile,tournamentFinalTableRangeProfile,tournamentFinalTableRangeProfileText,tournamentFinalTablePostflopProfile,tournamentFinalTablePostflopProfileText,tournamentFinalTableLearningPoint,tournamentFinalTableLearningPointText,tournamentHeadsUpProfile};
 // [Codex fix 2026-06-05] Query-gated regression output for browser verification without exposing debug UI during normal play.
 if(new URLSearchParams(location.search).has('codex_regression')){
   setTimeout(function(){
