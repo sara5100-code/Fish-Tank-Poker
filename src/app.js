@@ -1827,7 +1827,7 @@ class GameEngine{
     // [Codex fix 2026-06-14] ストリートが変わったら直前アクション表示を消す。
     // 前ストリートのフォールド/チェックが次の判断材料のように見える混乱を防ぐ。
     this._lastActions={};
-    if(this.street==='flop')this.community=[this.deck.deal(),this.deck.deal(),this.deck.deal()];
+    if(this.street==='flop')this.community=(this._scenario&&this._scenario.flopCards&&this._scenario.flopCards.length>=3)?this._scenario.flopCards.slice(0,3):[this.deck.deal(),this.deck.deal(),this.deck.deal()];
     // [Claude feature 2026-05-23] シナリオモード: ターン/リバーに予約カードを使用（F/G用）
     else if(this.street==='turn')this.community.push(this._scenario&&this._scenario.turnCard?this._scenario.turnCard:this.deck.deal());
     else if(this.street==='river')this.community.push(this._scenario&&this._scenario.riverCard?this._scenario.riverCard:this.deck.deal());
@@ -1874,6 +1874,177 @@ class GameEngine{
   }
   isHumanTurn(){return this.street!=='showdown'&&this.actionIdx>=0&&!!this.players[this.actionIdx]?.isHuman;}
   getToCall(){const h=this.players.find(p=>p.isHuman);return Math.max(0,this.currentBet-h.currentBet);}
+}
+
+function replayCardKey(c){return c&&c.rank&&c.suit?c.rank+c.suit:String(c||'');}
+function replayCloneCard(c){
+  if(!c)return c;
+  return c.rank&&c.suit?new Card(c.rank,c.suit):c;
+}
+function replayStreetBoard(hr,street){
+  const board=(hr&&hr.community?hr.community:[]).map(replayCloneCard);
+  if(street==='flop')return board.slice(0,3);
+  if(street==='turn')return board.slice(0,4);
+  if(street==='river'||street==='showdown')return board.slice(0,5);
+  return [];
+}
+function replayPrimeDeck(g,hr,street){
+  if(!g||!g.deck||!hr)return;
+  const used=new Set();
+  (g.players||[]).forEach(function(p){(p.holeCards||[]).forEach(function(c){used.add(replayCardKey(c));});});
+  (g.community||[]).forEach(function(c){used.add(replayCardKey(c));});
+  const board=(hr.community||[]).map(replayCloneCard);
+  const future=[];
+  if(street==='preflop')future.push.apply(future,board.slice(0,5));
+  else if(street==='flop')future.push.apply(future,board.slice(3,5));
+  else if(street==='turn')future.push.apply(future,board.slice(4,5));
+  future.forEach(function(c){if(c)used.add(replayCardKey(c));});
+  g.deck.cards=g.deck.cards.filter(function(c){return !used.has(replayCardKey(c));});
+  // Deck.deal() pops from the end. Push reversed future cards so the runout is fixed.
+  for(let i=future.length-1;i>=0;i--)g.deck.cards.push(future[i]);
+  g._scenario={
+    replay:true,
+    flopCards:board.slice(0,3),
+    turnCard:board[3]||null,
+    riverCard:board[4]||null
+  };
+}
+function replayInferChips(hr,idx,decisionIndex){
+  const ds=(hr&&hr.decisions)||[];
+  for(let i=0;i<=decisionIndex;i++){
+    const d=ds[i];
+    if(d&&d.playerIdx===idx&&isFinite(d.playerChipsBefore))return d.playerChipsBefore+(d.playerBetBefore||0);
+  }
+  const p=hr&&hr.players?hr.players[idx]:null;
+  return p&&isFinite(p.chips)?p.chips:((hr&&hr.bigBlind)||5)*100;
+}
+function replayApplyPastDecision(g,d){
+  if(!g||!d||d.playerIdx==null||!g.players[d.playerIdx])return;
+  const p=g.players[d.playerIdx];
+  if(isFinite(d.playerChipsBefore))p.chips=d.playerChipsBefore;
+  if(isFinite(d.playerBetBefore))p.currentBet=d.playerBetBefore;
+  g.pot=isFinite(d.pot)?d.pot:g.pot;
+  if(d.action==='fold'){
+    p.folded=true;
+  }else if(d.action==='check'){
+  }else{
+    const amt=Math.max(0,Number(d.amount)||0);
+    p.chips=Math.max(0,p.chips-amt);
+    p.currentBet+=amt;
+    p.totalInvested+=amt;
+    g.pot+=amt;
+    if(d.action==='raise'||d.action==='allin')g.currentBet=Math.max(g.currentBet,p.currentBet);
+    if(d.action==='allin'||p.chips===0)p.allIn=true;
+  }
+}
+function buildReplayGameFromHand(hr,decisionIndex){
+  if(!hr||!hr.players||!hr.decisions)throw new Error('replay hand is incomplete');
+  const target=hr.decisions[decisionIndex];
+  if(!target)throw new Error('replay decision not found');
+  const bb=hr.bigBlind||5;
+  const sb=Math.max(1,Math.floor(bb/2));
+  const startingChips=Math.max(bb*20,...hr.players.map(function(p,i){return replayInferChips(hr,i,decisionIndex)||0;}));
+  const g=new GameEngine({
+    numPlayers:hr.players.length,
+    sb:sb,
+    bb:bb,
+    startingChips:startingChips,
+    aiLevel:aiLevel||'medium',
+    tournamentContext:hr.tournamentContext?Object.assign({},hr.tournamentContext):null,
+    rakeConfig:hr.rakeConfig||((hr.rake&&hr.rake.config)?hr.rake.config:null),
+    tableProfile:hr.tableProfile||null
+  });
+  g.handNum=hr.handNum;
+  g.handHistory=game&&game.handHistory?[...game.handHistory]:[];
+  g.dealerIndex=hr.dealerIndex==null?0:hr.dealerIndex;
+  g.street=target.street||'preflop';
+  g.community=replayStreetBoard(hr,g.street);
+  g.currentHandDecisions=(hr.decisions||[]).slice(0,decisionIndex).map(function(d){return Object.assign({},d);});
+  g.pot=0;g.currentBet=0;g.minRaise=bb;
+  g.players.forEach(function(p,i){
+    const src=hr.players[i]||{};
+    p.name=src.name||p.name;
+    p.isHuman=!!src.isHuman;
+    p.active=src.active!==false;
+    p.profile=src.profile||p.profile;
+    p.holeCards=(src.holeCards||[]).map(replayCloneCard);
+    p.chips=replayInferChips(hr,i,decisionIndex);
+    p.currentBet=0;
+    p.totalInvested=0;
+    p.folded=false;
+    p.allIn=false;
+  });
+  let lastStreet='preflop';
+  for(let i=0;i<decisionIndex;i++){
+    const d=hr.decisions[i];
+    if(d&&d.street!==lastStreet){
+      g.players.forEach(function(p){p.currentBet=0;});
+      g.currentBet=0;
+      lastStreet=d.street;
+    }
+    replayApplyPastDecision(g,d);
+  }
+  g.players.forEach(function(p){if(p.currentBet==null)p.currentBet=0;});
+  const tp=g.players[target.playerIdx];
+  if(tp){
+    tp.folded=false;tp.allIn=false;
+    if(isFinite(target.playerChipsBefore))tp.chips=target.playerChipsBefore;
+    tp.currentBet=isFinite(target.playerBetBefore)?target.playerBetBefore:0;
+  }
+  g.pot=isFinite(target.pot)?target.pot:g.pot;
+  g.currentBet=(tp?tp.currentBet:0)+(isFinite(target.toCall)?target.toCall:0);
+  g.actionIdx=target.playerIdx;
+  const later=[];
+  for(let i=decisionIndex+1;i<hr.decisions.length;i++){
+    const d=hr.decisions[i];
+    if(!d||d.street!==target.street)break;
+    if(d.playerIdx!=null&&d.playerIdx!==target.playerIdx&&!later.includes(d.playerIdx)){
+      const p=g.players[d.playerIdx];
+      if(p&&p.active&&!p.folded&&!p.allIn)later.push(d.playerIdx);
+    }
+  }
+  g.actorsRemaining=[target.playerIdx].concat(later).filter(function(i,pos,arr){
+    const p=g.players[i];
+    return p&&p.active&&!p.folded&&!p.allIn&&arr.indexOf(i)===pos;
+  });
+  if(!g.actorsRemaining.includes(target.playerIdx))g.actorsRemaining.unshift(target.playerIdx);
+  g.waitingForHuman=!!(tp&&tp.isHuman);
+  g.gameOver=false;g._handEnded=false;g._lastWinners=[];
+  g._replaySource={handNum:hr.handNum,decisionIndex:decisionIndex,street:target.street,action:target.action};
+  replayPrimeDeck(g,hr,g.street);
+  return g;
+}
+function findReplayHand(handNum){
+  const pool=[];
+  if(window._lastHR)pool.push(window._lastHR);
+  if(game&&game.handHistory)pool.push.apply(pool,game.handHistory);
+  return pool.find(function(h){return String(h&&h.handNum)===String(handNum);})||null;
+}
+function startReplayFromDecision(handNum,decisionIndex){
+  const hr=findReplayHand(handNum);
+  if(!hr){toast('元ハンドが見つかりません。履歴からもう一度開いてください。','info',3500);return false;}
+  try{
+    const replayGame=buildReplayGameFromHand(hr,Number(decisionIndex));
+    if(aiTimeout)clearTimeout(aiTimeout);
+    game=replayGame;
+    _scenarioMode=false;
+    _preflopDrillMode=false;
+    document.body.classList.remove('pf-drill-active');
+    const drillPanel=$('preflop-drill-panel');if(drillPanel)drillPanel.classList.add('hidden');
+    $('analysis-modal').classList.remove('open');
+    showScreen('game-screen');
+    refreshHudPracticeFocus();
+    renderScenarioBanner();
+    renderTable();
+    renderActions();
+    toast('この局面からやり直します。元のカードとランアウトは固定です。','info',3500);
+    if(!game.isHumanTurn())runAI();
+    return true;
+  }catch(e){
+    console.error('startReplayFromDecision failed:',e);
+    toast('再プレイの復元に失敗しました。','info',3500);
+    return false;
+  }
 }
 
 // ---- GTO TIPS (contextual) ----
@@ -5364,6 +5535,32 @@ function runFishTankRegressionTests(){
   const humanEval=function(an,pred){
     return an.evals.find(function(e){return e.isHuman&&pred(e);});
   };
+  add('局面再プレイ: 元ハンドの判断直前を復元する',function(){
+    if(typeof buildReplayGameFromHand!=='function')return false;
+    const hr=regressionHand({
+      handNum:444,
+      heroHole:['Ah','Jh'],
+      villainHole:['Ks','Kc'],
+      board:['Jd','7h','2c','9h','3s'],
+      bigBlind:10,
+      pot:200,
+      decisions:[
+        regressionDecision({street:'preflop',action:'raise',amount:30,pot:15,toCall:10,position:'MP',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:1000,playerBetBefore:0}),
+        regressionDecision({street:'preflop',action:'call',amount:30,pot:45,toCall:30,position:'BTN',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:1000,playerBetBefore:0}),
+        regressionDecision({street:'flop',action:'raise',amount:50,pot:100,toCall:0,position:'MP',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:970,playerBetBefore:0}),
+        regressionDecision({street:'flop',action:'call',amount:50,pot:150,toCall:50,position:'BTN',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:970,playerBetBefore:0})
+      ]
+    });
+    const g=buildReplayGameFromHand(hr,3);
+    const hero=g.players[0];
+    const board=g.community.map(function(c){return c.rank+c.suit;}).join(' ');
+    if(g.street!=='flop'||board!=='Jd 7h 2c')return false;
+    if(g.pot!==150||g.currentBet!==50||g.actionIdx!==0||!g.waitingForHuman)return false;
+    if(hero.chips!==970||hero.currentBet!==0)return false;
+    if(hero.holeCards.map(function(c){return c.rank+c.suit;}).join(' ')!=='Ah Jh')return false;
+    g.processAction(0,'call',0);
+    return g.street==='turn'&&g.community.map(function(c){return c.rank+c.suit;}).join(' ')==='Jd 7h 2c 9h';
+  });
   add('UI audit: mobile HUD wraps practice focus',function(){
     const css=[].slice.call(document.querySelectorAll('style')).map(function(s){return s.textContent||'';}).join('\n').replace(/\s+/g,'');
     if(!css)return true;
@@ -10280,6 +10477,13 @@ function showAnalysis(hr,fromHistory){
     const shownFinalTableLessons=new Set();
     const stLbl={preflop:'PREFLOP',flop:'FLOP',turn:'TURN',river:'RIVER'};
     const gradeCol={'S':'#d4a820','A':'#22a46c','B':'#3d6cf0','C':'#d87020','D':'#e04848','F':'#9333ea'};
+    const replayQueues={};
+    (hr.decisions||[]).forEach(function(d,i){
+      if(!d||!d.isHuman)return;
+      const st=d.street||'preflop';
+      if(!replayQueues[st])replayQueues[st]=[];
+      replayQueues[st].push(i);
+    });
     function metaChip(label,value,color){
       if(value==null||value==='')return '';
       return '<span style="display:inline-block;margin:2px 4px 2px 0;padding:2px 6px;border-radius:5px;background:var(--panel);border:1px solid var(--border);font-size:9px;color:'+(color||'var(--dim)')+'">'+label+': <strong>'+value+'</strong></span>';
@@ -10375,6 +10579,7 @@ function showAnalysis(hr,fromHistory){
       html+='<span style="font-size:10px;color:var(--dim)">'+stScore+'pt</span>';
       html+='</summary>';
       for(const ev of evs){
+        const replayDecisionIndex=replayQueues[st]&&replayQueues[st].length?replayQueues[st].shift():-1;
         const actLabel=actionText(ev);
         const poStr=ev.potOdds>0?' <span style="color:var(--dim)">(PO '+Math.round(ev.potOdds*100)+'%)</span>':'';
         const suggestHTML=ev.suggest?'<div style="margin-top:4px;color:var(--gold);font-size:10px;font-weight:600">▶ '+ev.suggest+'</div>':'';
@@ -10398,8 +10603,9 @@ function showAnalysis(hr,fromHistory){
         const tRangeHTML=ev.tournamentRangeHint?'<div style="margin-top:5px;padding:5px 8px;border:1px dashed var(--border);background:var(--panel);border-radius:6px;color:var(--dim);font-size:10px;line-height:1.5"><strong style="color:var(--text)">Tレンジ目安:</strong> '+ev.tournamentRangeHint+'</div>':'';
         const tProfileHTML=ev.tournamentRangeProfile?'<div style="margin-top:5px;padding:5px 8px;border:1px solid rgba(61,108,240,.18);background:rgba(61,108,240,.06);border-radius:6px;color:var(--text);font-size:10px;line-height:1.5"><strong style="color:var(--accent)">Tレンジ判定:</strong> '+tournamentRangeProfileText(ev.tournamentRangeProfile)+'</div>':'';
         const coachHTML='<div class="coach-review" style="font-size:12px;line-height:1.75;color:var(--text)">'+coachReviewHTML(ev)+'</div>';
+        const replayHTML=(replayDecisionIndex>=0&&(ev.quality!=='good'||(ev.deduction||0)>0))?'<button type="button" class="replay-spot-btn" data-hand-num="'+hr.handNum+'" data-decision-index="'+replayDecisionIndex+'">この局面をやり直す</button>':'';
         const detailHTML=compactReviewDetailsHTML(ev,decisionMeta(ev)+poStr+tLessonHTML+ftLessonHTML+tRangeHTML+tProfileHTML+(ev.suggest?'<div style="margin-top:4px;color:var(--gold);font-size:10px;font-weight:600">推奨詳細: '+ev.suggest+'</div>':'')+'<div style="margin-top:5px;color:var(--dim);font-size:10px;line-height:1.5">'+plainReviewText(ev.comment)+'</div>');
-        html+='<div class="decision-row '+ev.quality+'"><div class="dr-action '+ev.quality+'">'+actLabel+'</div><div>'+coachHTML+detailHTML+'</div></div>';
+        html+='<div class="decision-row '+ev.quality+'"><div class="dr-action '+ev.quality+'">'+actLabel+'</div><div>'+coachHTML+replayHTML+detailHTML+'</div></div>';
       }
       html+='</details>';
     }
@@ -12032,6 +12238,11 @@ $('session-end-confirm').addEventListener('click',function(){
 });
 // [Codex fix 2026-05-26] 重複していた履歴クリック登録は削除済み。直下は統計リセット用。
 document.addEventListener('click',function(e){
+  const replayBtn=e.target&&e.target.closest&&e.target.closest('.replay-spot-btn');
+  if(replayBtn){
+    startReplayFromDecision(replayBtn.dataset.handNum,replayBtn.dataset.decisionIndex);
+    return;
+  }
   const practiceBtn=e.target&&e.target.closest&&e.target.closest('.session-apply-practice');
   if(practiceBtn){
     applySessionPracticeRecommendation({
@@ -12058,6 +12269,7 @@ document.addEventListener('click',function(e){
 });
 
 window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,runFishTankAuditBatch,fishTankAuditBatchReportText,buildFishTankAuditRepairQueue,fishTankAuditRepairPlanText,auditIssuesForHand,playAuditGame,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,boardTextureProfile,boardTextureProfileText,representativeBoardProfile,boardTextureFrequencyAdjustment,boardTextureSizePlan,boardTextureTransitionProfile,boardTextureTransitionProfileText,rangeNutAdvantageProfile,rangeNutAdvantageProfileText,rangeActionUpdateProfile,rangeActionUpdateProfileText,postflopBetPurposeProfile,postflopBetPurposeProfileText,postflopRaisePlanProfile,postflopRaisePlanProfileText,postflopBarrelPlanProfile,postflopBarrelPlanProfileText,postflopDefensePlanProfile,postflopDefensePlanProfileText,postflopCallFuturePlanProfile,postflopCallFuturePlanProfileText,standardBetSizePct,preflopOpenQuickOptions,raiseOverBetQuickOptions,postflopQuickBetOptions,aiSizingTellAdjustedTarget,aiSizingTellLabel,opponentReadSizingTellLabel,opponentNoteText,setOpponentNote,renderOpponentNotesPanel,lessonWeaknessRows,renderLessonWeaknessRanking,recordPrimaryLessonStats,adaptiveScenarioWeightPlan,adaptiveScenarioEnabled,setAdaptiveScenarioEnabled,_pickScenarioCat,preflopDrillBuildSpot,preflopDrillEvaluateSpot,startPreflopDrillSession,answerPreflopDrill,finishPreflopDrillSession,liveCashRakeConfigFromValue,liveCashTableProfileFromValue,liveCashRangeProfile,liveCashSpotProfile,liveCashSpotProfileText,liveCashSprProfile,liveCashSprProfileText,liveCashInitiativeProfile,liveCashInitiativeProfileText,liveCashReraisedPotProfile,liveCashReraisedPotProfileText,liveCashMultiwayProfile,liveCashMultiwayProfileText,liveCashRiverDecisionProfile,liveCashRiverDecisionProfileText,tournamentRangeProfile,tournamentFinalTableProfile,tournamentFinalTableStackRole,tournamentFinalTableCollisionProfile,tournamentFinalTableRangeProfile,tournamentFinalTableRangeProfileText,tournamentFinalTablePostflopProfile,tournamentFinalTablePostflopProfileText,tournamentFinalTableLearningPoint,tournamentFinalTableLearningPointText,tournamentHeadsUpProfile};
+Object.assign(window.__fishTankDebug,{buildReplayGameFromHand,startReplayFromDecision,findReplayHand});
 // [Codex fix 2026-06-05] Query-gated regression output for browser verification without exposing debug UI during normal play.
 if(new URLSearchParams(location.search).has('codex_regression')){
   setTimeout(function(){
