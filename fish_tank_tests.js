@@ -55,7 +55,7 @@ function loadSandbox(htmlPath) {
   if (!m) throw new Error('<script> が見つかりません');
   // const/class はvmグローバルに乗らないため、末尾でブリッジ注入
   const code = m[1] +
-    "\n;try{Object.assign(globalThis,{HandEval,Deck,Card,HAND_RANK_169,HAND_COMBO_FRAC,HAND_STRENGTH,RANK_VAL,RANKS,SUITS,GameEngine,AI_PROFILES,regressionPlayer,adaptiveScenarioWeightPlan,_pickScenarioCat,preflopDrillBuildSpot,preflopDrillEvaluateSpot});}catch(e){globalThis.__bridgeErr=e.message;}\n";
+    "\n;try{Object.assign(globalThis,{HandEval,Deck,Card,HAND_RANK_169,HAND_COMBO_FRAC,HAND_STRENGTH,RANK_VAL,RANKS,SUITS,GameEngine,AI_PROFILES,regressionPlayer,adaptiveScenarioWeightPlan,_pickScenarioCat,preflopDrillBuildSpot,preflopDrillEvaluateSpot,preflopChartLookup,preflopPositionBucketInfo});}catch(e){globalThis.__bridgeErr=e.message;}\n";
   const anyNode = new Proxy(function () {}, {
     get(t, p) {
       if (p === 'style') return {};
@@ -358,7 +358,7 @@ function runModeChecks(s) {
 
 function runPreflopModeChecks(s) {
   if (typeof s.liveCashRangeProfile !== 'function') { console.log('[プリフロップモード検証] スキップ'); return true; }
-  const { liveCashRangeProfile, preflopChartLookup, regressionCards: Cs, setRangeMode } = s;
+  const { liveCashRangeProfile, preflopChartLookup, preflopPositionBucketInfo, regressionCards: Cs, setRangeMode } = s;
   const players = Array.from({ length: 6 }, (_, i) => ({ active: true, isHuman: i === 0 }));
   const players9 = Array.from({ length: 9 }, (_, i) => ({ active: true, isHuman: i === 0 }));
   function prof(hc, pos, act, caller) {
@@ -408,6 +408,15 @@ function runPreflopModeChecks(s) {
   expectOpen('MP', ['Qh', 'Jh'], ['good'], '9max MP QJs open: chart in');
   if (typeof preflopChartLookup === 'function') {
     const chart = (kind, ht, stackBB) => preflopChartLookup(kind, ht, 'BTN', 6, { stackBB, openerPos: 'CO' });
+    const openChart = (ht, pos, totalP) => preflopChartLookup('open', ht, pos, totalP || 9, {});
+    const threeBetChart = (kind) => preflopChartLookup(kind, 'A5s', 'SB', 6, { openerPos: 'BTN', polar: true });
+    ok('9max position bucket: UTG+1 is EP', openChart('KTo', 'UTG+1', 9).positionBucket === 'EP', JSON.stringify(openChart('KTo', 'UTG+1', 9)));
+    ok('9max position bucket: MP is MP', openChart('55', 'MP', 9).positionBucket === 'MP', JSON.stringify(openChart('55', 'MP', 9)));
+    ok('9max position bucket: HJ is not MP', openChart('KJo', 'HJ', 9).positionBucket === 'HJ', JSON.stringify(openChart('KJo', 'HJ', 9)));
+    ok('3bet alias: 3bet and threeBet use the same chart', threeBetChart('3bet').status === threeBetChart('threeBet').status && threeBetChart('3bet').chartBucket === threeBetChart('threeBet').chartBucket, JSON.stringify({ a: threeBetChart('3bet'), b: threeBetChart('threeBet') }));
+    if (typeof preflopPositionBucketInfo === 'function') {
+      ok('position bucket helper exposes full-ring label', preflopPositionBucketInfo('UTG+1', 9).label.indexOf('9max') >= 0 && preflopPositionBucketInfo('UTG+1', 9).group === 'early', JSON.stringify(preflopPositionBucketInfo('UTG+1', 9)));
+    }
     ok('vs3bet 100BB QQ: continue pure', chart('vs3bet', 'QQ', 100).status === 'pure');
     ok('vs3bet 100BB AJo: fold out', chart('vs3bet', 'AJo', 100).status === 'out');
     ok('vs3bet 50BB TT: mixed continue', chart('vs3bet', 'TT', 50).status === 'mix');

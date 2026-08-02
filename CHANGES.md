@@ -6,6 +6,12 @@
 
 ---
 
+## 2026-08-02 Phase 5: 9maxプリフロップ位置バケットの明示化
+- `preflopPositionBucketInfo()` を追加し、9max/8max の UTG/UTG+1 を EP、MP/LJ を MP、HJ/CO/BTN を別バケットとして明示的に扱えるようにした。
+- `preflopChartLookup()` の返却値に `positionBucket` / `positionBucketLabel` / `positionGroup` / `chartBucket` を追加し、レビュー・監査・テストで「どの位置表を参照したか」を追えるようにした。
+- 呼び出し側で混在していた `3bet` と `threeBet` を同じ表に正規化し、一部の3BET参照がレンジ外扱いになる危険を減らした。
+- プリフロップ検証に、9max UTG+1/MP/HJ のバケット確認と `3bet` エイリアス確認を追加した。
+
 ## 2026-07-22 追記
 
 - セッション終了時の「次の1ハンドで見ること」の回収コメントをモード別に分岐。

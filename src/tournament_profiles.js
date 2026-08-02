@@ -1260,21 +1260,30 @@ function preflopRangeTokenMatch(token,ht){
 function preflopRangeMatch(range,ht){
   return preflopRangeTokens(range).some(function(t){return preflopRangeTokenMatch(t,ht);});
 }
-function preflopPositionBucket(pos,totalP){
-  if(['SB','BB'].includes(pos))return pos;
-  if(totalP>=8){
-    if(['UTG','UTG+1'].includes(pos))return'EP';
-    if(['MP','LJ'].includes(pos))return'MP';
-    if(pos==='HJ')return'HJ';
-    if(pos==='CO')return'CO';
-    if(pos==='BTN')return'BTN';
+function preflopPositionBucketInfo(pos,totalP){
+  // [Codex fix 2026-08-02] Full-ring ranges must not silently reuse 6max labels.
+  const players=Math.max(2,Math.min(9,Number(totalP)||6));
+  const p=pos||'MP';
+  let bucket='MP',group='middle',label=p;
+  if(['SB','BB'].includes(p)){
+    bucket=p;group='blind';label=p;
+  }else if(players>=8){
+    if(['UTG','UTG+1'].includes(p)){bucket='EP';group='early';label=players+'max EP';}
+    else if(['MP','LJ'].includes(p)){bucket='MP';group='middle';label=players+'max MP/LJ';}
+    else if(p==='HJ'){bucket='HJ';group='late';label=players+'max HJ';}
+    else if(p==='CO'){bucket='CO';group='late';label=players+'max CO';}
+    else if(p==='BTN'){bucket='BTN';group='button';label=players+'max BTN';}
+  }else{
+    if(p==='UTG'){bucket='EP';group='early';label=players+'max UTG';}
+    else if(['UTG+1','MP','LJ'].includes(p)){bucket='MP';group='middle';label=players+'max MP';}
+    else if(p==='HJ'){bucket='HJ';group='late';label=players+'max HJ';}
+    else if(p==='CO'){bucket='CO';group='late';label=players+'max CO';}
+    else if(p==='BTN'){bucket='BTN';group='button';label=players+'max BTN';}
   }
-  if(pos==='UTG')return'EP';
-  if(pos==='MP'||pos==='LJ'||pos==='UTG+1')return'MP';
-  if(pos==='HJ')return'HJ';
-  if(pos==='CO')return'CO';
-  if(pos==='BTN')return'BTN';
-  return'MP';
+  return{bucket,group,label,players,pos:p,fullRing:players>=8};
+}
+function preflopPositionBucket(pos,totalP){
+  return preflopPositionBucketInfo(pos,totalP).bucket;
 }
 function preflopStackBucket(stackBB){
   const bb=Number(stackBB)||100;
@@ -1285,38 +1294,49 @@ function preflopStackBucket(stackBB){
 }
 function preflopChartLookup(kind,ht,pos,totalP,opts){
   opts=opts||{};
+  kind=kind==='3bet'?'threeBet':kind;
   let chart=null,label='';
+  const posInfo=preflopPositionBucketInfo(pos,totalP);
+  let chartBucket='';
   if(kind==='open'){
-    const bucket=preflopPositionBucket(pos,totalP);
+    const bucket=posInfo.bucket;
+    chartBucket=bucket;
     chart=PREFLOP_RANGE_CHARTS.open[bucket]||PREFLOP_RANGE_CHARTS.open.MP;
-    label=bucket+' open';
+    label=posInfo.label+' open';
   }else if(kind==='flat'){
     if(pos==='BB'){
-      const ep=['UTG','UTG+1','MP'].includes(opts.openerPos||'');
+      const openerInfo=preflopPositionBucketInfo(opts.openerPos||'',totalP);
+      const ep=openerInfo.group==='early'||(openerInfo.fullRing&&openerInfo.bucket==='MP');
+      chartBucket=ep?'BB_EP':'BB_LATE';
       chart=PREFLOP_RANGE_CHARTS.flatVsOpen[ep?'BB_EP':'BB_LATE'];
       label=ep?'BB defend vs early':'BB defend vs late';
     }else if(pos==='SB'){
+      chartBucket='SB';
       chart=PREFLOP_RANGE_CHARTS.flatVsOpen.SB;label='SB flat';
     }else{
       const ip=['CO','BTN'].includes(pos);
+      chartBucket=ip?'IP':'OOP';
       chart=PREFLOP_RANGE_CHARTS.flatVsOpen[ip?'IP':'OOP'];
       label=ip?'IP flat':'OOP flat';
     }
   }else if(kind==='threeBet'){
     const steal=['CO','BTN','SB'].includes(opts.openerPos||'');
     const blind=['SB','BB'].includes(pos);
-    chart=PREFLOP_RANGE_CHARTS.threeBet[(blind&&steal)?'blindVsSteal':(opts.polar?'polar':'value')];
+    chartBucket=(blind&&steal)?'blindVsSteal':(opts.polar?'polar':'value');
+    chart=PREFLOP_RANGE_CHARTS.threeBet[chartBucket];
     label=(blind&&steal)?'blind vs steal 3bet':opts.polar?'polar 3bet':'value 3bet';
   }else if(kind==='vs3bet'){
     const stackBucket=preflopStackBucket(opts.stackBB);
+    chartBucket=stackBucket;
     chart=PREFLOP_RANGE_CHARTS.vs3bet[stackBucket];
     label=stackBucket+' vs 3bet';
   }else if(kind==='vs4bet'){
     const stackBucket=preflopStackBucket(opts.stackBB);
+    chartBucket=stackBucket;
     chart=PREFLOP_RANGE_CHARTS.vs4bet[stackBucket];
     label=stackBucket+' vs 4bet';
   }
-  if(!chart)return{bucket:'',label:'',status:'out',mix:'Fold 100%',pure:false,mixCandidate:false};
+  if(!chart)return{bucket:'',chartBucket:'',positionBucket:posInfo.bucket,positionBucketLabel:posInfo.label,positionGroup:posInfo.group,label:'',status:'out',mix:'Fold 100%',pure:false,mixCandidate:false};
   const pure=preflopRangeMatch(chart.pure,ht);
   const mixCandidate=!pure&&preflopRangeMatch(chart.mix,ht);
   let status=pure?'pure':mixCandidate?'mix':'out';
@@ -1326,7 +1346,7 @@ function preflopChartLookup(kind,ht,pos,totalP,opts){
     :status==='mix'
       ?(actionJP+' 20-60% / Foldまたは別ライン 40-80%')
       :(kind==='flat'?'Fold 75-100% / Call 0-25%':kind==='threeBet'?'Fold/Call 75-100% / 3bet 0-25%':(kind==='vs3bet'||kind==='vs4bet')?'Fold 75-100% / Continue 0-25%':'Fold 75-100% / Open 0-25%');
-  return{bucket:label,label,status,mix,pure,mixCandidate,pureRange:chart.pure,mixRange:chart.mix};
+  return{bucket:label,chartBucket,positionBucket:posInfo.bucket,positionBucketLabel:posInfo.label,positionGroup:posInfo.group,label,status,mix,pure,mixCandidate,pureRange:chart.pure,mixRange:chart.mix};
 }
 // [Codex fix 2026-06-04] 序盤は「深いから何でも参加」ではなく、ドミネートリスクと実現率で参加レンジを健全化する。
 function tournamentEarlyProfile(ctx,d,holeCards,stackBB,pos,totalPlayers,preCtx){
