@@ -10082,6 +10082,17 @@ function preflopDrillCategory(spot){
   if(spot.type==='vs3bet'||spot.type==='squeeze')return'ring-reraised-pot';
   return'preflop-entry';
 }
+function preflopDrillRangeBasisText(chart,shortOnly){
+  // [Codex fix 2026-08-02] 即答ドリルでも通常レビューと同じ参照レンジを見せる。
+  if(!chart||!chart.positionBucketLabel)return'';
+  const basis=chart.positionBucketLabel+' / '+(chart.chartBucket||chart.label||'range');
+  if(/[縺繝蛻]/.test(basis))return'';
+  if(shortOnly)return basis;
+  const fullRing=/^[89]max/.test(chart.positionBucketLabel||'');
+  return fullRing
+    ?'参照レンジ: '+basis+'。人数が多い卓ほど、早いポジションは狭く見ます。'
+    :'参照レンジ: '+basis+'。';
+}
 function preflopDrillBuildSpot(opts){
   opts=opts||{};
   const base=opts.base||PREFLOP_DRILL_SPOTS[Math.floor(Math.random()*PREFLOP_DRILL_SPOTS.length)]||PREFLOP_DRILL_SPOTS[0];
@@ -10090,6 +10101,7 @@ function preflopDrillBuildSpot(opts){
   const stackBB=opts.stackBB||100;
   const ht=opts.ht||preflopDrillPickHandType();
   const chart=preflopChartLookup(base.kind,ht,pos,totalP,{openerPos:opts.openerPos||base.openerPos,stackBB:stackBB,polar:base.type==='squeeze'});
+  const rangeBasis=preflopDrillRangeBasisText(chart,true);
   const hand=preflopDrillHandFromType(ht);
   const actionLine=base.type==='open'
     ?pos+'で未参加からアクション'
@@ -10098,13 +10110,14 @@ function preflopDrillBuildSpot(opts){
       :base.type==='vs3bet'
         ?pos+'でオープン後、3BETを受けた場面'
         :(base.openerPos||'CO')+'オープン＋1コールに'+pos+'で対応';
-  return{type:base.type,label:base.label,kind:base.kind,pos,totalP,stackBB,ht,hand,chart,actionLine,category:preflopDrillCategory(base)};
+  return{type:base.type,label:base.label,kind:base.kind,pos,totalP,stackBB,ht,hand,chart,rangeBasis,actionLine,category:preflopDrillCategory(base)};
 }
 function preflopDrillEvaluateSpot(spot,action){
   const chart=spot&&spot.chart||null;
   const accepted=preflopDrillAcceptedActions(spot,chart);
   const ok=accepted.includes(action);
   const primary=preflopDrillPrimaryAction(spot,chart);
+  const basis=preflopDrillRangeBasisText(chart,false);
   const mix=(chart&&chart.mix)||'参照頻度なし';
   const line=chart&&chart.status==='mix'
     ?'複数ラインが成立します。頻度の目安は '+mix+' です。'
@@ -10118,7 +10131,7 @@ function preflopDrillEvaluateSpot(spot,action){
       :spot.type==='vs3bet'
         ?'3BETを受けた後は、最初のオープンレンジではなくvs3BETレンジで見直します。'
         :'スクイーズはフォールドエクイティと相手の継続レンジが必要です。弱いコールで済ませない場面です。';
-  return{ok,accepted,primary,mix,quality:ok?'good':'bad',category:spot.category,text:(ok?'良い判断です。':'見直したい判断です。')+' '+line+' '+reason};
+  return{ok,accepted,primary,mix,rangeBasis:basis,quality:ok?'good':'bad',category:spot.category,text:(ok?'良い判断です。':'見直したい判断です。')+' '+line+' '+(basis?basis+' ':'')+reason};
 }
 function renderPreflopDrill(){
   const panel=$('preflop-drill-panel');
@@ -10126,7 +10139,7 @@ function renderPreflopDrill(){
   panel.classList.remove('hidden');
   const spot=preflopDrillState.current;
   $('pf-drill-progress').textContent=Math.min(preflopDrillState.index+1,PREFLOP_DRILL_TOTAL)+' / '+PREFLOP_DRILL_TOTAL;
-  $('pf-drill-spot').textContent=spot.actionLine+' / '+spot.totalP+'人 / '+spot.stackBB+'BB / ハンド '+spot.ht;
+  $('pf-drill-spot').textContent=spot.actionLine+' / '+spot.totalP+'人 / '+spot.stackBB+'BB / ハンド '+spot.ht+(spot.rangeBasis?' / '+spot.rangeBasis:'');
   $('pf-drill-hand').innerHTML=spot.hand.map(function(c){return cardHTML(c,true);}).join('');
   $('pf-drill-result').className='pf-drill-result';
   $('pf-drill-result').textContent='直感で選んでください。判定後にレンジ頻度を表示します。';

@@ -423,6 +423,11 @@ function runPreflopModeChecks(s) {
       const txt = s.coachReviewText({ street: 'preflop', action: 'raise', quality: 'bad', liveCashSpotProfile: p, comment: '', rec: 'フォールド' });
       ok('preflop review explains full-ring range bucket', p && p.rangeBasisFullRing && /参照レンジは9max EP/.test(txt), 'basis=' + (p && p.rangeBasis) + ' txt=' + txt);
     }
+    if (typeof preflopDrillBuildSpot === 'function' && typeof preflopDrillEvaluateSpot === 'function') {
+      const drillSpot = preflopDrillBuildSpot({ base: { type: 'open', kind: 'open', label: 'open', positions: ['UTG+1'] }, pos: 'UTG+1', ht: 'KTo', totalP: 9, stackBB: 100 });
+      const drillEval = preflopDrillEvaluateSpot(drillSpot, 'raise');
+      ok('preflop drill shows full-ring range bucket', drillSpot && /9max EP/.test(drillSpot.rangeBasis || '') && /参照レンジ: 9max EP/.test(drillEval.text || ''), 'spot=' + JSON.stringify(drillSpot && { rangeBasis: drillSpot.rangeBasis }) + ' text=' + (drillEval && drillEval.text));
+    }
     ok('vs3bet 100BB QQ: continue pure', chart('vs3bet', 'QQ', 100).status === 'pure');
     ok('vs3bet 100BB AJo: fold out', chart('vs3bet', 'AJo', 100).status === 'out');
     ok('vs3bet 50BB TT: mixed continue', chart('vs3bet', 'TT', 50).status === 'mix');
