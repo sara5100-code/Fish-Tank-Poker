@@ -343,7 +343,11 @@ function liveCashSpotProfile(hr,d,holeCards,role,tex,nOpponents,lineContext){
     }
   }
   if(!lane)return null;
-  return{lane,label,axis,verdict,severity,policy,risk,suggest,mix,sizePct,position:pos,multiway,limpIso,is3BetPot,onePair,strongOnePair,dynamic,villainBetsBefore,rakeActive:!!(rangeProfileForReturn&&rangeProfileForReturn.rakeActive),capPercent:rangeProfileForReturn?rangeProfileForReturn.capPercent:null,stackBB:stackBBPre,callStackPct:callStackPctPre};
+  const rangeChart=rangeProfileForReturn&&rangeProfileForReturn.chart?rangeProfileForReturn.chart:null;
+  const rangeBasis=rangeChart&&rangeChart.positionBucketLabel
+    ?(rangeChart.positionBucketLabel+' / '+(rangeChart.chartBucket||rangeChart.label||'range'))
+    :'';
+  return{lane,label,axis,verdict,severity,policy,risk,suggest,mix,sizePct,position:pos,multiway,limpIso,is3BetPot,onePair,strongOnePair,dynamic,villainBetsBefore,rakeActive:!!(rangeProfileForReturn&&rangeProfileForReturn.rakeActive),capPercent:rangeProfileForReturn?rangeProfileForReturn.capPercent:null,stackBB:stackBBPre,callStackPct:callStackPctPre,rangeBasis,rangeBasisFullRing:!!(rangeChart&&/^[89]max/.test(rangeChart.positionBucketLabel||'')),rangeChartBucket:rangeChart?rangeChart.chartBucket:''};
 }
 function liveCashSpotProfileText(profile){
   if(!profile)return'';

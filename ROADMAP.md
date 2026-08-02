@@ -231,6 +231,7 @@ GTO モードの AI にはテルを入れない（均衡挙動を守る）。
 追記 2026-07-06: 4BETコール評価と5BET評価を `vs4bet` 表へ接続した。コメントと `strategyMix` にスタック帯別の参照レンジを出し、100BB級のJJ 5BETをレンジ外寄りとして扱う回帰テストを追加した。
 追記 2026-07-12: 3BETを受けた後のコール/フォールド/4BET評価を `vs3bet` 表へ接続した。プリフロップの `threeBetResponse` レーンも追加し、3BET対応を単なる参加レンジではなく、3BET/4BETポット主題として扱えるようにした。
 追記 2026-08-02: `preflopPositionBucketInfo` を追加し、9max/8max の UTG/UTG+1=EP、MP/LJ=MP、HJ/CO/BTN=個別バケットを返すようにした。`preflopChartLookup` は `positionBucket` / `positionBucketLabel` / `chartBucket` を返し、`3bet` と `threeBet` の呼び出し名も同じ表へ正規化した。9max位置バケットと3BETエイリアスの検証を追加済み。次はこのメタをレビュー文の短い説明やプリフロップ即答ドリルの出題表示へ自然に出すかを判断する。
+追記 2026-08-02: 上記メタをリングのプリフロップレビュー本文へ接続した。フルリングでは「参照レンジは9max EP基準です」のように、詳細データを開かなくても早いポジションの厳しさが分かる一文を出す。次はプリフロップ即答ドリル側の出題・解説にも同じ表記を出すか、またはPhase 5-3のレンジ更新説明へ進む。
 
 ### 5-2. 代表ボード辞書（BLUEPRINT Phase 3）
 `boardTextureProfile`（分類器）の上に、9クラスの代表ボード辞書（A-high dry / K-high dry / paired / monotone / two-tone connected / low connected / broadway / 4-flush river / paired river）を定義する。

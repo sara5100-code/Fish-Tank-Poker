@@ -575,6 +575,14 @@ function cleanPreflopRecText(rec){
   rec=rec.replace(/^推奨[:：]\s*/,'').trim();
   return rec;
 }
+function preflopRangeBasisText(p){
+  if(!p||!p.rangeBasis)return'';
+  const basis=String(p.rangeBasis||'').replace(/\s*\/\s*/g,'の');
+  if(!basis||/[縺繝蛻]/.test(basis))return'';
+  if(p.rangeBasisFullRing)return'参照レンジは'+basis+'基準です。人数が多い卓ほど、早いポジションはかなり狭く見ます。';
+  if(p.severity==='bad'||p.severity==='border')return'参照レンジは'+basis+'基準です。';
+  return'';
+}
 function preflopCoachSummaryText(ev,action,rec){
   if(!ev||ev.street!=='preflop'||!ev.liveCashSpotProfile)return'';
   const p=ev.liveCashSpotProfile;
@@ -589,6 +597,7 @@ function preflopCoachSummaryText(ev,action,rec){
   const isLimp=/limp|Limp|リンプ/.test(lane+' '+label+' '+comment);
   const recText=cleanPreflopRecText(rec);
   const mixText=readableStrategyMixText(ev);
+  const rangeBasisText=preflopRangeBasisText(p);
   const rakeText=p.rakeActive?'レーキがある卓では、小さいコールやリンプで作る薄い利益が削られるため、境界の手は少しフォールド寄りにします。':'';
   let head='';
   let reason='';
@@ -624,7 +633,7 @@ function preflopCoachSummaryText(ev,action,rec){
     else reason='GTOでは頻度が割れることがあります。実戦では相手の広さ、後ろのプレイヤー、サイズを見て寄せます。';
     advice=recText?('今回の目安は '+recText+' です。'):'相手傾向で頻度を寄せる場面です。';
   }
-  return [head,reason,rakeText,mixText,advice].filter(Boolean).join(' ').replace(/\s+/g,' ').trim();
+  return [head,reason,rangeBasisText,rakeText,mixText,advice].filter(Boolean).join(' ').replace(/\s+/g,' ').trim();
 }
 function recommendationClose(action,quality,rec,hasSuggest){
   rec=naturalRecommendationText(rec);

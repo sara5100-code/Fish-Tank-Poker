@@ -55,7 +55,7 @@ function loadSandbox(htmlPath) {
   if (!m) throw new Error('<script> が見つかりません');
   // const/class はvmグローバルに乗らないため、末尾でブリッジ注入
   const code = m[1] +
-    "\n;try{Object.assign(globalThis,{HandEval,Deck,Card,HAND_RANK_169,HAND_COMBO_FRAC,HAND_STRENGTH,RANK_VAL,RANKS,SUITS,GameEngine,AI_PROFILES,regressionPlayer,adaptiveScenarioWeightPlan,_pickScenarioCat,preflopDrillBuildSpot,preflopDrillEvaluateSpot,preflopChartLookup,preflopPositionBucketInfo});}catch(e){globalThis.__bridgeErr=e.message;}\n";
+    "\n;try{Object.assign(globalThis,{HandEval,Deck,Card,HAND_RANK_169,HAND_COMBO_FRAC,HAND_STRENGTH,RANK_VAL,RANKS,SUITS,GameEngine,AI_PROFILES,regressionPlayer,adaptiveScenarioWeightPlan,_pickScenarioCat,preflopDrillBuildSpot,preflopDrillEvaluateSpot,preflopChartLookup,preflopPositionBucketInfo,liveCashSpotProfile,coachReviewText});}catch(e){globalThis.__bridgeErr=e.message;}\n";
   const anyNode = new Proxy(function () {}, {
     get(t, p) {
       if (p === 'style') return {};
@@ -416,6 +416,12 @@ function runPreflopModeChecks(s) {
     ok('3bet alias: 3bet and threeBet use the same chart', threeBetChart('3bet').status === threeBetChart('threeBet').status && threeBetChart('3bet').chartBucket === threeBetChart('threeBet').chartBucket, JSON.stringify({ a: threeBetChart('3bet'), b: threeBetChart('threeBet') }));
     if (typeof preflopPositionBucketInfo === 'function') {
       ok('position bucket helper exposes full-ring label', preflopPositionBucketInfo('UTG+1', 9).label.indexOf('9max') >= 0 && preflopPositionBucketInfo('UTG+1', 9).group === 'early', JSON.stringify(preflopPositionBucketInfo('UTG+1', 9)));
+    }
+    if (typeof s.liveCashSpotProfile === 'function' && typeof s.coachReviewText === 'function') {
+      const d = { street: 'preflop', action: 'raise', amount: 500, pot: 300, toCall: 200, facingRaise: false, position: 'UTG+1', isHuman: true, playerIdx: 0, playerChipsBefore: 10000 };
+      const p = s.liveCashSpotProfile({ bigBlind: 200, players: players9, decisions: [d], community: [] }, d, Cs(['Kh', 'Td']), null, null, 1, 'Open');
+      const txt = s.coachReviewText({ street: 'preflop', action: 'raise', quality: 'bad', liveCashSpotProfile: p, comment: '', rec: 'フォールド' });
+      ok('preflop review explains full-ring range bucket', p && p.rangeBasisFullRing && /参照レンジは9max EP/.test(txt), 'basis=' + (p && p.rangeBasis) + ' txt=' + txt);
     }
     ok('vs3bet 100BB QQ: continue pure', chart('vs3bet', 'QQ', 100).status === 'pure');
     ok('vs3bet 100BB AJo: fold out', chart('vs3bet', 'AJo', 100).status === 'out');
