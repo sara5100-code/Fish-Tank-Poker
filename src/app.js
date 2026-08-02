@@ -9042,6 +9042,30 @@ function runFishTankRegressionTests(){
     return /複数ストリート/.test(txt)&&/ブラフ不足/.test(txt)&&/70%pot/.test(txt)&&/境界/.test(txt);
   });
 
+  add('レンジ更新説明: ターンコール後は相手の空振りを少し減らす',function(){
+    const ev={
+      street:'river',
+      action:'bet',
+      quality:'border',
+      boardTextureProfile:{dynamic:true,flushThreat:true},
+      rangeActionUpdateProfile:{street:'river',lane:'bet',sizePct:55,rangeState:'turn_call_dense',pressure:1,valueDensityPct:68,bluffCandidatePct:19,severity:'border'}
+    };
+    const txt=naturalRangeActionUpdateText(ev);
+    return /ターンでこちらのベットにコール/.test(txt)&&/完全な空振りは少し減/.test(txt)&&/バリュー候補が約68%/.test(txt)&&/ブラフ候補が約19%/.test(txt)&&!/ドローが残る/.test(txt);
+  });
+
+  add('レンジ更新説明: チェックキャップは小中サイズの理由まで言う',function(){
+    const ev={
+      street:'flop',
+      action:'bet',
+      quality:'good',
+      boardTextureProfile:{primary:'dry'},
+      rangeActionUpdateProfile:{street:'flop',lane:'bet',sizePct:33,rangeState:'capped',pressure:0,valueDensityPct:28,bluffCandidatePct:44,severity:'good'}
+    };
+    const txt=naturalRangeActionUpdateText(ev);
+    return /強いベット候補の一部は少し減/.test(txt)&&/小〜中サイズ/.test(txt)&&/バリュー候補が約28%/.test(txt)&&/自然/.test(txt);
+  });
+
   add('リバー文言: 未確定ドローが残ると言わない',function(){
     const board=boardTextureProfile(regressionCards(['Th','9h','4d','8c','2s']),'river',regressionCards(['Th','9h','4d','8c']));
     const boardText=boardTextureProfileText(board);
