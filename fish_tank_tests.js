@@ -463,7 +463,10 @@ function runAiPreflopModeChecks(s) {
     setRangeMode(mode);
     const g = createAuditRingGame();
     const v = g.players[1];
-    g.dealerIndex = v.seatIndex;
+    const n = g.players.length;
+    const relByPos = { BTN: 0, SB: 1, BB: 2, UTG: 3, MP: 4, CO: 5 };
+    const rel = relByPos[pos || 'BTN'];
+    g.dealerIndex = ((v.seatIndex - (rel == null ? 0 : rel)) % n + n) % n;
     g.bigBlind = 5;
     g.currentBet = 5;
     g.pot = 7;
@@ -492,6 +495,10 @@ function runAiPreflopModeChecks(s) {
   const OL = openRates('live', ['Jc', '6c'], N, 'BTN'), OG = openRates('gto', ['Jc', '6c'], N, 'BTN');
   ok('AI open: GTO opens BTN mix hands more than Live', OG.open > OL.open + 0.08, 'live=' + OL.open.toFixed(2) + ' gto=' + OG.open.toFixed(2));
   ok('AI open: Live keeps more marginal BTN hands folded', OL.fold > OG.fold + 0.08, 'live=' + OL.fold.toFixed(2) + ' gto=' + OG.fold.toFixed(2));
+  const EQL = openRates('live', ['Qh', 'Jh'], N, 'UTG'), EQG = openRates('gto', ['Qh', 'Jh'], N, 'UTG');
+  ok('AI open: GTO mixes EP QJs more than Live', EQG.open > EQL.open + 0.08, 'live=' + EQL.open.toFixed(2) + ' gto=' + EQG.open.toFixed(2));
+  const HJL = openRates('live', ['Kh', 'Jd'], N, 'MP'), HJG = openRates('gto', ['Kh', 'Jd'], N, 'MP');
+  ok('AI open: Live keeps MP offsuit broadway tighter than GTO', HJL.fold > HJG.fold + 0.06, 'live=' + HJL.fold.toFixed(2) + ' gto=' + HJG.fold.toFixed(2));
   setRangeMode('live');
   console.log(`\n[AIプリフロップ検証] ${pass} pass / ${fail} fail`);
   fails.forEach(x => console.log('  FAIL:', x));
