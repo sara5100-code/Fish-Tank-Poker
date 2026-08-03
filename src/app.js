@@ -8346,6 +8346,14 @@ function runFishTankRegressionTests(){
     return !!(dryPlan&&dryPlan.pct===33&&monoPlan&&monoPlan.pct===33&&connStrong&&connStrong.pct>=75&&connOnePair&&connOnePair.pct<=50);
   });
 
+  add('GTO/Liveサイズ: コール多め相手にはLiveの強バリューを取り切り寄りにする',function(){
+    const dry=boardTextureProfile(regressionCards(['Kd','8c','2s']),'flop',[]);
+    const role={role:'strong'};
+    const gtoPlan=boardTextureSizePlan(100,dry,role,{street:'flop',isPfr:true,nOpponents:1,mode:'gto'});
+    const livePlan=boardTextureSizePlan(100,dry,role,{street:'flop',isPfr:true,nOpponents:1,mode:'live',opponentTypeProfile:{label:'コール多め',valueLoosen:true}});
+    return !!(gtoPlan&&livePlan&&gtoPlan.pct===33&&livePlan.pct===75&&/取り切り/.test(livePlan.reason));
+  });
+
   add('GTO変化カード: フラッシュ完成やボードペア化で非ナッツ大サイズを重く見る',function(){
     const flush=boardTextureProfile(regressionCards(['Kh','7h','2c','4h']),'turn',regressionCards(['Kh','7h','2c']));
     const pair=boardTextureProfile(regressionCards(['Qd','8c','2s','8h']),'turn',regressionCards(['Qd','8c','2s']));
@@ -8832,6 +8840,24 @@ function runFishTankRegressionTests(){
     const ev=humanEval(analyzeHand(hr),function(e){return e.street==='flop'&&(e.action==='raise'||e.action==='bet');});
     const txt=coachReviewText(ev);
     return !!(/コールしてほしい相手/.test(txt)&&/降ろしたい相手/.test(txt)&&/今回のサイズは80%pot/.test(txt)&&/弱い手が降り|強い手だけ/.test(txt)&&txt.length<420);
+  });
+
+  add('ベット説明: ボード別サイズ理由を本文に短く出す',function(){
+    const hr=regressionHand({
+      heroHole:['Kc','Qc'],
+      villainHole:['7h','7d'],
+      board:['Ad','9c','3s'],
+      decisions:[
+        regressionDecision({street:'preflop',action:'raise',amount:15,pot:7,toCall:0,facingRaise:false,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:500}),
+        regressionDecision({street:'preflop',action:'call',amount:10,pot:22,toCall:10,potOdds:10/32,facingRaise:true,position:'BB',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:500}),
+        regressionDecision({street:'flop',action:'check',amount:0,pot:100,toCall:0,facingRaise:false,position:'BB',playerName:'villain',isHuman:false,playerIdx:1,playerChipsBefore:490}),
+        regressionDecision({street:'flop',action:'bet',amount:33,pot:100,toCall:0,facingRaise:false,position:'CO',playerName:'あなた',isHuman:true,playerIdx:0,playerChipsBefore:485})
+      ],
+      pot:133
+    });
+    const ev=humanEval(analyzeHand(hr),function(e){return e.street==='flop'&&(e.action==='raise'||e.action==='bet');});
+    const txt=coachReviewText(ev);
+    return !!(ev&&ev.boardTextureSizeProfile&&ev.boardTextureSizeProfile.pct===33&&/サイズの理由/.test(txt)&&/小さく広く|小さめ高頻度|ドライボード/.test(txt)&&txt.length<430);
   });
 
   add('ベット説明: セミブラフはフォールド対象と改善価値を本文に出す',function(){

@@ -268,13 +268,19 @@ function naturalPostflopBetPurposeText(ev){
   else if(p.lane==='rangeCbet')purposeText='レンジ全体の優位を小さく広く使うレンジCB';
   else purposeText='相手が十分に降りるかを確認したいブラフ';
   const advice=naturalRecommendationText(p.suggest||'');
-  const opponentNote=p.opponentType&&p.opponentType.postflopNote&&p.opponentType.label!=='標準的'?p.opponentType.postflopNote:'';
+  const opponentNote=p.opponentType&&p.opponentType.label&&p.opponentType.label!=='標準的'
+    ?(p.opponentType.postflopNote||('相手は'+p.opponentType.label+'寄りなので、サイズと頻度を相手に合わせます。'))
+    :'';
+  const sizeProfile=ev.boardTextureSizeProfile||null;
+  const sizeReason=sizeProfile&&sizeProfile.reason
+    ?'サイズの理由は、'+String(sizeProfile.reason).replace(/です。?$/,'です。')
+    :'';
   const core=streetLead+'、このベットは'+purposeText+'で、コールしてほしい相手は「'+target+'」、降ろしたい相手は「'+foldOut+'」、今回のサイズは'+actual+'、目安は'+rec+'です。';
   const bluff=p.bluffCandidate||null;
   const bluffNote=bluff
     ?'ブラフ候補として見ると、これは「'+bluff.kind+'」です。'+bluff.policy+' 頻度は'+bluff.frequency+'、サイズは'+bluff.sizeBand+'が目安です。'
     :'';
-  return [core,bluffNote,opponentNote,sizeNote,advice].filter(Boolean).join(' ');
+  return [core,opponentNote,sizeReason,bluffNote,sizeNote,advice].filter(Boolean).join(' ');
 }
 // [Codex fix 2026-06-20] ベットされた側の説明を、必要勝率・勝っている想定・相手ブラフ量に整理する。
 function riverFacingBlockerText(rv,required,rau){

@@ -570,7 +570,8 @@ function postflopBetPurposeProfile(hr,d,role,texture,rangeProfile,opts){
     severity='border';
   }
   if(opponentType&&opponentType.label&&opponentType.label!=='標準的'){
-    if(opponentType.bluffTighten&&(air||weakDraw||lane==='airBluff'||lane==='weakDrawBluff')){
+    const callHeavyBluffTighten=!!(opponentType.bluffTighten||opponentType.valueLoosen||opponentType.label==='コール多め');
+    if(callHeavyBluffTighten&&(air||weakDraw||lane==='airBluff'||lane==='weakDrawBluff')){
       severity='bad';
       verdict='コール多め相手へのブラフ過多';
       suggest='推奨: チェック寄り。打つなら、後で強く続けられるドローや明確なブロッカーがある時だけ';
