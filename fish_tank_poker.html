@@ -14509,6 +14509,19 @@ function runFishTankRegressionTests(){
     return issues.some(function(i){return i.type==='bluff-comment-too-long'&&i.severity==='medium';});
   });
 
+  add('実地監査: サイズ理由つきベット説明の長文化を検出する',function(){
+    const long='このベットは対象レンジとサイズ理由を整理します。サイズの理由は、ボードと相手傾向に合わせることです。'.repeat(12);
+    const issues=auditIssuesForHand({players:[]},{evals:[{
+      street:'flop',
+      action:'bet',
+      quality:'ok',
+      coachComment:long,
+      postflopBetPurposeProfile:{lane:'protectionValue',targetPlan:{target:'下のワンペア'}},
+      boardTextureSizeProfile:{pct:50,reason:'2トーンはドローに払わせたい一方、弱い手で大きくしすぎないサイズが中心です。'}
+    }]});
+    return issues.some(function(i){return i.type==='postflop-size-comment-too-long'&&i.severity==='medium';});
+  });
+
   add('実地監査: レビュー文の同一語句重複を検出する',function(){
     const txt='コールしてほしい相手を確認します。コールしてほしい相手は弱いペアです。コールしてほしい相手が少ないです。';
     const issues=auditIssuesForHand({players:[]},{evals:[{street:'flop',action:'bet',quality:'ok',coachComment:txt}]});
@@ -16303,6 +16316,10 @@ function auditIssuesForHand(hr,an,label){
     if(e.postflopBetPurposeProfile&&e.postflopBetPurposeProfile.bluffCandidate&&coach.length>360){
       addAuditIssue(issues,'medium','bluff-comment-too-long',street+' '+action+' のブラフ候補説明が長く、目的・候補・サイズのどれを直すべきか曖昧になる可能性があります。',{length:coach.length,bluffCandidate:e.postflopBetPurposeProfile.bluffCandidate,text:coach});
     }
+    if(e.postflopBetPurposeProfile&&e.boardTextureSizeProfile&&coach.length>380){
+      // [Codex fix 2026-08-04] サイズ理由を本文へ足した後も、ベット説明が教材として読める長さに収まるか監査する。
+      addAuditIssue(issues,'medium','postflop-size-comment-too-long',street+' '+action+' のベットサイズ説明が長く、対象レンジ・サイズ理由・結論が埋もれる可能性があります。',{length:coach.length,betPurpose:e.postflopBetPurposeProfile,sizeProfile:e.boardTextureSizeProfile,text:coach});
+    }
     if(e.liveCashRiverDecisionProfile&&/^river(OnePairCatch|DisciplineFold|RaiseResponse)/.test(e.liveCashRiverDecisionProfile.lane||'')&&coach.length>360){
       // [Codex fix 2026-08-03] 必要勝率・ブラフ量・ブロッカーを足したリバー受け説明が長文化していないか監査する。
       addAuditIssue(issues,'medium','river-facing-comment-too-long',street+' '+action+' のリバー受け説明が長く、必要勝率・ブラフ量・ブロッカーの要点が埋もれる可能性があります。',{length:coach.length,riverProfile:e.liveCashRiverDecisionProfile,text:coach});
@@ -16349,6 +16366,7 @@ function auditIssuePriorityWeight(issue){
     'river-one-pair-missing-profile':65,
     'review-too-long':60,
     'bluff-comment-too-long':58,
+    'postflop-size-comment-too-long':59,
     'river-facing-comment-too-long':62,
     'review-duplicate-phrase':35,
     'raw-effective-gap':45
@@ -16372,6 +16390,7 @@ function auditRepairSuggestion(type){
     'river-one-pair-missing-profile':'リバーのワンペアコールには必ず専用プロファイルを付ける。',
     'review-too-long':'レビュー文を結論・理由・推奨サイズの3点に圧縮する。詳しい軸は内部/監査側に残す。',
     'bluff-comment-too-long':'ブラフ候補説明を「候補の質」「降ろす相手」「サイズ帯」の短い一文へ圧縮する。',
+    'postflop-size-comment-too-long':'ベット説明を「対象レンジ」「今回サイズ/目安」「サイズ理由1文」に圧縮する。相手タイプとボード理由を重複させない。',
     'river-facing-comment-too-long':'リバー受け説明を「必要勝率」「ブラフ量」「ブロッカー有無」「結論」の4点に圧縮する。',
     'review-duplicate-phrase':'同じ語句を複数のプロファイルから重ねて出している。最終整文で重複を1回にまとめる。',
     'raw-effective-gap':'Raw EQと実効EQの差が大きい局面で、Raw EQだけを根拠にした説明を避ける。'
