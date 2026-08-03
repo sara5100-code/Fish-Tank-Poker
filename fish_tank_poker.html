@@ -14514,6 +14514,38 @@ function runFishTankRegressionTests(){
     return issues.some(function(i){return i.type==='review-duplicate-phrase'&&i.meta&&i.meta.phrase==='コールしてほしい相手';});
   });
 
+  add('実地監査: 長すぎるリバー受け説明を検出する',function(){
+    const long='必要勝率とブラフ候補とブロッカーを確認します。'.repeat(18);
+    const issues=auditIssuesForHand({players:[]},{evals:[{
+      street:'river',
+      action:'call',
+      quality:'bad',
+      coachComment:long,
+      liveCashRiverDecisionProfile:{lane:'riverOnePairCatch',sizePct:75,completed:true,blocker:{label:'フラッシュブロッカーなし'}}
+    }]});
+    return issues.some(function(i){return i.type==='river-facing-comment-too-long'&&i.severity==='medium';});
+  });
+
+  add('コーチ文: リバー受け説明はブロッカー統合後も長文化させない',function(){
+    const txt=coachReviewText({
+      street:'river',
+      action:'call',
+      quality:'bad',
+      liveCashRiverDecisionProfile:{
+        lane:'riverOnePairCatch',
+        sizePct:75,
+        completed:true,
+        pressure:2,
+        policy:'リバーのワンペアは相手のサイズとラインにブラフが残るかで判断します。',
+        suggest:'推奨: フォールド寄り',
+        line:{label:'3バレル'},
+        blocker:{label:'フラッシュブロッカーなし',severity:'bad'}
+      },
+      rangeActionUpdateProfile:{street:'river',lane:'call',sizePct:75,rangeState:'pressure_dense',valueDensityPct:78,bluffCandidatePct:16,rangeDensityBand:'高',bluffDensityBand:'少なめ'}
+    });
+    return txt.length<360&&/必要勝率/.test(txt)&&/ブロッカー面/.test(txt)&&/フォールド寄り/.test(txt);
+  });
+
   add('トリップス監査: Aトリップスを弱いワンペア扱いしない',function(){
     const hr=regressionHand({
       heroHole:['As','Kd'],
@@ -16239,6 +16271,10 @@ function auditIssuesForHand(hr,an,label){
     if(e.postflopBetPurposeProfile&&e.postflopBetPurposeProfile.bluffCandidate&&coach.length>360){
       addAuditIssue(issues,'medium','bluff-comment-too-long',street+' '+action+' のブラフ候補説明が長く、目的・候補・サイズのどれを直すべきか曖昧になる可能性があります。',{length:coach.length,bluffCandidate:e.postflopBetPurposeProfile.bluffCandidate,text:coach});
     }
+    if(e.liveCashRiverDecisionProfile&&/^river(OnePairCatch|DisciplineFold|RaiseResponse)/.test(e.liveCashRiverDecisionProfile.lane||'')&&coach.length>360){
+      // [Codex fix 2026-08-03] 必要勝率・ブラフ量・ブロッカーを足したリバー受け説明が長文化していないか監査する。
+      addAuditIssue(issues,'medium','river-facing-comment-too-long',street+' '+action+' のリバー受け説明が長く、必要勝率・ブラフ量・ブロッカーの要点が埋もれる可能性があります。',{length:coach.length,riverProfile:e.liveCashRiverDecisionProfile,text:coach});
+    }
     ['コールしてほしい相手','降ろしたい相手','ブラフ候補として見ると','推奨:'].forEach(function(phrase){
       const n=(coach.match(new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'g'))||[]).length;
       if(n>=3){
@@ -16281,6 +16317,7 @@ function auditIssuePriorityWeight(issue){
     'river-one-pair-missing-profile':65,
     'review-too-long':60,
     'bluff-comment-too-long':58,
+    'river-facing-comment-too-long':62,
     'review-duplicate-phrase':35,
     'raw-effective-gap':45
   }[issue&&issue.type]||30;
@@ -16303,6 +16340,7 @@ function auditRepairSuggestion(type){
     'river-one-pair-missing-profile':'リバーのワンペアコールには必ず専用プロファイルを付ける。',
     'review-too-long':'レビュー文を結論・理由・推奨サイズの3点に圧縮する。詳しい軸は内部/監査側に残す。',
     'bluff-comment-too-long':'ブラフ候補説明を「候補の質」「降ろす相手」「サイズ帯」の短い一文へ圧縮する。',
+    'river-facing-comment-too-long':'リバー受け説明を「必要勝率」「ブラフ量」「ブロッカー有無」「結論」の4点に圧縮する。',
     'review-duplicate-phrase':'同じ語句を複数のプロファイルから重ねて出している。最終整文で重複を1回にまとめる。',
     'raw-effective-gap':'Raw EQと実効EQの差が大きい局面で、Raw EQだけを根拠にした説明を避ける。'
   };
