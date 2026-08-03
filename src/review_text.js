@@ -277,6 +277,21 @@ function naturalPostflopBetPurposeText(ev){
   return [core,bluffNote,opponentNote,sizeNote,advice].filter(Boolean).join(' ');
 }
 // [Codex fix 2026-06-20] ベットされた側の説明を、必要勝率・勝っている想定・相手ブラフ量に整理する。
+function riverFacingBlockerText(rv,required,rau){
+  const b=rv&&rv.blocker;
+  if(!b)return'';
+  // [Codex fix 2026-08-03] リバー受け側の説明では、必要勝率とブロッカーを同じ判断材料として扱う。
+  if(b.hasNutFlushBlocker){
+    return 'ブロッカー面では、こちらのAブロッカーが相手のナッツ級を少し減らします。ただし完成役そのものを消すわけではないので、必要勝率'+(required!=null?'約'+required+'%':'')+'を埋めるだけのブラフ量は別に必要です。';
+  }
+  if(b.severity==='bad'||/ブロッカーなし/.test(b.label||'')){
+    return 'ブロッカー面では、こちらは相手の強い完成役をあまり減らしていません。ブラフ候補'+(rau&&rau.bluffCandidatePct!=null?'約'+rau.bluffCandidatePct+'%':'')+'が足りないラインでは、ワンペアのコールはより慎重に見ます。';
+  }
+  if(b.coach){
+    return 'ブロッカー面では、'+b.coach;
+  }
+  return'';
+}
 function naturalFacingBetDecisionText(ev){
   if(!ev)return'';
   const rv=ev.liveCashRiverDecisionProfile||null;
@@ -296,6 +311,7 @@ function naturalFacingBetDecisionText(ev){
       ?'必要勝率に対してブラフ候補が足りないため、相手がよほど打てるタイプでない限りフォールド寄り'
       :'必要勝率に対してブラフ候補は残るため、相手が実際にブラフを作れるタイプならコールが残る')
     :'';
+  const blockerOddsNote=rv?riverFacingBlockerText(rv,required,rau):'';
   if(rv){
     const lane=rv.lane||'';
     const board=rv.completed?'完成寄りボード':'比較的静的なボード';
@@ -312,7 +328,7 @@ function naturalFacingBetDecisionText(ev){
       return'';
     }
     const sizeText=sizePct!=null?'リバーで'+(tendency?tendency:'')+'相手の'+sizePct+'%potに対する'+action+'で、必要勝率は約'+required+'%':'リバーで相手のベット/レイズに対する'+action+'で、相手のサイズとラインを見る';
-    const oddsText=[sizeText,riverDensityNote,riverOddsNote].filter(Boolean).join('、')+'。';
+    const oddsText=[sizeText,riverDensityNote,blockerOddsNote,riverOddsNote].filter(Boolean).join('、')+'。';
     return [oddsText,heroPlan,board+'です。',rv.suggest?naturalRecommendationText(rv.suggest):''].filter(Boolean).join(' ');
   }
   const goodTarget=fp.target||'相手のベットレンジ';

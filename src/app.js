@@ -9007,6 +9007,46 @@ function runFishTankRegressionTests(){
     return !!(/必要勝率は約30%/.test(txt)&&/ブラフ/.test(txt)&&/ワンペア/.test(txt)&&/ターンとリバー/.test(txt));
   });
 
+  add('受け側説明: リバーワンペアは必要勝率とブロッカーを同じ文で見る',function(){
+    const txt=coachReviewText({
+      street:'river',
+      action:'call',
+      quality:'bad',
+      liveCashRiverDecisionProfile:{
+        lane:'riverOnePairCatch',
+        sizePct:75,
+        completed:true,
+        pressure:2,
+        policy:'リバーのワンペアは相手のサイズとラインにブラフが残るかで判断します。',
+        suggest:'推奨: フォールド寄り',
+        line:{label:'3バレル'},
+        blocker:{label:'フラッシュブロッカーなし',severity:'bad'}
+      },
+      rangeActionUpdateProfile:{street:'river',lane:'call',sizePct:75,rangeState:'pressure_dense',valueDensityPct:78,bluffCandidatePct:16,rangeDensityBand:'高',bluffDensityBand:'少なめ'}
+    });
+    return !!(/必要勝率は約30%/.test(txt)&&/ブロッカー面/.test(txt)&&/強い完成役をあまり減らしていません/.test(txt)&&/ブラフ候補約16%/.test(txt)&&/フォールド寄り/.test(txt));
+  });
+
+  add('受け側説明: Aブロッカーはリバーコール根拠として過大評価しない',function(){
+    const txt=coachReviewText({
+      street:'river',
+      action:'call',
+      quality:'ok',
+      liveCashRiverDecisionProfile:{
+        lane:'riverOnePairCatch',
+        sizePct:55,
+        completed:true,
+        pressure:1,
+        policy:'リバーのワンペアは相手のサイズとラインにブラフが残るかで判断します。',
+        suggest:'相手依存: 一部コール',
+        line:{label:'単発リバーベット'},
+        blocker:{label:'ナッツフラッシュブロッカーあり',severity:'good',hasNutFlushBlocker:true}
+      },
+      rangeActionUpdateProfile:{street:'river',lane:'call',sizePct:55,rangeState:'single_pressure',valueDensityPct:55,bluffCandidatePct:27,rangeDensityBand:'中高',bluffDensityBand:'中'}
+    });
+    return !!(/Aブロッカー/.test(txt)&&/ナッツ級を少し減らします/.test(txt)&&/完成役そのものを消すわけではない/.test(txt)&&/必要勝率約26%/.test(txt));
+  });
+
   add('受け側説明: フロップ/ターンのコールは勝っている想定を本文に出す',function(){
     const txt=coachReviewText({
       street:'flop',
