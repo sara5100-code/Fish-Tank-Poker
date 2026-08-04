@@ -14842,6 +14842,14 @@ function runFishTankRegressionTests(){
     return !!(b&&b.totalHands>=6&&b.criticalCount===0&&b.highCount===0&&b.mediumCount===0&&b.repairQueue&&b.repairQueue.totalIssues===0);
   });
 
+  add('実地監査: AIオープン幅確認後もAIレンジ違和感を出さない',function(){
+    const b=runFishTankAuditBatch({perMode:1,seed:20260805,maxExamples:8,maxActions:80});
+    const aiIssues=(b.suspiciousHands||[]).some(function(h){
+      return (h.issues||[]).some(function(i){return i.type==='ai-preflop-premise';});
+    });
+    return !!(b&&b.totalHands>=6&&!aiIssues);
+  });
+
   add('20BB reshove監査でAI非BBフラット前提を出さない',function(){
     const b=runFishTankAuditBatch({perMode:1,seed:20260605,maxExamples:12,maxActions:90});
     const h=(b.suspiciousHands||[]).filter(function(x){return x.modeId==='tournament:reshove20';});
