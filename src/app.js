@@ -2792,6 +2792,29 @@ function renderSessionStartChecklist(focus){
   const carry=renderSessionCarryOver(focus===undefined?getStoredSessionNextFocus():focus);
   return carry+renderSessionChecklist(SESSION_START_CHECKS,'全部にチェックできなくても開始はできます。崩れそうな条件を先に見つけるためのメモです。');
 }
+function sessionFocusFromWeaknessRow(row){
+  if(!row||row.count<3||row.missRate<35)return null;
+  const cat=String(row.category||'');
+  const title=String(row.title||'弱点テーマ');
+  const mode=String(row.modeLabel||'総合');
+  const base='主テーマ別の弱点ランキングで「'+title+'」が'+row.count+'件、ミス寄り'+row.missRate+'%です。次回はこの型を一つだけ意識して、同じ失点を減らします。';
+  let focusTitle='次回の一点: '+title;
+  let body=base;
+  if(/river|onepair|showdown|value|bluff/i.test(cat)||/リバー|ワンペア|ショーダウン|薄バリュー/.test(title)){
+    focusTitle='次回の一点: リバーでワンペアを受けすぎない';
+    body=base+' 大きいベットにコールする前に、相手のバリュー候補と足りるブラフ量を先に数えます。';
+  }else if(/preflop|entry|flat|limp|bb-defense/i.test(cat)||/入口|参加|リンプ|フラット|BB/.test(title)){
+    focusTitle='次回の一点: フロップ前の入口を整理する';
+    body=base+' 参加するならレイズで主導権を取り、迷うコールは最初からフォールド寄りに整理します。';
+  }else if(/postflop|barrel|bet|raise|multiway|initiative|spr/i.test(cat)||/ポストフロップ|ベット|レイズ|マルチウェイ|SPR|主導権/.test(title)){
+    focusTitle='次回の一点: ベット目的を先に決める';
+    body=base+' 打つ前に「何にコールしてほしいか」「何を降ろしたいか」を一つずつ言ってからサイズを選びます。';
+  }else if(/bubble|ft|heads|middle|early|tournament/i.test(cat)||/バブル|FT|HU|中盤|序盤|トーナメント/.test(mode+title)){
+    focusTitle='次回の一点: トーナメントの立場を先に見る';
+    body=base+' ハンドの強さだけでなく、残り人数、カバー関係、有効スタックを先に見てから受けるか押すかを決めます。';
+  }
+  return{title:focusTitle,body:body,tone:'warn',weakness:{category:cat,title:title,count:row.count,missRate:row.missRate,modeLabel:mode}};
+}
 function sessionEndStatsProfile(stats){
   stats=stats||sessionStats||{};
   const n=stats.hands||0;
@@ -2805,11 +2828,15 @@ function sessionEndStatsProfile(stats){
   const limpPct=pct(stats.limp||0,stats.limpOpp||0);
   const wtsd=pct(stats.wtsdWent||0,stats.wtsdSaw||0);
   const mistake=pct(stats.badDec||0,stats.totalDec||0);
+  const weaknessRows=typeof lessonWeaknessRows==='function'?lessonWeaknessRows(stats):[];
+  const weaknessFocus=sessionFocusFromWeaknessRow(weaknessRows[0]);
   let focus={title:'今日の振り返り',body:'まだハンド数が少ないため、数字よりも「集中して判断できたか」を見ます。次回のテーマを一つだけ決めて終えましょう。',tone:'neutral'};
   if(n>=5&&limpPct>25){
     focus={title:'次回の一点: オープンリンプを減らす',body:'リンプが多めです。参加するならレイズ、難しいハンドは最初からフォールドに整理すると、後のストリートがかなり楽になります。',tone:'warn'};
   }else if(n>=5&&vpip>45){
     focus={title:'次回の一点: 入口を締める',body:'VPIPが高めです。特にOOPやオフスートブロードウェイは、ヒットしても難しい判断になりやすいので参加前に一段絞ります。',tone:'warn'};
+  }else if(n>=5&&weaknessFocus){
+    focus=weaknessFocus;
   }else if(n>=8&&poN>=4&&avgPF-avgPO>=18){
     focus={title:'次回の一点: ポストフロップで守る',body:'フロップ前よりポストフロップの失点が目立ちます。ワンペアで大きなポットを作る前に、相手レンジと嫌なターン/リバーを確認しましょう。',tone:'warn'};
   }else if(n>=8&&wtsd>37){
@@ -2819,11 +2846,12 @@ function sessionEndStatsProfile(stats){
   }else if(n>=8&&avgScore>=80){
     focus={title:'良いセッションです',body:'平均スコアは安定しています。次は得意な場面を増やすより、苦手な一領域を選んで精度を上げる段階です。',tone:'good'};
   }
-  return sessionFocusApplyHistory({hands:n,avgScore,avgPF,avgPO,poN,vpip,limpPct,wtsd,mistake,focus});
+  return sessionFocusApplyHistory({hands:n,avgScore,avgPF,avgPO,poN,vpip,limpPct,wtsd,mistake,focus,weaknessFocus});
 }
 function sessionEndFocusReason(profile){
   const p=profile||sessionEndStatsProfile();
   if(p.historyRepeat&&p.historyRepeat.title)return '同じテーマが'+p.historyRepeat.count+'回続いています。いまは新しい課題へ広げるより、'+p.historyRepeat.title+'をもう一度だけ継続する判断です。';
+  if(p.focus&&p.focus.weakness)return '主テーマ別の弱点ランキングから選びました。'+p.focus.weakness.title+'が'+p.focus.weakness.count+'件、ミス寄り'+p.focus.weakness.missRate+'%です。';
   const txt=((p.focus&&p.focus.title)||'')+' '+((p.focus&&p.focus.body)||'');
   if(/繝ｪ繝ｳ繝|リンプ/.test(txt))return 'リンプ率 '+(p.limpPct>=0?p.limpPct+'%':'--')+'。参加するならレイズかフォールドに寄せるテーマです。';
   if(/VPIP|蜈･蜿｣|蜿ょ刈|入口|参加/.test(txt))return 'VPIP '+(p.vpip>=0?p.vpip+'%':'--')+'。参加ハンドを一段絞るテーマです。';
@@ -5770,6 +5798,25 @@ function runFishTankRegressionTests(){
       &&/session-focus-good/.test(html)
       &&/session-focus-reason/.test(html)
       &&/次は弱点探し|リンプ|VPIP|PostF|WTSD|ミス/.test(html);
+  });
+  add('session checklist: weakness ranking can choose next focus',function(){
+    if(typeof sessionEndStatsProfile!=='function'||typeof renderSessionEndSummary!=='function'||typeof emptyLessonStats!=='function')return false;
+    const stats={hands:12,vpip:4,pfr:3,limp:0,limpOpp:4,wtsdWent:3,wtsdSaw:8,badDec:2,totalDec:20,scores:[78,80,79],pfScores:[80,82],poScores:[74,76,75,73],lessonStats:emptyLessonStats()};
+    stats.lessonStats.categories['ring-river-onepair']={category:'ring-river-onepair',title:'リバーでワンペアを受けすぎない',modeLabel:'リング $2/$5',count:4,bad:3,border:1,good:0,recent:['bad','border','bad','bad'],lastHand:12};
+    const p=sessionEndStatsProfile(stats);
+    const reason=sessionEndFocusReason(p);
+    const html=renderSessionEndSummary(stats);
+    return p.focus&&/リバーでワンペア/.test(p.focus.title)
+      &&p.focus.weakness&&p.focus.weakness.count===4
+      &&/弱点ランキングから選びました/.test(reason)
+      &&/ミス寄り/.test(html);
+  });
+  add('session checklist: hard entry leaks outrank weakness ranking',function(){
+    if(typeof sessionEndStatsProfile!=='function'||typeof emptyLessonStats!=='function')return false;
+    const stats={hands:12,vpip:7,pfr:2,limp:4,limpOpp:8,wtsdWent:3,wtsdSaw:8,badDec:2,totalDec:20,scores:[78,80,79],pfScores:[80,82],poScores:[74,76,75,73],lessonStats:emptyLessonStats()};
+    stats.lessonStats.categories['ring-river-onepair']={category:'ring-river-onepair',title:'リバーでワンペアを受けすぎない',modeLabel:'リング $2/$5',count:5,bad:4,border:1,good:0,recent:['bad','border','bad','bad','bad'],lastHand:12};
+    const p=sessionEndStatsProfile(stats);
+    return p.focus&&/オープンリンプ/.test(p.focus.title)&&!p.focus.weakness;
   });
   add('session checklist: end summary closes current focus loop',function(){
     if(typeof sessionEndCarryoverResult!=='function'||typeof renderSessionEndSummary!=='function'||typeof storeSessionNextFocus!=='function')return false;
