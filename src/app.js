@@ -2522,7 +2522,7 @@ function renderSessionPracticeRecommendation(focus,stats){
   const rec=sessionPracticeRecommendation(focus,stats);
   if(!rec)return '';
   const label=rec.status?'（'+rec.status+'）':'';
-  const guide=rec.guide?'<div class="session-recommend-guide">関連教材: '+sessionTextHTML(rec.guide.title)+'。'+sessionTextHTML(rec.guide.reason)+'</div>':'';
+  const guide=rec.guide?'<div class="session-recommend-guide">関連教材: '+sessionTextHTML(rec.guide.title)+'。'+sessionTextHTML(rec.guide.reason)+'<button type="button" class="session-open-guide" data-guide="'+sessionTextHTML(rec.guide.key||'')+'">関連教材を見る</button></div>':'';
   return '<div class="session-recommend"><div class="session-recommend-title">おすすめ練習'+sessionTextHTML(label)+': '+sessionTextHTML(rec.mode)+' / '+sessionTextHTML(rec.focus)+'</div><div class="session-recommend-body">'+sessionTextHTML(rec.reason)+'</div>'+guide+'<button type="button" class="session-apply-practice" data-mode="'+sessionTextHTML(rec.modeValue||'normal')+'" data-focus="'+sessionTextHTML(rec.focusValue||'')+'" data-preset="'+sessionTextHTML(rec.presetValue||'')+'" data-mode-label="'+sessionTextHTML(rec.mode||'')+'" data-focus-label="'+sessionTextHTML(rec.focus||'')+'" data-status="'+sessionTextHTML(rec.status||'')+'" data-reason="'+sessionTextHTML(rec.reason||'')+'">この練習を設定</button></div>';
 }
 function renderAppliedPracticeNote(rec){
@@ -5695,7 +5695,13 @@ function runFishTankRegressionTests(){
     const html=renderSessionPracticeRecommendation(river,{hands:12,wtsdSaw:10,wtsdWent:5});
     return rec&&rec.guide&&rec.guide.title==='セッション終了判断'
       &&/関連教材: セッション終了判断/.test(html)
-      &&/リバー判断が雑/.test(html);
+      &&/リバー判断が雑/.test(html)
+      &&/session-open-guide/.test(html)
+      &&/data-guide="session-end"/.test(html);
+  });
+  add('セッションチェック: 関連教材ジャンプ関数を持つ',function(){
+    if(typeof focusLivePracticeGuide!=='function')return false;
+    return focusLivePracticeGuide('')===false;
   });
   add('セッションチェック: おすすめ練習を設定ボタンとして描画する',function(){
     if(typeof renderSessionPracticeRecommendation!=='function')return false;
@@ -12502,6 +12508,27 @@ function openSheet(tab){
   $('sheet-overlay').classList.add('open');
 }
 function closeSheet(){$('sheet-overlay').classList.remove('open');}
+function focusLivePracticeGuide(key){
+  if(!key)return false;
+  const openSide=function(){
+    document.querySelectorAll('.side-tab').forEach(function(s){s.classList.remove('active');});
+    document.querySelectorAll('.side-tab[data-tab="live"]').forEach(function(s){s.classList.add('active');});
+    ['history','trends','glossary','live','notes'].forEach(function(id){var el=$('tab-'+id);if(el)el.classList.toggle('hidden',id!=='live');});
+    var tl=$('tab-live');if(tl)tl.innerHTML=renderLivePractice();
+  };
+  if(isLandscape())openSide();
+  else openSheet('live');
+  setTimeout(function(){
+    const sel='[data-live-guide="'+String(key).replace(/"/g,'\\"')+'"]';
+    const card=document.querySelector(sel);
+    if(!card)return;
+    document.querySelectorAll('.live-guide-focus').forEach(function(el){el.classList.remove('live-guide-focus');});
+    card.classList.add('live-guide-focus');
+    if(card.scrollIntoView)card.scrollIntoView({behavior:'smooth',block:'center'});
+    setTimeout(function(){card.classList.remove('live-guide-focus');},3200);
+  },40);
+  return true;
+}
 $('sheet-close-btn').addEventListener('click',closeSheet);
 $('sheet-overlay').addEventListener('click',function(e){if(e.target===$('sheet-overlay'))closeSheet();});
 document.querySelectorAll('.stab').forEach(function(btn){
@@ -12601,6 +12628,11 @@ document.addEventListener('click',function(e){
     });
     return;
   }
+  const guideBtn=e.target&&e.target.closest&&e.target.closest('.session-open-guide');
+  if(guideBtn){
+    focusLivePracticeGuide(guideBtn.dataset.guide||'');
+    return;
+  }
   if(e.target&&(e.target.id==='btn-reset-stats'||e.target.id==='btn-reset-stats2')){
     if(confirm('統計データをリセットしますか？（累積ハンド数・VPIP・CBet等がすべてクリアされます）')){
       try{localStorage.removeItem(_STATS_KEY);}catch(ex){}
@@ -12614,7 +12646,7 @@ document.addEventListener('click',function(e){
   }
 });
 
-window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,runFishTankAuditBatch,fishTankAuditBatchReportText,buildFishTankAuditRepairQueue,fishTankAuditRepairPlanText,auditIssuesForHand,playAuditGame,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,boardTextureProfile,boardTextureProfileText,representativeBoardProfile,boardTextureFrequencyAdjustment,boardTextureSizePlan,boardTextureTransitionProfile,boardTextureTransitionProfileText,rangeNutAdvantageProfile,rangeNutAdvantageProfileText,rangeActionUpdateProfile,rangeActionUpdateProfileText,postflopBetPurposeProfile,postflopBetPurposeProfileText,postflopRaisePlanProfile,postflopRaisePlanProfileText,postflopBarrelPlanProfile,postflopBarrelPlanProfileText,postflopDefensePlanProfile,postflopDefensePlanProfileText,postflopCallFuturePlanProfile,postflopCallFuturePlanProfileText,standardBetSizePct,preflopOpenQuickOptions,raiseOverBetQuickOptions,postflopQuickBetOptions,aiSizingTellAdjustedTarget,aiSizingTellLabel,opponentReadSizingTellLabel,opponentNoteText,setOpponentNote,renderOpponentNotesPanel,lessonWeaknessRows,renderLessonWeaknessRanking,recordPrimaryLessonStats,adaptiveScenarioWeightPlan,adaptiveScenarioEnabled,setAdaptiveScenarioEnabled,_pickScenarioCat,preflopDrillBuildSpot,preflopDrillEvaluateSpot,startPreflopDrillSession,answerPreflopDrill,finishPreflopDrillSession,liveCashRakeConfigFromValue,liveCashTableProfileFromValue,liveCashRangeProfile,liveCashSpotProfile,liveCashSpotProfileText,liveCashSprProfile,liveCashSprProfileText,liveCashInitiativeProfile,liveCashInitiativeProfileText,liveCashReraisedPotProfile,liveCashReraisedPotProfileText,liveCashMultiwayProfile,liveCashMultiwayProfileText,liveCashRiverDecisionProfile,liveCashRiverDecisionProfileText,tournamentRangeProfile,tournamentFinalTableProfile,tournamentFinalTableStackRole,tournamentFinalTableCollisionProfile,tournamentFinalTableRangeProfile,tournamentFinalTableRangeProfileText,tournamentFinalTablePostflopProfile,tournamentFinalTablePostflopProfileText,tournamentFinalTableLearningPoint,tournamentFinalTableLearningPointText,tournamentHeadsUpProfile};
+window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,runFishTankAuditBatch,fishTankAuditBatchReportText,buildFishTankAuditRepairQueue,fishTankAuditRepairPlanText,auditIssuesForHand,playAuditGame,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,boardTextureProfile,boardTextureProfileText,representativeBoardProfile,boardTextureFrequencyAdjustment,boardTextureSizePlan,boardTextureTransitionProfile,boardTextureTransitionProfileText,rangeNutAdvantageProfile,rangeNutAdvantageProfileText,rangeActionUpdateProfile,rangeActionUpdateProfileText,postflopBetPurposeProfile,postflopBetPurposeProfileText,postflopRaisePlanProfile,postflopRaisePlanProfileText,postflopBarrelPlanProfile,postflopBarrelPlanProfileText,postflopDefensePlanProfile,postflopDefensePlanProfileText,postflopCallFuturePlanProfile,postflopCallFuturePlanProfileText,standardBetSizePct,preflopOpenQuickOptions,raiseOverBetQuickOptions,postflopQuickBetOptions,aiSizingTellAdjustedTarget,aiSizingTellLabel,opponentReadSizingTellLabel,opponentNoteText,setOpponentNote,renderOpponentNotesPanel,livePracticeGuideForFocus,focusLivePracticeGuide,lessonWeaknessRows,renderLessonWeaknessRanking,recordPrimaryLessonStats,adaptiveScenarioWeightPlan,adaptiveScenarioEnabled,setAdaptiveScenarioEnabled,_pickScenarioCat,preflopDrillBuildSpot,preflopDrillEvaluateSpot,startPreflopDrillSession,answerPreflopDrill,finishPreflopDrillSession,liveCashRakeConfigFromValue,liveCashTableProfileFromValue,liveCashRangeProfile,liveCashSpotProfile,liveCashSpotProfileText,liveCashSprProfile,liveCashSprProfileText,liveCashInitiativeProfile,liveCashInitiativeProfileText,liveCashReraisedPotProfile,liveCashReraisedPotProfileText,liveCashMultiwayProfile,liveCashMultiwayProfileText,liveCashRiverDecisionProfile,liveCashRiverDecisionProfileText,tournamentRangeProfile,tournamentFinalTableProfile,tournamentFinalTableStackRole,tournamentFinalTableCollisionProfile,tournamentFinalTableRangeProfile,tournamentFinalTableRangeProfileText,tournamentFinalTablePostflopProfile,tournamentFinalTablePostflopProfileText,tournamentFinalTableLearningPoint,tournamentFinalTableLearningPointText,tournamentHeadsUpProfile};
 Object.assign(window.__fishTankDebug,{buildReplayGameFromHand,startReplayFromDecision,findReplayHand,handProfitChips,handProfitBB,sessionStatsBb100,renderQualityMoneyBand});
 // [Codex fix 2026-06-05] Query-gated regression output for browser verification without exposing debug UI during normal play.
 if(new URLSearchParams(location.search).has('codex_regression')){
