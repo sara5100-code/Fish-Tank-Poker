@@ -2319,22 +2319,37 @@ function renderOpponentNotesPanel(){
 // ===== ライブ実戦教材 (Phase 6-1) =====
 const LIVE_PRACTICE_GUIDES=[
   {title:'テーブル/シート選択',
+   key:'table',
    text:'勝ちやすさは自分の腕だけで決まりません。深いスタックでルースにコールする相手が多く、強い常連が左に少ない席を優先します。きつい卓で無理に戦うより、良いゲームを選ぶこと自体が大きなEVです。'},
   {title:'ストラドルポット',
+   key:'straddle',
    text:'ストラドルが入ると実質BBが大きくなり、スタックは浅くなります。プリフロップは少しタイトに、ポストフロップはSPRが下がる前提でワンペアの扱いを決めます。参加するなら、後ろから大きくアイソされても困りにくい手を選びます。'},
   {title:'ティルトの兆候',
+   key:'tilt',
    text:'取り返したい、相手を懲らしめたい、さっきの負けを理由にコールしたい。この感覚が出たら一度席を離れる合図です。正しい判断を続けられない状態では、良いハンドを待っても利益を守れません。'},
   {title:'セッション終了判断',
+   key:'session-end',
    text:'勝っている時も負けている時も、疲労と集中力を基準にします。ミスが増えた、リバー判断が雑になった、相手のレンジを考えずにボタンを押している。そう感じたら、まだゲームが良くても終了候補です。'},
   {title:'バンクロール',
+   key:'bankroll',
    text:'$2/$5は一回の負け額が大きくなりやすいゲームです。生活費とプレー資金を分け、負けても判断が崩れない余裕を持ちます。十分な余裕がない時は、下のレートや短いセッションで練習量を積む方が長く続きます。'},
   {title:'チップハンドリングとエチケット',
+   key:'etiquette',
    text:'ベット額ははっきり置き、相手のアクション前に余計な反応をしない。ショーダウンでは自分の手を明確に開き、ディーラーや他プレイヤーを急かさない。テーブルで信頼される振る舞いは、長時間プレーするうえで大事な土台です。'}
 ];
+function livePracticeGuideForFocus(focus){
+  const txt=((focus&&focus.title)||'')+' '+((focus&&focus.body)||'')+' '+((focus&&focus.weakness&&focus.weakness.title)||'')+' '+((focus&&focus.weakness&&focus.weakness.category)||'');
+  if(/リバー|ワンペア|ショーダウン|river|onepair|showdown/i.test(txt))return{key:'session-end',title:'セッション終了判断',reason:'リバー判断が雑になってきた時の終了基準と相性が良い教材です。'};
+  if(/入口|参加|リンプ|フラット|preflop|entry|flat|limp/i.test(txt))return{key:'straddle',title:'ストラドルポット',reason:'フロップ前の参加レンジとSPR感覚を見直す教材です。'};
+  if(/ベット|レイズ|ポストフロップ|マルチウェイ|SPR|postflop|bet|raise|multiway/i.test(txt))return{key:'table',title:'テーブル/シート選択',reason:'相手が降りない卓で、ブラフと薄バリューをどう変えるかにつながる教材です。'};
+  if(/トーナメント|バブル|FT|HU|middle|bubble|heads/i.test(txt))return{key:'session-end',title:'セッション終了判断',reason:'疲労時にICMやスタック関係の判断が荒れないようにする教材です。'};
+  if(/ティルト|ミス|取り返|tilt/i.test(txt))return{key:'tilt',title:'ティルトの兆候',reason:'判断が崩れ始めた時に席を離れる基準を確認します。'};
+  return null;
+}
 function renderLivePractice(){
   const intro='<div class="gto-tip"><div class="tip-title">ライブ実戦メモ</div>ハンド単体の正解だけでなく、良いゲームを選び、崩れた状態で打たないことも勝率の一部です。ここでは$2/$5ライブで特に差が出る習慣だけを短くまとめます。</div>';
   return renderOpponentReadTrainer()+intro+LIVE_PRACTICE_GUIDES.map(function(g){
-    return '<div class="gto-tip"><div class="tip-title">'+g.title+'</div>'+g.text+'</div>';
+    return '<div class="gto-tip" data-live-guide="'+sessionTextHTML(g.key||g.title)+'"><div class="tip-title">'+g.title+'</div>'+g.text+'</div>';
   }).join('');
 }
 
@@ -2499,13 +2514,16 @@ function sessionPracticeRecommendation(focus,stats){
     rec.status='サンプル集め';
     rec.reason='まだ判定材料が少ないため、まずは同じテーマのハンドを増やします。'+rec.reason;
   }
+  const guide=livePracticeGuideForFocus(focus);
+  if(guide)rec.guide=guide;
   return rec;
 }
 function renderSessionPracticeRecommendation(focus,stats){
   const rec=sessionPracticeRecommendation(focus,stats);
   if(!rec)return '';
   const label=rec.status?'（'+rec.status+'）':'';
-  return '<div class="session-recommend"><div class="session-recommend-title">おすすめ練習'+sessionTextHTML(label)+': '+sessionTextHTML(rec.mode)+' / '+sessionTextHTML(rec.focus)+'</div><div class="session-recommend-body">'+sessionTextHTML(rec.reason)+'</div><button type="button" class="session-apply-practice" data-mode="'+sessionTextHTML(rec.modeValue||'normal')+'" data-focus="'+sessionTextHTML(rec.focusValue||'')+'" data-preset="'+sessionTextHTML(rec.presetValue||'')+'" data-mode-label="'+sessionTextHTML(rec.mode||'')+'" data-focus-label="'+sessionTextHTML(rec.focus||'')+'" data-status="'+sessionTextHTML(rec.status||'')+'" data-reason="'+sessionTextHTML(rec.reason||'')+'">この練習を設定</button></div>';
+  const guide=rec.guide?'<div class="session-recommend-guide">関連教材: '+sessionTextHTML(rec.guide.title)+'。'+sessionTextHTML(rec.guide.reason)+'</div>':'';
+  return '<div class="session-recommend"><div class="session-recommend-title">おすすめ練習'+sessionTextHTML(label)+': '+sessionTextHTML(rec.mode)+' / '+sessionTextHTML(rec.focus)+'</div><div class="session-recommend-body">'+sessionTextHTML(rec.reason)+'</div>'+guide+'<button type="button" class="session-apply-practice" data-mode="'+sessionTextHTML(rec.modeValue||'normal')+'" data-focus="'+sessionTextHTML(rec.focusValue||'')+'" data-preset="'+sessionTextHTML(rec.presetValue||'')+'" data-mode-label="'+sessionTextHTML(rec.mode||'')+'" data-focus-label="'+sessionTextHTML(rec.focus||'')+'" data-status="'+sessionTextHTML(rec.status||'')+'" data-reason="'+sessionTextHTML(rec.reason||'')+'">この練習を設定</button></div>';
 }
 function renderAppliedPracticeNote(rec){
   rec=rec||getStoredAppliedPractice();
@@ -5620,6 +5638,16 @@ function runFishTankRegressionTests(){
       &&/バンクロール/.test(html)
       &&/チップハンドリング/.test(html);
   });
+  add('ライブ実戦教材: 弱点テーマから関連教材を選べる',function(){
+    if(typeof livePracticeGuideForFocus!=='function'||typeof renderLivePractice!=='function')return false;
+    const river=livePracticeGuideForFocus({title:'次回の一点: リバーでワンペアを受けすぎない',body:'WTSDを締めます。'});
+    const entry=livePracticeGuideForFocus({title:'次回の一点: フロップ前の入口を整理する',body:'迷うコールを減らします。'});
+    const html=renderLivePractice();
+    return river&&river.title==='セッション終了判断'
+      &&entry&&entry.title==='ストラドルポット'
+      &&/data-live-guide="session-end"/.test(html)
+      &&/data-live-guide="straddle"/.test(html);
+  });
   add('セッションチェック: 開始前と終了時の主要項目を描画する',function(){
     if(typeof renderSessionStartChecklist!=='function'||typeof renderSessionEndChecklist!=='function')return false;
     const s=renderSessionStartChecklist();
@@ -5659,6 +5687,15 @@ function runFishTankRegressionTests(){
     return river&&river.mode==='リングゲーム'&&/リバー/.test(river.focus)
       &&bb&&bb.mode==='トーナメント局面別'&&/BBディフェンス/.test(bb.focus)
       &&/おすすめ練習/.test(html)&&/フロップトレーニング/.test(html);
+  });
+  add('セッションチェック: おすすめ練習に関連教材を添える',function(){
+    if(typeof renderSessionPracticeRecommendation!=='function'||typeof sessionPracticeRecommendation!=='function')return false;
+    const river={title:'次回の一点: リバーでワンペアを受けすぎない',body:'大きいベットに払う前に相手のバリュー候補を数えます。'};
+    const rec=sessionPracticeRecommendation(river,{hands:12,wtsdSaw:10,wtsdWent:5});
+    const html=renderSessionPracticeRecommendation(river,{hands:12,wtsdSaw:10,wtsdWent:5});
+    return rec&&rec.guide&&rec.guide.title==='セッション終了判断'
+      &&/関連教材: セッション終了判断/.test(html)
+      &&/リバー判断が雑/.test(html);
   });
   add('セッションチェック: おすすめ練習を設定ボタンとして描画する',function(){
     if(typeof renderSessionPracticeRecommendation!=='function')return false;
