@@ -2523,7 +2523,8 @@ function renderSessionPracticeRecommendation(focus,stats){
   if(!rec)return '';
   const label=rec.status?'（'+rec.status+'）':'';
   const guide=rec.guide?'<div class="session-recommend-guide">関連教材: '+sessionTextHTML(rec.guide.title)+'。'+sessionTextHTML(rec.guide.reason)+'<button type="button" class="session-open-guide" data-guide="'+sessionTextHTML(rec.guide.key||'')+'">関連教材を見る</button></div>':'';
-  return '<div class="session-recommend"><div class="session-recommend-title">おすすめ練習'+sessionTextHTML(label)+': '+sessionTextHTML(rec.mode)+' / '+sessionTextHTML(rec.focus)+'</div><div class="session-recommend-body">'+sessionTextHTML(rec.reason)+'</div>'+guide+'<button type="button" class="session-apply-practice" data-mode="'+sessionTextHTML(rec.modeValue||'normal')+'" data-focus="'+sessionTextHTML(rec.focusValue||'')+'" data-preset="'+sessionTextHTML(rec.presetValue||'')+'" data-mode-label="'+sessionTextHTML(rec.mode||'')+'" data-focus-label="'+sessionTextHTML(rec.focus||'')+'" data-status="'+sessionTextHTML(rec.status||'')+'" data-reason="'+sessionTextHTML(rec.reason||'')+'">この練習を設定</button></div>';
+  const data=' data-mode="'+sessionTextHTML(rec.modeValue||'normal')+'" data-focus="'+sessionTextHTML(rec.focusValue||'')+'" data-preset="'+sessionTextHTML(rec.presetValue||'')+'" data-mode-label="'+sessionTextHTML(rec.mode||'')+'" data-focus-label="'+sessionTextHTML(rec.focus||'')+'" data-status="'+sessionTextHTML(rec.status||'')+'" data-reason="'+sessionTextHTML(rec.reason||'')+'"';
+  return '<div class="session-recommend"><div class="session-recommend-title">おすすめ練習'+sessionTextHTML(label)+': '+sessionTextHTML(rec.mode)+' / '+sessionTextHTML(rec.focus)+'</div><div class="session-recommend-body">'+sessionTextHTML(rec.reason)+'</div>'+guide+'<div class="session-recommend-actions"><button type="button" class="session-apply-practice"'+data+'>この練習を設定</button><button type="button" class="session-start-practice"'+data+'>このテーマで開始</button></div></div>';
 }
 function renderAppliedPracticeNote(rec){
   rec=rec||getStoredAppliedPractice();
@@ -3015,6 +3016,14 @@ function applySessionPracticeRecommendation(rec){
   storeAppliedPractice(rec);
   refreshSessionStartChecklist();
   if(typeof toast==='function')toast('おすすめ練習を設定しました。内容を確認して開始してください。','info',2600);
+  return true;
+}
+function startSessionPracticeRecommendation(rec){
+  if(!applySessionPracticeRecommendation(rec))return false;
+  const modal=$('session-end-modal');if(modal)modal.classList.remove('open');
+  const sheet=$('sheet-overlay');if(sheet)sheet.classList.remove('open');
+  if(aiTimeout)clearTimeout(aiTimeout);
+  _initGame($('cfg-mode').value);
   return true;
 }
 function finishSessionToSetup(){
@@ -5708,10 +5717,16 @@ function runFishTankRegressionTests(){
     const bbHtml=renderSessionPracticeRecommendation({title:'次回の一点: BB防衛',body:'BBディフェンスを整理します。'});
     const riverHtml=renderSessionPracticeRecommendation({title:'次回の一点: リバーで降りる力',body:'ワンペアの受けを少し締めます。'});
     return /session-apply-practice/.test(bbHtml)
+      &&/session-start-practice/.test(bbHtml)
       &&/data-mode="tournament"/.test(bbHtml)
       &&/data-focus="bb_defend"/.test(bbHtml)
       &&/data-preset="middle"/.test(bbHtml)
       &&/data-mode="normal"/.test(riverHtml);
+  });
+  add('セッションチェック: おすすめ練習から直接開始できる足場を持つ',function(){
+    if(typeof startSessionPracticeRecommendation!=='function'||typeof renderSessionPracticeRecommendation!=='function')return false;
+    const html=renderSessionPracticeRecommendation({title:'次回の一点: ポストフロップで守る',body:'フロップ以降の判断を確認します。'});
+    return /このテーマで開始/.test(html)&&/session-start-practice/.test(html);
   });
   add('セッションチェック: おすすめ練習は行動チェック結果で温度差を出す',function(){
     if(typeof renderSessionPracticeRecommendation!=='function'||typeof sessionPracticeRecommendation!=='function')return false;
@@ -12628,6 +12643,19 @@ document.addEventListener('click',function(e){
     });
     return;
   }
+  const startPracticeBtn=e.target&&e.target.closest&&e.target.closest('.session-start-practice');
+  if(startPracticeBtn){
+    startSessionPracticeRecommendation({
+      modeValue:startPracticeBtn.dataset.mode||'normal',
+      focusValue:startPracticeBtn.dataset.focus||'',
+      presetValue:startPracticeBtn.dataset.preset||'',
+      mode:startPracticeBtn.dataset.modeLabel||'',
+      focus:startPracticeBtn.dataset.focusLabel||'',
+      status:startPracticeBtn.dataset.status||'',
+      reason:startPracticeBtn.dataset.reason||''
+    });
+    return;
+  }
   const guideBtn=e.target&&e.target.closest&&e.target.closest('.session-open-guide');
   if(guideBtn){
     focusLivePracticeGuide(guideBtn.dataset.guide||'');
@@ -12646,7 +12674,7 @@ document.addEventListener('click',function(e){
   }
 });
 
-window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,runFishTankAuditBatch,fishTankAuditBatchReportText,buildFishTankAuditRepairQueue,fishTankAuditRepairPlanText,auditIssuesForHand,playAuditGame,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,boardTextureProfile,boardTextureProfileText,representativeBoardProfile,boardTextureFrequencyAdjustment,boardTextureSizePlan,boardTextureTransitionProfile,boardTextureTransitionProfileText,rangeNutAdvantageProfile,rangeNutAdvantageProfileText,rangeActionUpdateProfile,rangeActionUpdateProfileText,postflopBetPurposeProfile,postflopBetPurposeProfileText,postflopRaisePlanProfile,postflopRaisePlanProfileText,postflopBarrelPlanProfile,postflopBarrelPlanProfileText,postflopDefensePlanProfile,postflopDefensePlanProfileText,postflopCallFuturePlanProfile,postflopCallFuturePlanProfileText,standardBetSizePct,preflopOpenQuickOptions,raiseOverBetQuickOptions,postflopQuickBetOptions,aiSizingTellAdjustedTarget,aiSizingTellLabel,opponentReadSizingTellLabel,opponentNoteText,setOpponentNote,renderOpponentNotesPanel,livePracticeGuideForFocus,focusLivePracticeGuide,lessonWeaknessRows,renderLessonWeaknessRanking,recordPrimaryLessonStats,adaptiveScenarioWeightPlan,adaptiveScenarioEnabled,setAdaptiveScenarioEnabled,_pickScenarioCat,preflopDrillBuildSpot,preflopDrillEvaluateSpot,startPreflopDrillSession,answerPreflopDrill,finishPreflopDrillSession,liveCashRakeConfigFromValue,liveCashTableProfileFromValue,liveCashRangeProfile,liveCashSpotProfile,liveCashSpotProfileText,liveCashSprProfile,liveCashSprProfileText,liveCashInitiativeProfile,liveCashInitiativeProfileText,liveCashReraisedPotProfile,liveCashReraisedPotProfileText,liveCashMultiwayProfile,liveCashMultiwayProfileText,liveCashRiverDecisionProfile,liveCashRiverDecisionProfileText,tournamentRangeProfile,tournamentFinalTableProfile,tournamentFinalTableStackRole,tournamentFinalTableCollisionProfile,tournamentFinalTableRangeProfile,tournamentFinalTableRangeProfileText,tournamentFinalTablePostflopProfile,tournamentFinalTablePostflopProfileText,tournamentFinalTableLearningPoint,tournamentFinalTableLearningPointText,tournamentHeadsUpProfile};
+window.__fishTankDebug={GameEngine,AI_PROFILES,aiDecide,analyzeHand,runFishTankRegressionTests,fishTankRegressionReportText,runFishTankAuditBatch,fishTankAuditBatchReportText,buildFishTankAuditRepairQueue,fishTankAuditRepairPlanText,auditIssuesForHand,playAuditGame,rerunHandAnalysis,evaluationSnapshot,getDebugHand,preflopPremiseAudit,trainingSpotQualityAudit,trainingSpotQualityText,actualHandLeakAudit,actualHandLeakAuditText,actualHandVisibility,boardTextureProfile,boardTextureProfileText,representativeBoardProfile,boardTextureFrequencyAdjustment,boardTextureSizePlan,boardTextureTransitionProfile,boardTextureTransitionProfileText,rangeNutAdvantageProfile,rangeNutAdvantageProfileText,rangeActionUpdateProfile,rangeActionUpdateProfileText,postflopBetPurposeProfile,postflopBetPurposeProfileText,postflopRaisePlanProfile,postflopRaisePlanProfileText,postflopBarrelPlanProfile,postflopBarrelPlanProfileText,postflopDefensePlanProfile,postflopDefensePlanProfileText,postflopCallFuturePlanProfile,postflopCallFuturePlanProfileText,standardBetSizePct,preflopOpenQuickOptions,raiseOverBetQuickOptions,postflopQuickBetOptions,aiSizingTellAdjustedTarget,aiSizingTellLabel,opponentReadSizingTellLabel,opponentNoteText,setOpponentNote,renderOpponentNotesPanel,livePracticeGuideForFocus,focusLivePracticeGuide,applySessionPracticeRecommendation,startSessionPracticeRecommendation,lessonWeaknessRows,renderLessonWeaknessRanking,recordPrimaryLessonStats,adaptiveScenarioWeightPlan,adaptiveScenarioEnabled,setAdaptiveScenarioEnabled,_pickScenarioCat,preflopDrillBuildSpot,preflopDrillEvaluateSpot,startPreflopDrillSession,answerPreflopDrill,finishPreflopDrillSession,liveCashRakeConfigFromValue,liveCashTableProfileFromValue,liveCashRangeProfile,liveCashSpotProfile,liveCashSpotProfileText,liveCashSprProfile,liveCashSprProfileText,liveCashInitiativeProfile,liveCashInitiativeProfileText,liveCashReraisedPotProfile,liveCashReraisedPotProfileText,liveCashMultiwayProfile,liveCashMultiwayProfileText,liveCashRiverDecisionProfile,liveCashRiverDecisionProfileText,tournamentRangeProfile,tournamentFinalTableProfile,tournamentFinalTableStackRole,tournamentFinalTableCollisionProfile,tournamentFinalTableRangeProfile,tournamentFinalTableRangeProfileText,tournamentFinalTablePostflopProfile,tournamentFinalTablePostflopProfileText,tournamentFinalTableLearningPoint,tournamentFinalTableLearningPointText,tournamentHeadsUpProfile};
 Object.assign(window.__fishTankDebug,{buildReplayGameFromHand,startReplayFromDecision,findReplayHand,handProfitChips,handProfitBB,sessionStatsBb100,renderQualityMoneyBand});
 // [Codex fix 2026-06-05] Query-gated regression output for browser verification without exposing debug UI during normal play.
 if(new URLSearchParams(location.search).has('codex_regression')){
