@@ -2320,21 +2320,27 @@ function renderOpponentNotesPanel(){
 const LIVE_PRACTICE_GUIDES=[
   {title:'テーブル/シート選択',
    key:'table',
+   weak:'ベット目的 / 相手選び',
    text:'勝ちやすさは自分の腕だけで決まりません。深いスタックでルースにコールする相手が多く、強い常連が左に少ない席を優先します。きつい卓で無理に戦うより、良いゲームを選ぶこと自体が大きなEVです。'},
   {title:'ストラドルポット',
    key:'straddle',
+   weak:'フロップ前の入口 / SPR',
    text:'ストラドルが入ると実質BBが大きくなり、スタックは浅くなります。プリフロップは少しタイトに、ポストフロップはSPRが下がる前提でワンペアの扱いを決めます。参加するなら、後ろから大きくアイソされても困りにくい手を選びます。'},
   {title:'ティルトの兆候',
    key:'tilt',
+   weak:'ティルト / 取り返し癖',
    text:'取り返したい、相手を懲らしめたい、さっきの負けを理由にコールしたい。この感覚が出たら一度席を離れる合図です。正しい判断を続けられない状態では、良いハンドを待っても利益を守れません。'},
   {title:'セッション終了判断',
    key:'session-end',
+   weak:'リバー判断 / 集中切れ',
    text:'勝っている時も負けている時も、疲労と集中力を基準にします。ミスが増えた、リバー判断が雑になった、相手のレンジを考えずにボタンを押している。そう感じたら、まだゲームが良くても終了候補です。'},
   {title:'バンクロール',
    key:'bankroll',
+   weak:'資金管理 / 無理な着席',
    text:'$2/$5は一回の負け額が大きくなりやすいゲームです。生活費とプレー資金を分け、負けても判断が崩れない余裕を持ちます。十分な余裕がない時は、下のレートや短いセッションで練習量を積む方が長く続きます。'},
   {title:'チップハンドリングとエチケット',
    key:'etiquette',
+   weak:'ライブ所作 / 信頼',
    text:'ベット額ははっきり置き、相手のアクション前に余計な反応をしない。ショーダウンでは自分の手を明確に開き、ディーラーや他プレイヤーを急かさない。テーブルで信頼される振る舞いは、長時間プレーするうえで大事な土台です。'}
 ];
 function livePracticeGuideForFocus(focus){
@@ -2349,7 +2355,8 @@ function livePracticeGuideForFocus(focus){
 function renderLivePractice(){
   const intro='<div class="gto-tip"><div class="tip-title">ライブ実戦メモ</div>ハンド単体の正解だけでなく、良いゲームを選び、崩れた状態で打たないことも勝率の一部です。ここでは$2/$5ライブで特に差が出る習慣だけを短くまとめます。</div>';
   return renderOpponentReadTrainer()+intro+LIVE_PRACTICE_GUIDES.map(function(g){
-    return '<div class="gto-tip" data-live-guide="'+sessionTextHTML(g.key||g.title)+'"><div class="tip-title">'+g.title+'</div>'+g.text+'</div>';
+    const weak=g.weak?'<div class="live-guide-weak">この弱点に効く: '+sessionTextHTML(g.weak)+'</div>':'';
+    return '<div class="gto-tip" data-live-guide="'+sessionTextHTML(g.key||g.title)+'"><div class="tip-title">'+g.title+'</div>'+weak+g.text+'</div>';
   }).join('');
 }
 
@@ -5646,6 +5653,14 @@ function runFishTankRegressionTests(){
       &&/セッション終了判断/.test(html)
       &&/バンクロール/.test(html)
       &&/チップハンドリング/.test(html);
+  });
+  add('ライブ実戦教材: 教材カードに効く弱点ラベルを出す',function(){
+    if(typeof renderLivePractice!=='function')return false;
+    const html=renderLivePractice();
+    return /live-guide-weak/.test(html)
+      &&/この弱点に効く: リバー判断 \/ 集中切れ/.test(html)
+      &&/この弱点に効く: フロップ前の入口 \/ SPR/.test(html)
+      &&/この弱点に効く: ベット目的 \/ 相手選び/.test(html);
   });
   add('ライブ実戦教材: 弱点テーマから関連教材を選べる',function(){
     if(typeof livePracticeGuideForFocus!=='function'||typeof renderLivePractice!=='function')return false;
