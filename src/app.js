@@ -9367,6 +9367,18 @@ function runFishTankRegressionTests(){
     return /フォールド寄り/.test(txt)&&/非BBでレイズにコール/.test(txt)&&/頻度の目安/.test(txt)&&!/IP flat|GTO基準|out/.test(txt)&&txt.length<260;
   });
 
+  add('コーチ文: オープン候補フォールドをリンプミス扱いしない',function(){
+    const txt=coachReviewText({
+      street:'preflop',
+      action:'fold',
+      quality:'bad',
+      suggest:'推奨: レイズ（15チップ程度）',
+      comment:'88のリンプポットフォールド。弱いハンドへの正当な判断です。',
+      liveCashSpotProfile:{label:'Open fold',lane:'openFold',severity:'bad',rangeBasis:'6max CO / CO',policy:'COのオープン候補です。',risk:'',rakeActive:true}
+    });
+    return /オープン候補/.test(txt)&&/レイズ/.test(txt)&&!/オープンリンプ|リンプすると/.test(txt)&&txt.length<260;
+  });
+
   add('コーチ文: 正しいフォールドを重複させない',function(){
     const txt=coachReviewText({
       street:'preflop',
@@ -9932,6 +9944,12 @@ function runFishTankRegressionTests(){
     return fold.ok&&!raise.ok&&/Fold|フォールド/.test(fold.mix+fold.text);
   });
 
+  add('プリフロップドリル: オープン候補のフォールドミスをリンプ説明にしない',function(){
+    const spot=preflopDrillBuildSpot({base:PREFLOP_DRILL_SPOTS[0],pos:'CO',ht:'88',totalP:6,stackBB:100});
+    const r=preflopDrillEvaluateSpot(spot,'fold');
+    return !r.ok&&r.primary==='raise'&&/オープン候補/.test(r.text)&&!/リンプではなく/.test(r.text);
+  });
+
   add('プリフロップドリル: vs3BETの継続候補はCall/Raiseを許容する',function(){
     const spot=preflopDrillBuildSpot({base:PREFLOP_DRILL_SPOTS[2],pos:'BTN',ht:'QQ',totalP:6,stackBB:100});
     const call=preflopDrillEvaluateSpot(spot,'call');
@@ -10430,7 +10448,9 @@ function preflopDrillEvaluateSpot(spot,action){
       ?'主ラインは '+preflopDrillActionLabel(primary)+' です。頻度の目安は '+mix+' です。'
       :'レンジ外寄りです。頻度の目安は '+mix+' です。';
   const reason=spot.type==='open'
-    ?'参加するならリンプではなく、レイズで主導権を取れるかを確認します。'
+    ?(action==='fold'&&primary==='raise'
+      ?'このポジションではオープン候補です。フォールドで終えるより、レイズで主導権とブラインド獲得を狙えるかを確認します。'
+      :'参加するならリンプではなく、レイズで主導権を取れるかを確認します。')
     :spot.type==='flat'
       ?'非BBのコールはドミネートと後続の圧力、BBはOOPの実現率まで見ます。'
       :spot.type==='vs3bet'

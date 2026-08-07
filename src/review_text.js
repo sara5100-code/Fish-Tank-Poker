@@ -635,7 +635,10 @@ function preflopCoachSummaryText(ev,action,rec){
     else reason='レンジ外の弱いハンドで無理に参加しないことが、後の難しい判断を減らします。';
     advice='このまま降りて問題ありません。';
   }else if(ev.quality==='bad'){
-    if(isBB){
+    if(isOpenFold){
+      head='この手はオープン候補です。';
+      reason='今のポジションなら、フォールドで終えるよりレイズで主導権を取る価値があります。後ろがタイトなら特に、ブラインドを取りに行く収益機会を逃しすぎないようにします。';
+    }else if(isBB){
       head='BBでも少し守りすぎです。';
       reason='フロップ前のBBディフェンスです。BBはポットオッズが良いので広く守れますが、UTGオープン相手のように相手レンジが強い時は防衛目安をかなり絞ります。OOPで実現率を落としやすく、弱いトップペアやキッカー負けで払いすぎる形になりやすいです。';
     }else if(isFlat){
