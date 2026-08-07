@@ -2367,7 +2367,7 @@ function renderLivePractice(){
   return renderOpponentReadTrainer()+intro+LIVE_PRACTICE_GUIDES.map(function(g){
     const weak=g.weak?'<div class="live-guide-weak">この弱点に効く: '+sessionTextHTML(g.weak)+'</div>':'';
     const start=g.practice?'<button type="button" class="session-start-practice live-guide-start"'+sessionPracticeDataAttrs(g.practice)+'>この練習を開始</button>':'';
-    return '<div class="gto-tip" data-live-guide="'+sessionTextHTML(g.key||g.title)+'"><div class="tip-title">'+g.title+'</div>'+weak+g.text+start+'</div>';
+    return '<div class="gto-tip" data-live-guide="'+sessionTextHTML(g.key||g.title)+'"><div class="tip-title">'+sessionTextHTML(g.title)+'</div>'+weak+'<div class="live-guide-body">'+sessionTextHTML(g.text)+'</div>'+start+'</div>';
   }).join('');
 }
 
@@ -3018,8 +3018,9 @@ function refreshSessionStartChecklist(){
   if(cb&&box)box.innerHTML=cb.checked?renderSessionStartChecklist():'';
   refreshAppliedPracticeNote();
 }
-function applySessionPracticeRecommendation(rec){
+function applySessionPracticeRecommendation(rec,opt){
   if(!rec)return false;
+  opt=opt||{};
   const mode=rec.modeValue||rec.mode||'normal';
   const modeEl=$('cfg-mode');
   if(!modeEl)return false;
@@ -3033,15 +3034,16 @@ function applySessionPracticeRecommendation(rec){
   applyTournamentPresetToSetup();
   storeAppliedPractice(rec);
   refreshSessionStartChecklist();
-  if(typeof toast==='function')toast('おすすめ練習を設定しました。内容を確認して開始してください。','info',2600);
+  if(!opt.silent&&typeof toast==='function')toast('おすすめ練習を設定しました。内容を確認して開始してください。','info',2600);
   return true;
 }
 function startSessionPracticeRecommendation(rec){
-  if(!applySessionPracticeRecommendation(rec))return false;
+  if(!applySessionPracticeRecommendation(rec,{silent:true}))return false;
   const modal=$('session-end-modal');if(modal)modal.classList.remove('open');
   const sheet=$('sheet-overlay');if(sheet)sheet.classList.remove('open');
   if(aiTimeout)clearTimeout(aiTimeout);
   _initGame($('cfg-mode').value);
+  if(typeof toast==='function')toast('練習を開始しました。今日の狙いを意識して進めましょう。','info',2200);
   return true;
 }
 function finishSessionToSetup(){
@@ -5669,6 +5671,7 @@ function runFishTankRegressionTests(){
     if(typeof renderLivePractice!=='function')return false;
     const html=renderLivePractice();
     return /live-guide-weak/.test(html)
+      &&/live-guide-body/.test(html)
       &&/この弱点に効く: リバー判断 \/ 集中切れ/.test(html)
       &&/この弱点に効く: フロップ前の入口 \/ SPR/.test(html)
       &&/この弱点に効く: ベット目的 \/ 相手選び/.test(html);
@@ -5761,7 +5764,9 @@ function runFishTankRegressionTests(){
   add('セッションチェック: おすすめ練習から直接開始できる足場を持つ',function(){
     if(typeof startSessionPracticeRecommendation!=='function'||typeof renderSessionPracticeRecommendation!=='function')return false;
     const html=renderSessionPracticeRecommendation({title:'次回の一点: ポストフロップで守る',body:'フロップ以降の判断を確認します。'});
-    return /このテーマで開始/.test(html)&&/session-start-practice/.test(html);
+    return /このテーマで開始/.test(html)&&/session-start-practice/.test(html)
+      &&/silent:true/.test(String(startSessionPracticeRecommendation))
+      &&/練習を開始しました/.test(String(startSessionPracticeRecommendation));
   });
   add('セッションチェック: おすすめ練習は行動チェック結果で温度差を出す',function(){
     if(typeof renderSessionPracticeRecommendation!=='function'||typeof sessionPracticeRecommendation!=='function')return false;
