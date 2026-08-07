@@ -78,6 +78,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,'Hiragino 
 .session-apply-practice:hover{background:rgba(61,108,240,.13);}
 .session-recommend-actions .session-apply-practice{margin-top:0;}
 .session-start-practice{width:100%;padding:7px 9px;background:var(--accent);border:1px solid var(--accent);border-radius:8px;color:#fff;font-family:inherit;font-size:11px;font-weight:900;cursor:pointer;}
+.live-guide-start{margin-top:7px;}
 .session-progress{margin-top:8px;border-radius:8px;padding:6px 8px;background:var(--panel);border:1px solid var(--border);font-size:10px;line-height:1.5;color:var(--dim);}
 .session-progress span{display:inline-block;margin-right:6px;font-weight:900;}
 .session-progress small{display:block;margin-top:3px;color:var(--muted);font-size:9px;font-weight:800;}
